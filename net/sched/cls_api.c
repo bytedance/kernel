@@ -3122,6 +3122,37 @@ int tcf_exts_dump_stats(struct sk_buff *skb, struct tcf_exts *exts)
 }
 EXPORT_SYMBOL(tcf_exts_dump_stats);
 
+static int tc_exts_setup_cb_egdev_call(struct tcf_exts *exts,
+				       enum tc_setup_type type,
+				       void *type_data, bool err_stop)
+{
+	int ok_count = 0;
+#ifdef CONFIG_NET_CLS_ACT
+	tc_action_priv_destructor *d;
+	const struct tc_action *a;
+	struct net_device *dev;
+	int i, ret;
+
+	if (!tcf_exts_has_actions(exts))
+		return 0;
+
+	for (i = 0; i < exts->nr_actions; i++) {
+		a = exts->actions[i];
+		if (!a->ops->get_dev)
+			continue;
+		dev = a->ops->get_dev(a, d);
+		if (!dev)
+			continue;
+		ret = tc_setup_cb_egdev_call(dev, type, type_data, err_stop);
+		dev_put(dev);
+		if (ret < 0)
+			return ret;
+		ok_count += ret;
+	}
+#endif
+	return ok_count;
+}
+
 static void tcf_block_offload_inc(struct tcf_block *block, u32 *flags)
 {
 	if (*flags & TCA_CLS_FLAGS_IN_HW)
