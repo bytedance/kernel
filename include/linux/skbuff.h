@@ -636,6 +636,7 @@ typedef unsigned char *sk_buff_data_t;
  *	@tc_at_ingress: used within tc_classify to distinguish in/egress
  *	@redirected: packet was redirected by packet classifier
  *	@from_ingress: packet was redirected from the ingress path
+ *	@recirc_id: classifier chain id
  *	@peeked: this packet has been seen already, so stats have been
  *		done for it, don't do them again
  *	@nf_trace: netfilter packet trace flag
@@ -820,6 +821,7 @@ struct sk_buff {
 #ifdef CONFIG_NET_REDIRECT
 	__u8			redirected:1;
 	__u8			from_ingress:1;
+	__u32			recirc_id;	/* classifier chain id */
 #endif
 #ifdef CONFIG_TLS_DEVICE
 	__u8			decrypted:1;
