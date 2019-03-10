@@ -3299,6 +3299,26 @@ err_unlock:
 }
 EXPORT_SYMBOL(tc_setup_cb_add);
 
+int tc_setup_cb_call_all(struct tcf_block *block, enum tc_setup_type type, void *type_data)
+{
+	struct tcf_block_cb *block_cb;
+	int err;
+
+#if 0
+	if (block) {
+		/* Assumption: this list has only one element (rep) */
+		list_for_each_entry(block_cb, &block->cb_list, list) {
+			err = block_cb->cb(type, type_data,
+					   block_cb->cb_priv);
+			return err;
+		}
+	}
+#endif
+
+	return tc_setup_cb_egdev_all_call_fast(type, type_data);
+}
+EXPORT_SYMBOL(tc_setup_cb_call_all);
+
 /* Destructive filter replace. If filter that wasn't already in hardware is
  * successfully offloaded, increment block offload counter. On failure,
  * previously offloaded filter is considered to be destroyed and offload counter
