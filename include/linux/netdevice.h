@@ -860,6 +860,13 @@ struct tc_miniflow_offload {
 	uint32_t chain_index;
 };
 
+struct tc_ct_offload {
+	struct sk_buff *skb;
+	struct net *net;
+	struct nf_conntrack_tuple *tuple;
+	struct nf_conntrack_zone *zone;
+};
+
 /* These structures hold the attributes of bpf state that are being passed
  * to the netdevice through the bpf op.
  */
