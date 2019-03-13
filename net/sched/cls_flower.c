@@ -26,8 +26,17 @@
 #include <net/dst.h>
 #include <net/dst_metadata.h>
 
+#include <net/netfilter/nf_conntrack_core.h>
+#include <net/netfilter/nf_conntrack_labels.h>
+
+#include <net/tc_act/tc_gact.h>
+
 struct fl_flow_key {
 	struct flow_dissector_key_meta meta;
+	u8	ct_state;
+	u16	ct_zone;
+	u32	ct_mark;
+	u32	ct_labels[4];
 	struct flow_dissector_key_control control;
 	struct flow_dissector_key_control enc_control;
 	struct flow_dissector_key_basic basic;
@@ -277,6 +286,29 @@ static struct cls_fl_filter *fl_lookup(struct fl_flow_mask *mask,
 	return __fl_lookup(mask, mkey);
 }
 
+static u8 fl_ct_get_state(enum ip_conntrack_info ctinfo)
+{
+	u8 ct_state = TCA_FLOWER_KEY_CT_FLAGS_TRACKED;
+
+	switch (ctinfo) {
+	case IP_CT_ESTABLISHED:
+	case IP_CT_ESTABLISHED_REPLY:
+		ct_state |= TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED;
+		break;
+	case IP_CT_RELATED:
+	case IP_CT_RELATED_REPLY:
+		ct_state |= TCA_FLOWER_KEY_CT_FLAGS_RELATED;
+		break;
+	case IP_CT_NEW:
+		ct_state |= TCA_FLOWER_KEY_CT_FLAGS_NEW;
+		break;
+	default:
+		break;
+	}
+
+	return ct_state;
+}
+
 static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		       struct tcf_result *res)
 {
@@ -285,12 +317,28 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 	struct fl_flow_mask *mask;
 	struct fl_flow_key skb_key;
 	struct fl_flow_key skb_mkey;
+	enum ip_conntrack_info ctinfo;
+	struct nf_conn_labels *cl;
+	struct nf_conn *ct;
+
 
 	list_for_each_entry_rcu(mask, &head->masks, list) {
 		flow_dissector_init_keys(&skb_key.control, &skb_key.basic);
 		fl_clear_masked_range(&skb_key, mask);
 
 		skb_flow_dissect_meta(skb, &mask->dissector, &skb_key);
+
+		ct = nf_ct_get(skb, &ctinfo);
+		if (ct) {
+			skb_key.ct_state = fl_ct_get_state(ctinfo);
+			skb_key.ct_zone = ct->zone.id;
+			skb_key.ct_mark = ct->mark;
+
+			cl = nf_ct_labels_find(ct);
+			if (cl)
+				memcpy(skb_key.ct_labels, cl->bits, sizeof(skb_key.ct_labels));
+		}
+
 		/* skb_flow_dissect() does not set n_proto in case an unknown
 		 * protocol, so do it rather here.
 		 */
@@ -306,6 +354,7 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 			return tcf_exts_exec(skb, &f->exts, res);
 		}
 	}
+
 	return -1;
 }
 
@@ -428,6 +477,9 @@ static int fl_hw_replace_filter(struct tcf_proto *tp,
 	cls_flower.rule->match.mask = &f->mask->key;
 	cls_flower.rule->match.key = &f->mkey;
 	cls_flower.classid = f->res.classid;
+
+	cls_flower.ct_state_key = f->mkey.ct_state;
+	cls_flower.ct_state_mask = f->mask->key.ct_state;
 
 	err = tc_setup_flow_action(&cls_flower.rule->action, &f->exts,
 				   rtnl_held);
@@ -661,6 +713,17 @@ static const struct nla_policy fl_policy[TCA_FLOWER_MAX + 1] = {
 	[TCA_FLOWER_KEY_ENC_IP_TTL_MASK] = { .type = NLA_U8 },
 	[TCA_FLOWER_KEY_ENC_OPTS]	= { .type = NLA_NESTED },
 	[TCA_FLOWER_KEY_ENC_OPTS_MASK]	= { .type = NLA_NESTED },
+	[TCA_FLOWER_KEY_CT_STATE]	= { .type = NLA_U8 },
+	[TCA_FLOWER_KEY_CT_STATE_MASK]	= { .type = NLA_U8 },
+	[TCA_FLOWER_KEY_CT_ZONE]	= { .type = NLA_U16 },
+	[TCA_FLOWER_KEY_CT_ZONE_MASK]	= { .type = NLA_U16 },
+	[TCA_FLOWER_KEY_CT_MARK]	= { .type = NLA_U32 },
+	[TCA_FLOWER_KEY_CT_MARK_MASK]	= { .type = NLA_U32 },
+	[TCA_FLOWER_KEY_CT_LABELS]	= { .type = NLA_UNSPEC,
+					    .len = 16 },
+	[TCA_FLOWER_KEY_CT_LABELS_MASK]	= { .type = NLA_UNSPEC,
+					    .len = 16 },
+
 	[TCA_FLOWER_FLAGS]		= { .type = NLA_U32 },
 };
 
@@ -988,6 +1051,26 @@ static int fl_set_key(struct net *net, struct nlattr **tb,
 			return err;
 		key->meta.ingress_ifindex = err;
 		mask->meta.ingress_ifindex = 0xffffffff;
+	}
+
+	if (tb[TCA_FLOWER_KEY_CT_STATE]) {
+		key->ct_state = nla_get_u8(tb[TCA_FLOWER_KEY_CT_STATE]);
+		mask->ct_state = nla_get_u8(tb[TCA_FLOWER_KEY_CT_STATE_MASK]);
+	}
+
+	if (tb[TCA_FLOWER_KEY_CT_ZONE_MASK]) {
+		key->ct_zone = nla_get_u16(tb[TCA_FLOWER_KEY_CT_ZONE]);
+		mask->ct_zone = nla_get_u16(tb[TCA_FLOWER_KEY_CT_ZONE_MASK]);
+	}
+
+	if (tb[TCA_FLOWER_KEY_CT_MARK_MASK]) {
+		key->ct_mark = nla_get_u32(tb[TCA_FLOWER_KEY_CT_MARK]);
+		mask->ct_mark = nla_get_u32(tb[TCA_FLOWER_KEY_CT_MARK_MASK]);
+	}
+
+	if (tb[TCA_FLOWER_KEY_CT_LABELS_MASK]) {
+		memcpy(key->ct_labels, nla_data(tb[TCA_FLOWER_KEY_CT_LABELS]), nla_len(tb[TCA_FLOWER_KEY_CT_LABELS]));
+		memcpy(mask->ct_labels, nla_data(tb[TCA_FLOWER_KEY_CT_LABELS_MASK]), nla_len(tb[TCA_FLOWER_KEY_CT_LABELS_MASK]));
 	}
 
 	fl_set_key_val(tb, key->eth.dst, TCA_FLOWER_KEY_ETH_DST,
@@ -2124,6 +2207,23 @@ static int fl_dump_key(struct sk_buff *skb, struct net *net,
 		if (dev && nla_put_string(skb, TCA_FLOWER_INDEV, dev->name))
 			goto nla_put_failure;
 	}
+
+	/* TODO: check return value */
+	fl_dump_key_val(skb, &key->ct_state, TCA_FLOWER_KEY_CT_STATE,
+			&mask->ct_state, TCA_FLOWER_KEY_CT_STATE_MASK,
+			sizeof(key->ct_state));
+
+	fl_dump_key_val(skb, &key->ct_zone, TCA_FLOWER_KEY_CT_ZONE,
+			&mask->ct_zone, TCA_FLOWER_KEY_CT_ZONE_MASK,
+			sizeof(key->ct_zone));
+
+	fl_dump_key_val(skb, &key->ct_mark, TCA_FLOWER_KEY_CT_MARK,
+			&mask->ct_mark, TCA_FLOWER_KEY_CT_MARK_MASK,
+			sizeof(key->ct_mark));
+
+	fl_dump_key_val(skb, &key->ct_labels, TCA_FLOWER_KEY_CT_LABELS,
+			&mask->ct_labels, TCA_FLOWER_KEY_CT_LABELS_MASK,
+			sizeof(key->ct_labels));
 
 	if (fl_dump_key_val(skb, key->eth.dst, TCA_FLOWER_KEY_ETH_DST,
 			    mask->eth.dst, TCA_FLOWER_KEY_ETH_DST_MASK,

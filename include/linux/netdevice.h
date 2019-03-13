@@ -852,6 +852,14 @@ enum tc_setup_type {
 	TC_SETUP_QDISC_TAPRIO,
 };
 
+struct tc_miniflow_offload {
+	struct sk_buff *skb;
+	unsigned long cookie;
+	bool last_flow;
+	bool is_drop;
+	uint32_t chain_index;
+};
+
 /* These structures hold the attributes of bpf state that are being passed
  * to the netdevice through the bpf op.
  */
