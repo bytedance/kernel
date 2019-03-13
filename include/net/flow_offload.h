@@ -359,6 +359,10 @@ struct flow_cls_offload {
 	struct flow_rule *rule;
 	struct flow_stats stats;
 	u32 classid;
+
+	/* FIXME: ugly */
+	u8 ct_state_key;
+	u8 ct_state_mask;
 };
 
 static inline struct flow_rule *

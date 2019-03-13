@@ -538,10 +538,31 @@ enum {
 	TCA_FLOWER_KEY_PORT_DST_MIN,	/* be16 */
 	TCA_FLOWER_KEY_PORT_DST_MAX,	/* be16 */
 
+	TCA_FLOWER_KEY_CT_STATE,	/* u8 */
+	TCA_FLOWER_KEY_CT_STATE_MASK,	/* u8 */
+
+	TCA_FLOWER_KEY_CT_ZONE,		/* u16 */
+	TCA_FLOWER_KEY_CT_ZONE_MASK,	/* u16 */
+
+	TCA_FLOWER_KEY_CT_MARK,		/* u32 */
+	TCA_FLOWER_KEY_CT_MARK_MASK,	/* u32 */
+
+	TCA_FLOWER_KEY_CT_LABELS,	/* u32*4 */
+	TCA_FLOWER_KEY_CT_LABELS_MASK,	/* u32*4 */
+
 	__TCA_FLOWER_MAX,
 };
 
 #define TCA_FLOWER_MAX (__TCA_FLOWER_MAX - 1)
+
+/* TODO: FIXME: CT_STATE flags; is that the correct place? */
+/* Should we use OVS defines? e.g., OVS_CS_F_NEW */
+#define TCA_FLOWER_KEY_CT_FLAGS_NEW               0x01 /* Beginning of a new connection. */
+#define TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED       0x02 /* Part of an existing connection. */
+#define TCA_FLOWER_KEY_CT_FLAGS_RELATED           0x04 /* Related to an established
+							* connection. */
+#define TCA_FLOWER_KEY_CT_FLAGS_INVALID           0x10 /* Could not track connection. */
+#define TCA_FLOWER_KEY_CT_FLAGS_TRACKED           0x20 /* Conntrack has occurred. */
 
 enum {
 	TCA_FLOWER_KEY_ENC_OPTS_UNSPEC,
