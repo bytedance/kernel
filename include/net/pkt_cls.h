@@ -831,4 +831,15 @@ struct tc_root_qopt_offload {
 	bool ingress;
 };
 
+/* TODO: temp, use qdisc_skb_cb's data, is it used in ingress? */
+struct tc_skb_cb {
+	struct qdisc_skb_cb cb;
+
+	/* TODO: some code along the way changes recirc_id1 to 8060000 ? */
+	u32 recirc_id1;
+	u32 recirc_id2;
+	u32 recirc_id;
+};
+
+#define TC_CB(skb) ((struct tc_skb_cb *)(skb)->cb)
 #endif

@@ -1568,6 +1568,11 @@ int tcf_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 	int limit = 0;
 
 reclassify:
+	BUILD_BUG_ON(sizeof(skb->cb) < sizeof(struct tc_skb_cb));
+
+	/* TODO: can we do better? */
+	if (tp && tp->chain)
+		TC_CB(skb)->recirc_id = tp->chain->index;
 #endif
 	for (; tp; tp = rcu_dereference_bh(tp->next)) {
 		__be16 protocol = skb_protocol(skb, false);
