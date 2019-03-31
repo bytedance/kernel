@@ -330,6 +330,26 @@ static u8 fl_ct_get_state(struct nf_conn *ct, enum ip_conntrack_info ctinfo)
 	return ct_state;
 }
 
+static void fl_notify_underlying_device(struct sk_buff *skb, const struct tcf_proto *tp,
+					struct cls_fl_filter *f)
+{
+	struct tcf_block *block = tp->chain->block;
+	struct tc_action **actions = f->exts.actions;
+	int nr_actions = f->exts.nr_actions;
+	struct tc_miniflow_offload mf;
+
+	WARN_ON(nr_actions < 1);
+
+	mf.skb = skb;
+	mf.cookie = tc_in_hw(f->flags) ? (unsigned long) f : 0;
+	mf.last_flow = !is_tcf_gact_goto_chain(actions[nr_actions-1]);
+	mf.is_drop = is_tcf_gact_shot(actions[nr_actions-1]);
+	mf.chain_index = tp->chain->index;
+
+	/* TODO: should be replaced by something else TBD */
+	tc_setup_cb_call_all(block, TC_SETUP_MINIFLOW, &mf);
+}
+
 static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		       struct tcf_result *res)
 {
@@ -371,6 +391,7 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 
 		f = fl_lookup(mask, &skb_mkey, &skb_key);
 		if (f && !tc_skip_sw(f->flags)) {
+			fl_notify_underlying_device(skb, tp, f);
 			*res = f->res;
 			return tcf_exts_exec(skb, &f->exts, res);
 		}
