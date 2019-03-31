@@ -851,6 +851,7 @@ enum tc_setup_type {
 	TC_SETUP_QDISC_GRED,
 	TC_SETUP_QDISC_TAPRIO,
 	TC_SETUP_CT,
+	TC_SETUP_MINIFLOW,
 };
 
 struct tc_miniflow_offload {
