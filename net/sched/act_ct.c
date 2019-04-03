@@ -34,6 +34,21 @@
 static unsigned int conntrack_net_id;
 static struct tc_action_ops act_conntrack_ops;
 
+static void ct_notify_underlying_device(struct sk_buff *skb,
+					struct nf_conn *ct,
+					enum ip_conntrack_info ctinfo,
+					struct net *net)
+{
+	struct tc_ct_offload cto = { skb, net, NULL, NULL };
+
+	if (ct) {
+		cto.zone = (struct nf_conntrack_zone *)nf_ct_zone(ct);
+		cto.tuple = nf_ct_tuple(ct, CTINFO2DIR(ctinfo));
+	}
+
+	tc_setup_cb_call_all(NULL, TC_SETUP_CT, &cto);
+}
+
 static bool skb_nfct_cached(struct net *net, struct sk_buff *skb, u16 zone_id)
 {
 	enum ip_conntrack_info ctinfo;
@@ -169,7 +184,7 @@ static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
 	if (ctinfo == IP_CT_ESTABLISHED ||
 	    ctinfo == IP_CT_ESTABLISHED_REPLY) {
 		if (!cached)
-			pr_info("act_ct: conn %px established and not cached\n", skb);
+			ct_notify_underlying_device(skb, ct, ctinfo, net);
 	}
 
 	/* TODO: must check this code very carefully; move to another function */
@@ -251,7 +266,7 @@ skip:
 
 out:
 	if (ret)
-		pr_info("act_ct: conn %p not tracked", skb);
+		ct_notify_underlying_device(skb, NULL, IP_CT_UNTRACKED, net);
 
 	skb_push(skb, nh_ofs);
 	skb_postpush_rcsum(skb, skb->data, nh_ofs);
