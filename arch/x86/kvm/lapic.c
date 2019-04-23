@@ -710,6 +710,7 @@ static void apic_update_ppr(struct kvm_lapic *apic)
 
 void kvm_apic_update_ppr(struct kvm_vcpu *vcpu)
 {
+	++vcpu->stat.update_ppr_exits;
 	apic_update_ppr(vcpu->arch.apic);
 }
 EXPORT_SYMBOL_GPL(kvm_apic_update_ppr);
@@ -1188,6 +1189,7 @@ void kvm_apic_set_eoi_accelerated(struct kvm_vcpu *vcpu, int vector)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
 
+	++vcpu->stat.apic_eoi_exits;
 	trace_kvm_eoi(apic, vector);
 
 	kvm_ioapic_send_eoi(apic, vector);
@@ -1865,15 +1867,18 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 
 	case APIC_TASKPRI:
+		++apic->vcpu->stat.lapic_set_tpr;
 		report_tpr_access(apic, true);
 		apic_set_tpr(apic, val & 0xff);
 		break;
 
 	case APIC_EOI:
+		++apic->vcpu->stat.lapic_set_eoi;
 		apic_set_eoi(apic);
 		break;
 
 	case APIC_LDR:
+		++apic->vcpu->stat.lapic_set_ldr;
 		if (!apic_x2apic_mode(apic))
 			kvm_apic_set_ldr(apic, val & APIC_LDR_MASK);
 		else
@@ -1881,6 +1886,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 
 	case APIC_DFR:
+		++apic->vcpu->stat.lapic_set_dfr;
 		if (!apic_x2apic_mode(apic)) {
 			kvm_lapic_set_reg(apic, APIC_DFR, val | 0x0FFFFFFF);
 			recalculate_apic_map(apic->vcpu->kvm);
@@ -1890,6 +1896,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 
 	case APIC_SPIV: {
 		u32 mask = 0x3ff;
+		++apic->vcpu->stat.lapic_set_spiv;
 		if (kvm_lapic_get_reg(apic, APIC_LVR) & APIC_LVR_DIRECTED_EOI)
 			mask |= APIC_SPIV_DIRECTED_EOI;
 		apic_set_spiv(apic, val & mask);
@@ -1910,6 +1917,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 	}
 	case APIC_ICR:
+		++apic->vcpu->stat.lapic_set_icr;
 		/* No delay here, so we always clear the pending bit */
 		val &= ~(1 << 12);
 		apic_send_ipi(apic, val, kvm_lapic_get_reg(apic, APIC_ICR2));
@@ -1917,6 +1925,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 
 	case APIC_ICR2:
+		++apic->vcpu->stat.lapic_set_icr2;
 		if (!apic_x2apic_mode(apic))
 			val &= 0xff000000;
 		kvm_lapic_set_reg(apic, APIC_ICR2, val);
@@ -1933,6 +1942,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		size_t size;
 		u32 index;
 
+		++apic->vcpu->stat.lapic_set_lvt;
 		if (!kvm_apic_sw_enabled(apic))
 			val |= APIC_LVT_MASKED;
 		size = ARRAY_SIZE(apic_lvt_mask);
@@ -1944,6 +1954,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 	}
 
 	case APIC_LVTT:
+		++apic->vcpu->stat.lapic_set_lvtt;
 		if (!kvm_apic_sw_enabled(apic))
 			val |= APIC_LVT_MASKED;
 		val &= (apic_lvt_mask[0] | apic->lapic_timer.timer_mode_mask);
@@ -1952,6 +1963,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 
 	case APIC_TMICT:
+		++apic->vcpu->stat.lapic_set_tmict;
 		if (apic_lvtt_tscdeadline(apic))
 			break;
 
@@ -1963,6 +1975,7 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 	case APIC_TDCR: {
 		uint32_t old_divisor = apic->divide_count;
 
+		++apic->vcpu->stat.lapic_set_tdcr;
 		kvm_lapic_set_reg(apic, APIC_TDCR, val);
 		update_divide_count(apic);
 		if (apic->divide_count != old_divisor &&
@@ -1974,11 +1987,13 @@ int kvm_lapic_reg_write(struct kvm_lapic *apic, u32 reg, u32 val)
 		break;
 	}
 	case APIC_ESR:
+		++apic->vcpu->stat.lapic_set_esr;
 		if (apic_x2apic_mode(apic) && val != 0)
 			ret = 1;
 		break;
 
 	case APIC_SELF_IPI:
+		++apic->vcpu->stat.lapic_set_self_ipi;
 		if (apic_x2apic_mode(apic)) {
 			kvm_lapic_reg_write(apic, APIC_ICR, 0x40000 | (val & 0xff));
 		} else
@@ -2037,6 +2052,7 @@ void kvm_apic_write_nodecode(struct kvm_vcpu *vcpu, u32 offset)
 {
 	u32 val = 0;
 
+	++vcpu->stat.apic_write_exits;
 	/* hw has done the conditional check and inst decode */
 	offset &= 0xff0;
 
@@ -2088,6 +2104,7 @@ void kvm_set_lapic_tscdeadline_msr(struct kvm_vcpu *vcpu, u64 data)
 {
 	struct kvm_lapic *apic = vcpu->arch.apic;
 
+	++vcpu->stat.lapic_set_tscdeadline;
 	if (!kvm_apic_present(vcpu) || apic_lvtt_oneshot(apic) ||
 			apic_lvtt_period(apic))
 		return;

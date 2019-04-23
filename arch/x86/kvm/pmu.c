@@ -349,6 +349,7 @@ int kvm_pmu_get_msr(struct kvm_vcpu *vcpu, u32 msr, u64 *data)
 
 int kvm_pmu_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 {
+	++vcpu->stat.wrmsr_set_pmu;
 	return kvm_x86_ops->pmu_ops->set_msr(vcpu, msr_info);
 }
 

@@ -990,6 +990,64 @@ struct kvm_vcpu_stat {
 	u64 irq_injections;
 	u64 nmi_injections;
 	u64 req_event;
+
+	/* vm-exit reasons */
+	u64 exception_nmi_exits;
+	u64 cr_exits;
+	u64 dr_exits;
+	u64 cpuid_exits;
+	u64 rdpmc_exits;
+	u64 update_ppr_exits;
+	u64 rdmsr_exits;
+	u64 wrmsr_exits;
+	u64 apic_access_exits;
+	u64 apic_write_exits;
+	u64 apic_eoi_exits;
+	u64 wbinvd_exits;
+	u64 xsetbv_exits;
+	u64 task_switch_exits;
+	u64 ept_violation_exits;
+	u64 pause_exits;
+	u64 mwait_exits;
+	u64 monitor_trap_exits;
+	u64 monitor_exits;
+	u64 pml_full_exits;
+	u64 preemption_timer_exits;
+	/* wrmsr & apic vm-exit reasons */
+	u64 wrmsr_set_apic_base;
+	u64 wrmsr_set_wall_clock;
+	u64 wrmsr_set_system_time;
+	u64 wrmsr_set_pmu;
+	u64 lapic_set_tscdeadline;
+	u64 lapic_set_tpr;
+	u64 lapic_set_eoi;
+	u64 lapic_set_ldr;
+	u64 lapic_set_dfr;
+	u64 lapic_set_spiv;
+	u64 lapic_set_icr;
+	u64 lapic_set_icr2;
+	u64 lapic_set_lvt;
+	u64 lapic_set_lvtt;
+	u64 lapic_set_tmict;
+	u64 lapic_set_tdcr;
+	u64 lapic_set_esr;
+	u64 lapic_set_self_ipi;
+	/* cr vm-exit reasons */
+	u64 cr_movetocr0;
+	u64 cr_movetocr3;
+	u64 cr_movetocr4;
+	u64 cr_movetocr8;
+	u64 cr_movefromcr3;
+	u64 cr_movefromcr8;
+	u64 cr_clts;
+	u64 cr_lmsw;
+	/* hypercall vm-exit reasons */
+	u64 hypercall_vapic_poll_irq;
+	u64 hypercall_kick_cpu;
+#ifdef CONFIG_X86_64
+	u64 hypercall_clock_pairing;
+#endif
+	u64 hypercall_send_ipi;
 };
 
 struct x86_instruction_info;

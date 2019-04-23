@@ -219,6 +219,59 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	{ "nx_largepages_splitted", VM_STAT(nx_lpage_splits, .mode = 0444) },
 	{ "max_mmu_page_hash_collisions",
 		VM_STAT(max_mmu_page_hash_collisions) },
+	{ "exception_nmi_exits", VCPU_STAT(exception_nmi_exits) },
+	{ "cr_exits", VCPU_STAT(cr_exits) },
+	{ "dr_exits", VCPU_STAT(dr_exits) },
+	{ "cpuid_exits", VCPU_STAT(cpuid_exits) },
+	{ "rdpmc_exits", VCPU_STAT(rdpmc_exits) },
+	{ "update_ppr_exits", VCPU_STAT(update_ppr_exits) },
+	{ "rdmsr_exits", VCPU_STAT(rdmsr_exits) },
+	{ "wrmsr_exits", VCPU_STAT(wrmsr_exits) },
+	{ "apic_access_exits", VCPU_STAT(apic_access_exits) },
+	{ "apic_write_exits", VCPU_STAT(apic_write_exits) },
+	{ "apic_eoi_exits", VCPU_STAT(apic_eoi_exits) },
+	{ "wbinvd_exits", VCPU_STAT(wbinvd_exits) },
+	{ "xsetbv_exits", VCPU_STAT(xsetbv_exits) },
+	{ "task_switch_exits", VCPU_STAT(task_switch_exits) },
+	{ "ept_violation_exits", VCPU_STAT(ept_violation_exits) },
+	{ "pause_exits", VCPU_STAT(pause_exits) },
+	{ "mwait_exits", VCPU_STAT(mwait_exits) },
+	{ "monitor_trap_exits", VCPU_STAT(monitor_trap_exits) },
+	{ "monitor_exits", VCPU_STAT(monitor_exits) },
+	{ "pml_full_exits", VCPU_STAT(pml_full_exits) },
+	{ "preemption_timer_exits", VCPU_STAT(preemption_timer_exits) },
+	{ "wrmsr_set_apic_base", VCPU_STAT(wrmsr_set_apic_base) },
+	{ "wrmsr_set_wall_clock", VCPU_STAT(wrmsr_set_wall_clock) },
+	{ "wrmsr_set_system_time", VCPU_STAT(wrmsr_set_system_time) },
+	{ "wrmsr_set_pmu", VCPU_STAT(wrmsr_set_pmu) },
+	{ "lapic_set_tscdeadline", VCPU_STAT(lapic_set_tscdeadline) },
+	{ "lapic_set_tpr", VCPU_STAT(lapic_set_tpr) },
+	{ "lapic_set_eoi", VCPU_STAT(lapic_set_eoi) },
+	{ "lapic_set_ldr", VCPU_STAT(lapic_set_ldr) },
+	{ "lapic_set_dfr", VCPU_STAT(lapic_set_dfr) },
+	{ "lapic_set_spiv", VCPU_STAT(lapic_set_spiv) },
+	{ "lapic_set_icr", VCPU_STAT(lapic_set_icr) },
+	{ "lapic_set_icr2", VCPU_STAT(lapic_set_icr2) },
+	{ "lapic_set_lvt", VCPU_STAT(lapic_set_lvt) },
+	{ "lapic_set_lvtt", VCPU_STAT(lapic_set_lvtt) },
+	{ "lapic_set_tmict", VCPU_STAT(lapic_set_tmict) },
+	{ "lapic_set_tdcr", VCPU_STAT(lapic_set_tdcr) },
+	{ "lapic_set_esr", VCPU_STAT(lapic_set_esr) },
+	{ "lapic_set_self_ipi", VCPU_STAT(lapic_set_self_ipi) },
+	{ "cr_movetocr0", VCPU_STAT(cr_movetocr0) },
+	{ "cr_movetocr3", VCPU_STAT(cr_movetocr3) },
+	{ "cr_movetocr4", VCPU_STAT(cr_movetocr4) },
+	{ "cr_movetocr8", VCPU_STAT(cr_movetocr8) },
+	{ "cr_movefromcr3", VCPU_STAT(cr_movefromcr3) },
+	{ "cr_movefromcr8", VCPU_STAT(cr_movefromcr8) },
+	{ "cr_clts", VCPU_STAT(cr_clts) },
+	{ "cr_lmsw", VCPU_STAT(cr_lmsw) },
+	{ "hypercall_vapic_poll_irq", VCPU_STAT(hypercall_vapic_poll_irq) },
+	{ "hypercall_kick_cpu", VCPU_STAT(hypercall_kick_cpu) },
+#ifdef CONFIG_X86_64
+	{ "hypercall_clock_pairing", VCPU_STAT(hypercall_clock_pairing) },
+#endif
+	{ "hypercall_send_ipi", VCPU_STAT(hypercall_send_ipi) },
 	{ NULL }
 };
 
@@ -2754,6 +2807,7 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case 0x200 ... 0x2ff:
 		return kvm_mtrr_set_msr(vcpu, msr, data);
 	case MSR_IA32_APICBASE:
+		++vcpu->stat.wrmsr_set_apic_base;
 		return kvm_set_apic_base(vcpu, msr_info);
 	case APIC_BASE_MSR ... APIC_BASE_MSR + 0xff:
 		return kvm_x2apic_msr_write(vcpu, msr, data);
@@ -2812,12 +2866,15 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 		break;
 	case MSR_KVM_WALL_CLOCK_NEW:
 	case MSR_KVM_WALL_CLOCK:
+		++vcpu->stat.wrmsr_set_wall_clock;
 		vcpu->kvm->arch.wall_clock = data;
 		kvm_write_wall_clock(vcpu->kvm, data);
 		break;
 	case MSR_KVM_SYSTEM_TIME_NEW:
 	case MSR_KVM_SYSTEM_TIME: {
 		struct kvm_arch *ka = &vcpu->kvm->arch;
+
+		++vcpu->stat.wrmsr_set_system_time;
 
 		if (vcpu->vcpu_id == 0 && !msr_info->host_initiated) {
 			bool tmp = (msr == MSR_KVM_SYSTEM_TIME);
@@ -6044,6 +6101,7 @@ static int kvm_emulate_wbinvd_noskip(struct kvm_vcpu *vcpu)
 
 int kvm_emulate_wbinvd(struct kvm_vcpu *vcpu)
 {
+	++vcpu->stat.wbinvd_exits;
 	kvm_emulate_wbinvd_noskip(vcpu);
 	return kvm_skip_emulated_instruction(vcpu);
 }
@@ -7534,19 +7592,23 @@ int kvm_emulate_hypercall(struct kvm_vcpu *vcpu)
 
 	switch (nr) {
 	case KVM_HC_VAPIC_POLL_IRQ:
+		++vcpu->stat.hypercall_vapic_poll_irq;
 		ret = 0;
 		break;
 	case KVM_HC_KICK_CPU:
+		++vcpu->stat.hypercall_kick_cpu;
 		kvm_pv_kick_cpu_op(vcpu->kvm, a0, a1);
 		kvm_sched_yield(vcpu->kvm, a1);
 		ret = 0;
 		break;
 #ifdef CONFIG_X86_64
 	case KVM_HC_CLOCK_PAIRING:
+		++vcpu->stat.hypercall_clock_pairing;
 		ret = kvm_pv_clock_pairing(vcpu, a0, a1);
 		break;
 #endif
 	case KVM_HC_SEND_IPI:
+		++vcpu->stat.hypercall_send_ipi;
 		ret = kvm_pv_send_ipi(vcpu->kvm, a0, a1, a2, a3, op_64_bit);
 		break;
 	case KVM_HC_SCHED_YIELD:
