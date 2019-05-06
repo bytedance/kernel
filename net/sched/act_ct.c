@@ -283,6 +283,14 @@ static int tcf_conntrack_nat(struct net *net,
 	return err;
 }
 
+static void tcf_ct_clear(struct sk_buff *skb)
+{
+	if (skb_nfct(skb)) {
+		nf_conntrack_put(skb_nfct(skb));
+		nf_ct_set(skb, NULL, IP_CT_UNTRACKED);
+	}
+}
+
 static int __tcf_conntrack(struct sk_buff *skb,
 			   struct tcf_conntrack_info *ca,
 			   u_int8_t family,
@@ -443,6 +451,12 @@ static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
 	if (family == PF_UNSPEC)
 		return TC_ACT_SHOT;
 
+	/* TODO: temporary; should be in a different action? */
+	if (orig_ca->clear) {
+		tcf_ct_clear(skb);
+		return orig_ca->tcf_action;
+	}
+
 	/* The conntrack module expects to be working at L3. */
 	nh_ofs = skb_network_offset(skb);
 	skb_pull_rcsum(skb, nh_ofs);
@@ -565,6 +579,7 @@ static int tcf_conntrack_init(struct net *net, struct nlattr *nla,
 		ci->tcf_action = parm->action;
 		ci->net = net;
 		ci->commit = parm->commit;
+		ci->clear = parm->clear;
 
 		tcf_conntrack_nat_parse(ci, tb);
 
@@ -715,6 +730,7 @@ static inline int tcf_conntrack_dump(struct sk_buff *skb, struct tc_action *a,
 	opt.action  = ci->tcf_action,
 	opt.zone   = ci->zone,
 	opt.commit = ci->commit,
+	opt.clear = ci->clear,
 	opt.mark = ci->mark,
 	opt.mark_mask = ci->mark_mask,
 
