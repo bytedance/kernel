@@ -565,6 +565,14 @@ enum {
 							* connection. */
 #define TCA_FLOWER_KEY_CT_FLAGS_INVALID           0x10 /* Could not track connection. */
 #define TCA_FLOWER_KEY_CT_FLAGS_TRACKED           0x20 /* Conntrack has occurred. */
+#define TCA_FLOWER_KEY_CT_FLAGS_SRC_NAT           0x40 /* Packet's source address/port was
+							* mangled by NAT.
+							*/
+#define TCA_FLOWER_KEY_CT_FLAGS_DST_NAT           0x80 /* Packet's destination address/port
+							* was mangled by NAT.
+							*/
+#define TCA_FLOWER_KEY_CT_FLAGS_NAT_MASK (TCA_FLOWER_KEY_CT_FLAGS_SRC_NAT | \
+					  TCA_FLOWER_KEY_CT_FLAGS_DST_NAT)
 
 enum {
 	TCA_FLOWER_KEY_ENC_OPTS_UNSPEC,
