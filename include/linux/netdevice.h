@@ -866,6 +866,10 @@ struct tc_ct_offload {
 	struct net *net;
 	struct nf_conntrack_tuple *tuple;
 	struct nf_conntrack_zone *zone;
+	unsigned long nat;
+	__be32 ipv4;
+	__be16 port;
+	__u8 proto;
 };
 
 /* These structures hold the attributes of bpf state that are being passed

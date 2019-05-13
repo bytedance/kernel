@@ -28,13 +28,65 @@
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_helper.h>
 #include <net/netfilter/nf_conntrack_labels.h>
+#include <linux/netfilter/nf_nat.h>
+#include <net/netfilter/nf_nat.h>
+/* #include <net/netfilter/nf_nat_l3proto.h> */
 
+#include <net/ip.h>
 #include <net/pkt_cls.h>
 
 static unsigned int conntrack_net_id;
 static struct tc_action_ops act_conntrack_ops;
 
+enum ovs_ct_nat {
+	OVS_CT_NAT = 1 << 0,     /* NAT for committed connections only. */
+	OVS_CT_SRC_NAT = 1 << 1, /* Source NAT for NEW connections. */
+	OVS_CT_DST_NAT = 1 << 2, /* Destination NAT for NEW connections. */
+};
+
+static void ct_parse_nat(struct tc_ct_offload *cto,
+			 struct tcf_conntrack_info *ca,
+			 struct nf_conn *ct,
+			 enum ip_conntrack_info ctinfo)
+{
+	struct nf_conntrack_tuple target;
+	unsigned long nat = 0;
+
+	if (!(ct->status & IPS_NAT_MASK) || !ca->nat)
+		return;
+
+	if (ca->nat & OVS_CT_SRC_NAT) {
+		nat = IPS_SRC_NAT;
+	} else if (ca->nat & OVS_CT_DST_NAT) {
+		nat = IPS_DST_NAT;
+	} else {
+		if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY)
+			nat = ct->status & IPS_SRC_NAT ?
+			      IPS_DST_NAT : IPS_SRC_NAT;
+		else
+			nat = ct->status & IPS_SRC_NAT ?
+			      IPS_SRC_NAT : IPS_DST_NAT;
+	}
+
+	/* We are aiming to look like inverse of other direction. */
+	nf_ct_invert_tuple(&target, nf_ct_tuple(ct, !CTINFO2DIR(ctinfo)));
+
+	if (nat & IPS_SRC_NAT) {
+		cto->ipv4 = target.src.u3.ip;
+		cto->port = target.src.u.all;
+	}
+
+	if (nat & IPS_DST_NAT) {
+		cto->ipv4 = target.dst.u3.ip;
+		cto->port = target.dst.u.all;
+	}
+
+	cto->proto = target.dst.protonum;
+	cto->nat = nat;
+}
+
 static void ct_notify_underlying_device(struct sk_buff *skb,
+					struct tcf_conntrack_info *ca,
 					struct nf_conn *ct,
 					enum ip_conntrack_info ctinfo,
 					struct net *net)
@@ -44,6 +96,8 @@ static void ct_notify_underlying_device(struct sk_buff *skb,
 	if (ct) {
 		cto.zone = (struct nf_conntrack_zone *)nf_ct_zone(ct);
 		cto.tuple = nf_ct_tuple(ct, CTINFO2DIR(ctinfo));
+
+		ct_parse_nat(&cto, ca, ct, ctinfo);
 	}
 
 	tc_setup_cb_call_all(NULL, TC_SETUP_CT, &cto);
@@ -109,6 +163,124 @@ static u_int8_t tcf_skb_family(struct sk_buff *skb)
 	}
 
 	return family;
+}
+
+static int tcf_conntrack_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
+				     enum ip_conntrack_info ctinfo,
+				     const struct nf_nat_range2 *range,
+				     enum nf_nat_manip_type maniptype)
+{
+	int hooknum, err = NF_ACCEPT;
+
+	/* See HOOK2MANIP(). */
+	if (maniptype == NF_NAT_MANIP_SRC)
+		hooknum = NF_INET_LOCAL_IN; /* Source NAT */
+	else
+		hooknum = NF_INET_LOCAL_OUT; /* Destination NAT */
+
+	switch (ctinfo) {
+	case IP_CT_RELATED:
+	case IP_CT_RELATED_REPLY:
+		if (IS_ENABLED(CONFIG_NF_NAT_IPV4) &&
+		    skb->protocol == htons(ETH_P_IP) &&
+		    ip_hdr(skb)->protocol == IPPROTO_ICMP) {
+			if (!nf_nat_icmp_reply_translation(skb, ct, ctinfo,
+							   hooknum))
+				err = NF_DROP;
+			goto push;
+		} else if (IS_ENABLED(CONFIG_NF_NAT_IPV6) &&
+			   skb->protocol == htons(ETH_P_IPV6)) {
+			__be16 frag_off;
+			u8 nexthdr = ipv6_hdr(skb)->nexthdr;
+			int hdrlen = ipv6_skip_exthdr(skb,
+						      sizeof(struct ipv6hdr),
+						      &nexthdr, &frag_off);
+
+			if (hdrlen >= 0 && nexthdr == IPPROTO_ICMPV6) {
+				if (!nf_nat_icmpv6_reply_translation(skb, ct,
+								     ctinfo,
+								     hooknum,
+								     hdrlen))
+					err = NF_DROP;
+				goto push;
+			}
+		}
+		/* Non-ICMP, fall thru to initialize if needed. */
+	case IP_CT_NEW:
+		/* Seen it before?  This can happen for loopback, retrans,
+		 * or local packets.
+		 */
+		if (!nf_nat_initialized(ct, maniptype)) {
+			/* Initialize according to the NAT action. */
+			err = (range && range->flags & NF_NAT_RANGE_MAP_IPS)
+				/* Action is set up to establish a new
+				 * mapping.
+				 */
+				? nf_nat_setup_info(ct, range, maniptype)
+				: nf_nat_alloc_null_binding(ct, hooknum);
+			if (err != NF_ACCEPT)
+				goto push;
+		}
+		break;
+
+	case IP_CT_ESTABLISHED:
+	case IP_CT_ESTABLISHED_REPLY:
+		break;
+
+	default:
+		err = NF_DROP;
+		goto push;
+	}
+
+	err = nf_nat_packet(ct, ctinfo, hooknum, skb);
+push:
+	return err;
+}
+
+/* Returns NF_DROP if the packet should be dropped, NF_ACCEPT otherwise. */
+static int tcf_conntrack_nat(struct net *net,
+			     struct tcf_conntrack_info *info,
+			     struct sk_buff *skb, struct nf_conn *ct,
+			     enum ip_conntrack_info ctinfo)
+{
+	enum nf_nat_manip_type maniptype;
+	int err;
+
+	/* Add NAT extension if not confirmed yet. */
+	if (!nf_ct_is_confirmed(ct) && !nf_ct_nat_ext_add(ct))
+		return NF_ACCEPT;   /* Can't NAT. */
+
+	/* Determine NAT type.
+	 * Check if the NAT type can be deduced from the tracked connection.
+	 * Make sure new expected connections (IP_CT_RELATED) are NATted only
+	 * when committing.
+	 */
+	if (info->nat & OVS_CT_NAT && ctinfo != IP_CT_NEW &&
+	    ct->status & IPS_NAT_MASK &&
+	    (ctinfo != IP_CT_RELATED || info->commit)) {
+		/* NAT an established or related connection like before. */
+		if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY)
+			/* This is the REPLY direction for a connection
+			 * for which NAT was applied in the forward
+			 * direction.  Do the reverse NAT.
+			 */
+			maniptype = ct->status & IPS_SRC_NAT
+				? NF_NAT_MANIP_DST : NF_NAT_MANIP_SRC;
+		else
+			maniptype = ct->status & IPS_SRC_NAT
+				? NF_NAT_MANIP_SRC : NF_NAT_MANIP_DST;
+	} else if (info->nat & OVS_CT_SRC_NAT) {
+		maniptype = NF_NAT_MANIP_SRC;
+	} else if (info->nat & OVS_CT_DST_NAT) {
+		maniptype = NF_NAT_MANIP_DST;
+	} else {
+		return NF_ACCEPT; /* Connection is not NATed. */
+	}
+
+	err = tcf_conntrack_nat_execute(skb, ct, ctinfo, &info->range,
+					maniptype);
+
+	return err;
 }
 
 static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
@@ -181,10 +353,19 @@ static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
 		goto out;
 	}
 
+	if (ca->nat && (nf_ct_is_confirmed(ct) || ca->commit)) {
+		err = tcf_conntrack_nat(net, ca, skb, ct, ctinfo);
+		if (err != NF_ACCEPT) {
+			ret = -1;
+			goto out;
+		}
+	}
+
 	if (ctinfo == IP_CT_ESTABLISHED ||
 	    ctinfo == IP_CT_ESTABLISHED_REPLY) {
+		/* TODO: I'm not sure if that "cached" thing affects NAT? */
 		if (!cached)
-			ct_notify_underlying_device(skb, ct, ctinfo, net);
+			ct_notify_underlying_device(skb, ca, ct, ctinfo, net);
 	}
 
 	/* TODO: must check this code very carefully; move to another function */
@@ -261,22 +442,87 @@ static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
 			nf_connlabels_replace(ct, ca->labels, ca->labels_mask, 4);
 		}
 skip:
-		nf_conntrack_confirm(skb);
+		if (nf_conntrack_confirm(skb) != NF_ACCEPT)
+			goto drop;
 	}
 
 out:
 	if (ret)
-		ct_notify_underlying_device(skb, NULL, IP_CT_UNTRACKED, net);
+		ct_notify_underlying_device(skb, ca, NULL, IP_CT_UNTRACKED,
+					    net);
 
 	skb_push(skb, nh_ofs);
 	skb_postpush_rcsum(skb, skb->data, nh_ofs);
 
 	return ca->tcf_action;
+
+drop:
+	skb_push(skb, nh_ofs);
+	skb_postpush_rcsum(skb, skb->data, nh_ofs);
+
+	spin_unlock(&ca->tcf_lock);
+	return TC_ACT_SHOT;
 }
 
 static const struct nla_policy conntrack_policy[TCA_CONNTRACK_MAX + 1] = {
 	[TCA_CONNTRACK_PARMS] = { .len = sizeof(struct tc_conntrack) },
+	/* TODO: should be nested */
+	/* TODO: support IPv6 */
+	[TCA_CONNTRACK_NAT] = { .type = NLA_FLAG },
+	[TCA_CONNTRACK_NAT_SRC] = { .type = NLA_FLAG },
+	[TCA_CONNTRACK_NAT_DST] = { .type = NLA_FLAG },
+	[TCA_CONNTRACK_NAT_IP_MIN] = { .type = NLA_U32 },
+	[TCA_CONNTRACK_NAT_IP_MAX] = { .type = NLA_U32 },
+	[TCA_CONNTRACK_NAT_PORT_MIN] = { .type = NLA_U16 },
+	[TCA_CONNTRACK_NAT_PORT_MAX] = { .type = NLA_U16 },
 };
+
+static void tcf_conntrack_nat_parse(struct tcf_conntrack_info *info,
+				    struct nlattr *tb[])
+{
+	bool have_ip_max = false;
+	bool have_proto_max = false;
+
+	if (!tb[TCA_CONNTRACK_NAT])
+		return;
+
+	info->nat |= OVS_CT_NAT;
+
+	if (tb[TCA_CONNTRACK_NAT_SRC])
+		info->nat |= OVS_CT_SRC_NAT;
+	if (tb[TCA_CONNTRACK_NAT_DST])
+		info->nat |= OVS_CT_DST_NAT;
+
+	if (tb[TCA_CONNTRACK_NAT_IP_MIN]) {
+		info->range.min_addr.ip = nla_get_u32(tb[TCA_CONNTRACK_NAT_IP_MIN]);
+		info->range.flags |= NF_NAT_RANGE_MAP_IPS;
+	}
+	if (tb[TCA_CONNTRACK_NAT_IP_MAX]) {
+		info->range.max_addr.ip = nla_get_u32(tb[TCA_CONNTRACK_NAT_IP_MAX]);
+		info->range.flags |= NF_NAT_RANGE_MAP_IPS;
+		have_ip_max = true;
+	}
+
+	if (tb[TCA_CONNTRACK_NAT_PORT_MIN]) {
+		info->range.min_proto.all = htons(nla_get_u16(tb[TCA_CONNTRACK_NAT_PORT_MIN]));
+		info->range.flags |= NF_NAT_RANGE_PROTO_SPECIFIED;
+	}
+	if (tb[TCA_CONNTRACK_NAT_PORT_MAX]) {
+		info->range.max_proto.all = htons(nla_get_u16(tb[TCA_CONNTRACK_NAT_PORT_MAX]));
+		info->range.flags |= NF_NAT_RANGE_PROTO_SPECIFIED;
+		have_proto_max = true;
+	}
+
+	/* Allow missing IP_MAX. */
+	if (info->range.flags & NF_NAT_RANGE_MAP_IPS && !have_ip_max)
+		info->range.max_addr.ip = info->range.min_addr.ip;
+
+	/* Allow missing PROTO_MAX. */
+	if (info->range.flags & NF_NAT_RANGE_PROTO_SPECIFIED &&
+	    !have_proto_max) {
+		info->range.max_proto.all = info->range.min_proto.all;
+	}
+}
 
 static int tcf_conntrack_init(struct net *net, struct nlattr *nla,
 			     struct nlattr *est, struct tc_action **a,
@@ -319,6 +565,9 @@ static int tcf_conntrack_init(struct net *net, struct nlattr *nla,
 		ci->tcf_action = parm->action;
 		ci->net = net;
 		ci->commit = parm->commit;
+
+		tcf_conntrack_nat_parse(ci, tb);
+
 		ci->zone = parm->zone;
 		if (parm->zone != NF_CT_DEFAULT_ZONE_ID) {
 			nf_ct_zone_init(&zone, parm->zone,
@@ -397,6 +646,58 @@ static void tcf_conntrack_release(struct tc_action *a)
 	}
 }
 
+static int tcf_conntrack_dump_nat(struct sk_buff *skb,
+				  struct tcf_conntrack_info *info)
+{
+	int err;
+
+	if (!info->nat)
+		return 0;
+
+	err = nla_put_flag(skb, TCA_CONNTRACK_NAT);
+	if (err)
+		goto nla_put_failure;
+
+	if (info->nat & OVS_CT_SRC_NAT) {
+		err = nla_put_flag(skb, TCA_CONNTRACK_NAT_SRC);
+		if (err)
+			goto nla_put_failure;
+	}
+
+	if (info->nat & OVS_CT_DST_NAT) {
+		err = nla_put_flag(skb, TCA_CONNTRACK_NAT_DST);
+		if (err)
+			goto nla_put_failure;
+	}
+
+	if (info->range.flags & NF_NAT_RANGE_MAP_IPS) {
+		err = nla_put_be32(skb, TCA_CONNTRACK_NAT_IP_MIN,
+				   info->range.min_addr.ip);
+		if (err)
+			goto nla_put_failure;
+
+		err = nla_put_be32(skb, TCA_CONNTRACK_NAT_IP_MAX,
+				   info->range.max_addr.ip);
+		if (err)
+			goto nla_put_failure;
+	}
+
+	if (info->range.flags & NF_NAT_RANGE_PROTO_SPECIFIED) {
+		err = nla_put_be16(skb, TCA_CONNTRACK_NAT_PORT_MIN,
+				   info->range.min_proto.all);
+		if (err)
+			goto nla_put_failure;
+
+		err = nla_put_be16(skb, TCA_CONNTRACK_NAT_PORT_MAX,
+				   info->range.max_proto.all);
+		if (err)
+			goto nla_put_failure;
+	}
+
+nla_put_failure:
+	return err;
+}
+
 static inline int tcf_conntrack_dump(struct sk_buff *skb, struct tc_action *a,
 				    int bind, int ref)
 {
@@ -421,6 +722,9 @@ static inline int tcf_conntrack_dump(struct sk_buff *skb, struct tc_action *a,
 	memcpy(opt.labels_mask, ci->labels_mask, sizeof(opt.labels_mask));
 
 	if (nla_put(skb, TCA_CONNTRACK_PARMS, sizeof(opt), &opt))
+		goto nla_put_failure;
+
+	if (tcf_conntrack_dump_nat(skb, ci))
 		goto nla_put_failure;
 
 	tcf_tm_dump(&t, &ci->tcf_tm);
