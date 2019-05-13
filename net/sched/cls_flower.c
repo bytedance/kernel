@@ -291,6 +291,15 @@ static u8 fl_ct_get_state(enum ip_conntrack_info ctinfo)
 	u8 ct_state = TCA_FLOWER_KEY_CT_FLAGS_TRACKED;
 
 	switch (ctinfo) {
+	case IP_CT_ESTABLISHED_REPLY:
+	case IP_CT_RELATED_REPLY:
+		ct_state |= TCA_FLOWER_KEY_CT_FLAGS_REPLY_DIR;
+		break;
+	default:
+		break;
+	}
+
+	switch (ctinfo) {
 	case IP_CT_ESTABLISHED:
 	case IP_CT_ESTABLISHED_REPLY:
 		ct_state |= TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED;
