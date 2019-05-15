@@ -1,0 +1,7 @@
+#
+# Bytedance module configuration
+#
+config BYTEDANCE_BLACKHOLEFS
+	tristate "bytedance blackholefs module"
+	---help---
+	  this module is blackholefs
