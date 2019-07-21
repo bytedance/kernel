@@ -428,7 +428,11 @@ int ovs_vport_receive(struct vport *vport, struct sk_buff *skb,
 	struct sw_flow_key key;
 	int error;
 
-	OVS_CB(skb)->recirc_id = skb->recirc_id;
+	if (vport->ops->type == OVS_VPORT_TYPE_INTERNAL && skb->recirc_id) {
+		OVS_CB(skb)->recirc_id = 0;
+	} else {
+		OVS_CB(skb)->recirc_id = skb->recirc_id;
+	}
 	OVS_CB(skb)->input_vport = vport;
 	OVS_CB(skb)->mru = 0;
 	OVS_CB(skb)->cutlen = 0;
