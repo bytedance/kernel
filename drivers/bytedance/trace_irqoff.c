@@ -60,6 +60,7 @@ struct stack_trace_metadata {
 
 	/* Task pids*/
 	pid_t pids[MAX_STACE_TRACE_ENTRIES];
+	u64 latency[MAX_STACE_TRACE_ENTRIES];
 };
 
 struct per_cpu_stack_trace {
@@ -76,7 +77,7 @@ static DEFINE_PER_CPU(struct per_cpu_stack_trace, cpu_stack_trace);
 /**
  * Note: Must be called with irq disabled.
  */
-static bool save_trace(struct pt_regs *regs, bool hardirq)
+static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 {
 	unsigned long nr_entries, nr_stack_trace;
 	struct stack_trace *trace;
@@ -96,6 +97,7 @@ static bool save_trace(struct pt_regs *regs, bool hardirq)
 	strlcpy(stack_trace->comms[nr_stack_trace], current->comm,
 		TASK_COMM_LEN);
 	stack_trace->pids[nr_stack_trace] = current->pid;
+	stack_trace->latency[nr_stack_trace] = latency;
 
 	trace = stack_trace->trace + nr_stack_trace;
 	trace->nr_entries = 0;
@@ -163,7 +165,7 @@ static bool trace_irqoff_record(u64 delta, bool hardirq)
 		__this_cpu_inc(cpu_stack_trace.softirq_trace.latency_count[index]);
 
 	if (unlikely(delta_old >= trace_irqoff_latency))
-		save_trace(get_irq_regs(), hardirq);
+		save_trace(get_irq_regs(), hardirq, delta_old);
 
 	return true;
 }
@@ -349,8 +351,10 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 		for (i = 0; i < nr_stack_trace; i++) {
 			struct stack_trace *trace = stack_trace->trace + i;
 
-			seq_printf(m, "%*cCOMMAND: %s PID: %d\n", 5, ' ',
-				   stack_trace->comms[i], stack_trace->pids[i]);
+			seq_printf(m, "%*cCOMMAND: %s PID: %d LATENCY: %llums\n",
+				   5, ' ', stack_trace->comms[i],
+				   stack_trace->pids[i],
+				   stack_trace->latency[i] / (1000 * 1000UL));
 			seq_print_stack_trace(m, trace);
 			seq_putc(m, '\n');
 		}
