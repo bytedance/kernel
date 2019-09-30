@@ -256,7 +256,7 @@ static void distribute_show_one(struct seq_file *m, void *v, bool hardirq)
 	int scale = (sampling_period << 1) / (1000 * 1000UL);
 	unsigned long latency_count[MAX_LATENCY_RECORD] = { 0 };
 
-	for_each_possible_cpu(cpu) {
+	for_each_online_cpu(cpu) {
 		unsigned long *count;
 
 		count = hardirq ?
@@ -433,17 +433,15 @@ static void trace_irqoff_cancel_timers(void)
 {
 	int cpu;
 
-	for_each_possible_cpu(cpu) {
+	for_each_online_cpu(cpu) {
 		struct hrtimer *hrtimer;
 		struct timer_list *timer;
 
 		hrtimer = per_cpu_ptr(&cpu_stack_trace.hrtimer, cpu);
-		if (hrtimer->function)
-			hrtimer_cancel(hrtimer);
+		hrtimer_cancel(hrtimer);
 
 		timer = per_cpu_ptr(&cpu_stack_trace.timer, cpu);
-		if (timer->function)
-			del_timer_sync(timer);
+		del_timer_sync(timer);
 	}
 }
 
