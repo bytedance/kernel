@@ -315,7 +315,11 @@ static ssize_t trace_latency_write(struct file *file, const char __user *buf,
 		return -EINVAL;
 
 	if (latency == 0) {
-		smp_call_function(smp_clear_stack_trace, NULL, true);
+		int cpu;
+
+		for_each_online_cpu(cpu)
+			smp_call_function_single(cpu, smp_clear_stack_trace,
+						 NULL, true);
 		return count;
 	} else if (latency < (sampling_period << 1) / (1000 * 1000UL))
 		return -EINVAL;
