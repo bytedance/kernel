@@ -597,6 +597,8 @@ static void io_cqring_fill_event(struct io_ring_ctx *ctx, u64 ki_user_data,
 {
 	struct io_uring_cqe *cqe;
 
+	trace_io_uring_complete(ctx, ki_user_data, res);
+
 	/*
 	 * If we can't get a cq entry, userspace overflowed the
 	 * submission (by quite a lot). Increment the overflow count in
@@ -2749,7 +2751,7 @@ out:
 		s.has_user = *mm != NULL;
 		s.in_async = true;
 		s.needs_fixed_file = true;
-		trace_io_uring_submit_sqe(ctx, true, true);
+		trace_io_uring_submit_sqe(ctx, s.sqe->user_data, true, true);
 		io_submit_sqe(ctx, &s, statep, &link);
 		submitted++;
 	}
@@ -2929,7 +2931,7 @@ out:
 		s.needs_fixed_file = false;
 		s.ring_fd = ring_fd;
 		submit++;
-		trace_io_uring_submit_sqe(ctx, true, false);
+		trace_io_uring_submit_sqe(ctx, s.sqe->user_data, true, false);
 		io_submit_sqe(ctx, &s, statep, &link);
 	}
 
