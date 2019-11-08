@@ -18,3 +18,8 @@ libsm3-y					:= sm3.o
 obj-$(CONFIG_CRYPTO_LIB_SM4)			+= libsm4.o
 libsm4-y					:= sm4.o
 
+obj-y += libblake2s.o
+libblake2s-y += blake2s.o blake2s-generic.o
+ifneq ($(CONFIG_CRYPTO_MANAGER_DISABLE_TESTS),y)
+libblake2s-y += blake2s-selftest.o
+endif
