@@ -29,7 +29,7 @@
  * rax original destination
  */
 ENTRY(__memcpy)
-ENTRY(memcpy)
+SYM_FUNC_START_LOCAL(memcpy)
 	ALTERNATIVE_2 "jmp memcpy_orig", "", X86_FEATURE_REP_GOOD, \
 		      "jmp memcpy_erms", X86_FEATURE_ERMS
 
