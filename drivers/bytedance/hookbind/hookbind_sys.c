@@ -167,70 +167,46 @@ static int make_ro(unsigned long address)
 	pte->pte = pte->pte &~ _PAGE_RW;
 	return 0;
 }
-static char *trim(char *str)
+
+static size_t decode(char *argenv,size_t length)
 {
-	char *ibuf = str, *obuf = str;
-	int i = 0;
-	if (str) {
-		while (*ibuf) {
-			if (isspace(*ibuf))
-				ibuf++;
-			else
-				obuf[i++] = *ibuf++;
-		}
-	obuf[i] = '\0';
-	}
-	return str;
-}
-static void decode(char *argenv)
-{
-	char *port, *mport, *tmp = NULL;
-	int iport, import;
-	if (argenv == NULL) {
-		pr_info("hookbind: failed to get argenv\n");
-	return ;
-	}
-
-	argenv = trim(argenv);
-
-	while (argenv[0] != '\0' ) {
-		port = argenv;
-		mport = strchr(argenv, ':');
-		if (mport == NULL) {
-			pr_info("hookbind: *decode* error, data decode fail, no ':' chart\n");
-			return;
-		}
-		tmp = strchr(argenv, '/');
-		if ( tmp != NULL) {
-			*tmp = '\0';
-		}
-		if (mport != NULL) {
-			*mport = '\0';
-			mport ++;
-		}
-
-		if (tmp != NULL)
-			tmp ++;
-		if (kstrtoint(port, 10, &iport)) {
-			pr_info("hookbind: kstrtoint fail port\n");
-			return ;
-		}
-		if (kstrtoint(mport, 10, &import)) {
-			pr_info("hookbind: kstrtoint fail mport\n");
-			return ;
-		}
-		if (iport > 0xFFFF || import > 0xFFFF ||
-			iport < 0 || import < 0) {
-			pr_info("hookbind: *add rule*: WRONG port %d --> %d\n",
-				iport, import);
-		/* continue with wrong ports converted */
-		}
-		add(iport, import, current);
-		if (tmp)
-			argenv = tmp;
-		else
+	int iport = 0, import = 0, flag = 0;
+	ssize_t i = 0;
+	while (i < length) {
+		if (isspace(argenv[i]) || argenv[i] == '\0') { 
+			i++;
+		}else if (isdigit(argenv[i])) {
+			if (flag == 0)
+				iport = iport*10 + (argenv[i] - '0');
+			else 
+				import = import*10 + (argenv[i] - '0');
+			i++;
+		}else if (argenv[i] == ':'){
+			flag = 1;
+			i++;
+		} else if (argenv[i] == '/'){
+			if (iport > 0xFFFF || import > 0xFFFF ||
+				iport <= 0 || import <= 0) {
+				pr_info("hookbind: *add rule*: WRONG port %d --> %d\n",
+					iport, import);
+				i++;
+				continue;
+			}
+			add(iport, import, current);
+			flag = 0;
+			iport =0;
+			import = 0;
+			i++;
+		} else{
+			pr_info("hookbind: str %s\n",argenv);
+			pr_info("hookbind: bad str %s\n",&argenv[i]);
 			break;
+		}
 	}
+	if (flag == 1 && iport <= 0xFFFF && iport > 0 &&
+			import <= 0xFFFF && import > 0)
+		add(iport, import, current);
+	return i;
 }
 
 ssize_t dump_dmesg(void)
@@ -262,17 +238,24 @@ ssize_t dump_dmesg(void)
 
 ssize_t add_new_rule(const char __user *buffer,size_t length)
 {
-	int res = 0;
-	char *bmp = kmalloc(length * sizeof(char), GFP_KERNEL);
+	ssize_t res = 0;
+	char *bmp = kmalloc((length + 1) * sizeof(char), GFP_KERNEL);
 	if (!bmp) {
 		pr_info("hookbind: *write*: kmalloc fail\n");
-		return 0;
+		res = -ENOMEM;
+		goto out;
 	}
 	res = copy_from_user(bmp, buffer, length);
-	decode(bmp);
+	if (res != 0) {
+		res = -EFAULT;
+		goto free_bmp;
+	}
+	bmp[length]='\0';
+	res = decode(bmp,length+1);
+free_bmp:
 	kfree(bmp);
-
-	return length;
+out:
+	return res;
 }
 
 bool __init register_hookbind(void) {
