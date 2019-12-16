@@ -47,10 +47,15 @@ static u64 sampling_period = 10 * 1000 * 1000UL;
  */
 static u64 trace_irqoff_latency = 50 * 1000 * 1000UL;
 
+struct irqoff_trace {
+	unsigned int nr_entries;
+	unsigned long *entries;
+};
+
 struct stack_trace_metadata {
 	u64 last_timestamp;
-	unsigned long nr_stack_trace;
-	struct stack_trace trace[MAX_STACE_TRACE_ENTRIES];
+	unsigned long nr_irqoff_trace;
+	struct irqoff_trace trace[MAX_STACE_TRACE_ENTRIES];
 	unsigned long nr_entries;
 	unsigned long entries[MAX_TRACE_ENTRIES];
 	unsigned long latency_count[MAX_LATENCY_RECORD];
@@ -79,36 +84,35 @@ static DEFINE_PER_CPU(struct per_cpu_stack_trace, cpu_stack_trace);
  */
 static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 {
-	unsigned long nr_entries, nr_stack_trace;
-	struct stack_trace *trace;
+	unsigned long nr_entries, nr_irqoff_trace;
+	struct irqoff_trace *trace;
 	struct stack_trace_metadata *stack_trace;
+	unsigned int size;
 
 	stack_trace = hardirq ? this_cpu_ptr(&cpu_stack_trace.hardirq_trace) :
 		      this_cpu_ptr(&cpu_stack_trace.softirq_trace);
 
-	nr_stack_trace = stack_trace->nr_stack_trace;
-	if (unlikely(nr_stack_trace >= MAX_STACE_TRACE_ENTRIES))
+	nr_irqoff_trace = stack_trace->nr_irqoff_trace;
+	if (unlikely(nr_irqoff_trace >= MAX_STACE_TRACE_ENTRIES))
 		return false;
 
 	nr_entries = stack_trace->nr_entries;
 	if (unlikely(nr_entries >= MAX_TRACE_ENTRIES - 1))
 		return false;
 
-	strlcpy(stack_trace->comms[nr_stack_trace], current->comm,
+	strlcpy(stack_trace->comms[nr_irqoff_trace], current->comm,
 		TASK_COMM_LEN);
-	stack_trace->pids[nr_stack_trace] = current->pid;
-	stack_trace->latency[nr_stack_trace] = latency;
+	stack_trace->pids[nr_irqoff_trace] = current->pid;
+	stack_trace->latency[nr_irqoff_trace] = latency;
 
-	trace = stack_trace->trace + nr_stack_trace;
-	trace->nr_entries = 0;
-	trace->max_entries = MAX_TRACE_ENTRIES - nr_entries;
+	trace = stack_trace->trace + nr_irqoff_trace;
 	trace->entries = stack_trace->entries + nr_entries;
-	trace->skip = 0;
-
+	size = MAX_TRACE_ENTRIES - nr_entries;
 #ifndef MODULE
-	save_stack_trace_regs(regs, trace);
+	trace->nr_entries = stack_trace_save_regs(regs, trace->entries, size,
+						  0);
 #else
-	save_stack_trace(trace);
+	trace->nr_entries = stack_trace_save(trace->entries, size, 0);
 #endif
 	/*
 	 * Some daft arches put -1 at the end to indicate its a full trace.
@@ -121,15 +125,13 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	    trace->entries[trace->nr_entries - 1] == ULONG_MAX)
 		trace->nr_entries--;
 
-	trace->max_entries = trace->nr_entries;
-
 	stack_trace->nr_entries += trace->nr_entries;
 
 	/**
 	 * Ensure that the initialisation of @trace is complete before we
-	 * update the @nr_stack_trace.
+	 * update the @nr_irqoff_trace.
 	 */
-	smp_store_release(&stack_trace->nr_stack_trace, nr_stack_trace + 1);
+	smp_store_release(&stack_trace->nr_irqoff_trace, nr_irqoff_trace + 1);
 
 	if (unlikely(stack_trace->nr_entries >= MAX_TRACE_ENTRIES - 1)) {
 		pr_info("BUG: MAX_TRACE_ENTRIES too low!");
@@ -220,9 +222,9 @@ static void smp_clear_stack_trace(void *info)
 	stack_trace = this_cpu_ptr(&cpu_stack_trace);
 
 	stack_trace->hardirq_trace.nr_entries = 0;
-	stack_trace->hardirq_trace.nr_stack_trace = 0;
+	stack_trace->hardirq_trace.nr_irqoff_trace = 0;
 	stack_trace->softirq_trace.nr_entries = 0;
-	stack_trace->softirq_trace.nr_stack_trace = 0;
+	stack_trace->softirq_trace.nr_irqoff_trace = 0;
 
 	for (i = 0; i < MAX_LATENCY_RECORD; i++) {
 		stack_trace->hardirq_trace.latency_count[i] = 0;
@@ -295,7 +297,7 @@ static int distribute_show(struct seq_file *m, void *v)
 
 DEFINE_SHOW_ATTRIBUTE(distribute);
 
-static void seq_print_stack_trace(struct seq_file *m, struct stack_trace *trace)
+static void seq_print_stack_trace(struct seq_file *m, struct irqoff_trace *trace)
 {
 	int i;
 
@@ -335,7 +337,7 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 
 	for_each_online_cpu(cpu) {
 		int i;
-		unsigned long nr_stack_trace;
+		unsigned long nr_irqoff_trace;
 		struct stack_trace_metadata *stack_trace;
 
 		stack_trace = hardirq ?
@@ -345,15 +347,15 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 		/**
 		 * Paired with smp_store_release() in the save_trace().
 		 */
-		nr_stack_trace = smp_load_acquire(&stack_trace->nr_stack_trace);
+		nr_irqoff_trace = smp_load_acquire(&stack_trace->nr_irqoff_trace);
 
-		if (!nr_stack_trace)
+		if (!nr_irqoff_trace)
 			continue;
 
 		seq_printf(m, " cpu: %d\n", cpu);
 
-		for (i = 0; i < nr_stack_trace; i++) {
-			struct stack_trace *trace = stack_trace->trace + i;
+		for (i = 0; i < nr_irqoff_trace; i++) {
+			struct irqoff_trace *trace = stack_trace->trace + i;
 
 			seq_printf(m, "%*cCOMMAND: %s PID: %d LATENCY: %llums\n",
 				   5, ' ', stack_trace->comms[i],
