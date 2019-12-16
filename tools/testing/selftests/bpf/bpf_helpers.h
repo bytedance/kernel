@@ -61,6 +61,8 @@ static int (*bpf_redirect)(int ifindex, int flags) =
 	(void *) BPF_FUNC_redirect;
 static int (*bpf_redirect_map)(void *map, int key, int flags) =
 	(void *) BPF_FUNC_redirect_map;
+static int (*bpf_biggest_bits)(u64 bits, u16 *bit_array, u32 array_size) =
+	(void *) BPF_FUNC_biggest_bits;
 static int (*bpf_perf_event_output)(void *ctx, void *map,
 				    unsigned long long flags, void *data,
 				    int size) =
