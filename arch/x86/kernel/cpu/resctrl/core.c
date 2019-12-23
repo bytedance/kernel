@@ -888,11 +888,6 @@ static __init void __check_quirks_intel(void)
 		if (!rdt_options[RDT_FLAG_L3_CAT].force_off)
 			cache_alloc_hsw_probe();
 		break;
-	case INTEL_FAM6_SKYLAKE_X:
-		if (boot_cpu_data.x86_stepping <= 4)
-			set_rdt_options("!cmt,!mbmtotal,!mbmlocal,!l3cat");
-		else
-			set_rdt_options("!l3cat");
 	}
 }
 
