@@ -380,7 +380,7 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 
 static int trace_latency_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "trace_irqoff_latency: %llu ms\n\n",
+	seq_printf(m, "trace_irqoff_latency: %llums\n\n",
 		   trace_irqoff_latency / (1000 * 1000UL));
 
 	seq_puts(m, " hardirq:\n");
