@@ -24,10 +24,6 @@
 #include <linux/timer.h>
 #include <asm/irq_regs.h>
 
-#ifndef MODULE
-#define MAX_TRACE_ENTRIES		(SZ_4K / sizeof(unsigned long))
-#define PER_TRACE_ENTRIES_AVERAGE	8
-#else
 /**
  * If we compile as a module, the static per cpu varibles will be
  * dynamically allocated via alloc_percpu(). If requset memory size
@@ -36,7 +32,6 @@
  */
 #define MAX_TRACE_ENTRIES		(SZ_1K / sizeof(unsigned long))
 #define PER_TRACE_ENTRIES_AVERAGE	(8 + 8)
-#endif
 
 #define MAX_STACE_TRACE_ENTRIES		\
 	(MAX_TRACE_ENTRIES / PER_TRACE_ENTRIES_AVERAGE)
