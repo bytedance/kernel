@@ -135,7 +135,6 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 
 	if (unlikely(stack_trace->nr_entries >= MAX_TRACE_ENTRIES - 1)) {
 		pr_info("BUG: MAX_TRACE_ENTRIES too low!");
-		dump_stack();
 
 		return false;
 	}
