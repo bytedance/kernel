@@ -224,9 +224,7 @@ static void trace_irqoff_timer_handler(struct timer_list *timer)
 static void smp_clear_stack_trace(void *info)
 {
 	int i;
-	struct per_cpu_stack_trace *stack_trace;
-
-	stack_trace = this_cpu_ptr(&cpu_stack_trace);
+	struct per_cpu_stack_trace *stack_trace = info;
 
 	stack_trace->hardirq_trace.nr_entries = 0;
 	stack_trace->hardirq_trace.nr_irqoff_trace = 0;
@@ -245,8 +243,6 @@ static void smp_timers_start(void *info)
 	struct per_cpu_stack_trace *stack_trace = info;
 	struct hrtimer *hrtimer = &stack_trace->hrtimer;
 	struct timer_list *timer = &stack_trace->timer;
-
-	smp_clear_stack_trace(NULL);
 
 	stack_trace->hardirq_trace.last_timestamp = now;
 	stack_trace->softirq_trace.last_timestamp = now;
@@ -328,7 +324,8 @@ static ssize_t trace_latency_write(struct file *file, const char __user *buf,
 
 		for_each_online_cpu(cpu)
 			smp_call_function_single(cpu, smp_clear_stack_trace,
-						 NULL, true);
+						 per_cpu_ptr(&cpu_stack_trace, cpu),
+						 true);
 		return count;
 	} else if (latency < (sampling_period << 1) / (1000 * 1000UL))
 		return -EINVAL;
