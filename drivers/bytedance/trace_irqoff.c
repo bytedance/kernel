@@ -223,7 +223,8 @@ static void trace_irqoff_timer_handler(struct timer_list *timer)
 
 	trace_irqoff_record(delta, false, false);
 
-	mod_timer(timer, jiffies + nsecs_to_jiffies(sampling_period));
+	mod_timer(timer,
+		  jiffies + msecs_to_jiffies(sampling_period / 1000000UL));
 }
 
 static void smp_clear_stack_trace(void *info)
@@ -256,7 +257,7 @@ static void smp_timers_start(void *info)
 			       sampling_period >> 3,
 			       HRTIMER_MODE_REL_PINNED);
 
-	timer->expires = jiffies + nsecs_to_jiffies(sampling_period);
+	timer->expires = jiffies + msecs_to_jiffies(sampling_period / 1000000UL);
 	add_timer_on(timer, smp_processor_id());
 }
 
