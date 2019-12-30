@@ -66,7 +66,11 @@ struct stack_trace_metadata {
 
 	/* Task pids*/
 	pid_t pids[MAX_STACE_TRACE_ENTRIES];
-	u64 latency[MAX_STACE_TRACE_ENTRIES];
+
+	struct {
+		u64 nsecs:63;
+		u64 more:1;
+	} latency[MAX_STACE_TRACE_ENTRIES];
 };
 
 struct per_cpu_stack_trace {
@@ -129,7 +133,8 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	strlcpy(stack_trace->comms[nr_irqoff_trace], current->comm,
 		TASK_COMM_LEN);
 	stack_trace->pids[nr_irqoff_trace] = current->pid;
-	stack_trace->latency[nr_irqoff_trace] = latency;
+	stack_trace->latency[nr_irqoff_trace].nsecs = latency;
+	stack_trace->latency[nr_irqoff_trace].more = !hardirq && regs;
 
 	trace = stack_trace->trace + nr_irqoff_trace;
 	store_stack_trace(regs, trace, stack_trace->entries + nr_entries,
@@ -361,10 +366,11 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 		for (i = 0; i < nr_irqoff_trace; i++) {
 			struct irqoff_trace *trace = stack_trace->trace + i;
 
-			seq_printf(m, "%*cCOMMAND: %s PID: %d LATENCY: %llums\n",
+			seq_printf(m, "%*cCOMMAND: %s PID: %d LATENCY: %lu%s\n",
 				   5, ' ', stack_trace->comms[i],
 				   stack_trace->pids[i],
-				   stack_trace->latency[i] / (1000 * 1000UL));
+				   stack_trace->latency[i].nsecs / (1000 * 1000UL),
+				   stack_trace->latency[i].more ? "+ms" : "ms");
 			seq_print_stack_trace(m, trace);
 			seq_putc(m, '\n');
 		}
