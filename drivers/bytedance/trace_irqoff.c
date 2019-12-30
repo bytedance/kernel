@@ -5,6 +5,7 @@
 #include <linux/hrtimer.h>
 #include <linux/irqflags.h>
 #include <linux/kernel.h>
+#include <linux/kallsyms.h>
 #include <linux/module.h>
 #include <linux/percpu.h>
 #include <linux/proc_fs.h>
@@ -79,6 +80,32 @@ struct per_cpu_stack_trace {
 
 static DEFINE_PER_CPU(struct per_cpu_stack_trace, cpu_stack_trace);
 
+static unsigned int (*stack_trace_save_skip_hardirq)(struct pt_regs *regs,
+						     unsigned long *store,
+						     unsigned int size,
+						     unsigned int skipnr);
+
+static inline void stack_trace_skip_hardirq_init(void)
+{
+	stack_trace_save_skip_hardirq =
+			(void *)kallsyms_lookup_name("stack_trace_save_regs");
+}
+
+static inline void store_stack_trace(struct pt_regs *regs,
+				     struct irqoff_trace *trace,
+				     unsigned long *entries,
+				     unsigned int max_entries, int skip)
+{
+	trace->entries = entries;
+	if (regs && stack_trace_save_skip_hardirq)
+		trace->nr_entries = stack_trace_save_skip_hardirq(regs, entries,
+								  max_entries,
+								  skip);
+	else
+		trace->nr_entries = stack_trace_save(entries, max_entries,
+						     skip);
+}
+
 /**
  * Note: Must be called with irq disabled.
  */
@@ -87,7 +114,6 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	unsigned long nr_entries, nr_irqoff_trace;
 	struct irqoff_trace *trace;
 	struct stack_trace_metadata *stack_trace;
-	unsigned int size;
 
 	stack_trace = hardirq ? this_cpu_ptr(&cpu_stack_trace.hardirq_trace) :
 		      this_cpu_ptr(&cpu_stack_trace.softirq_trace);
@@ -106,25 +132,8 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	stack_trace->latency[nr_irqoff_trace] = latency;
 
 	trace = stack_trace->trace + nr_irqoff_trace;
-	trace->entries = stack_trace->entries + nr_entries;
-	size = MAX_TRACE_ENTRIES - nr_entries;
-#ifndef MODULE
-	trace->nr_entries = stack_trace_save_regs(regs, trace->entries, size,
-						  0);
-#else
-	trace->nr_entries = stack_trace_save(trace->entries, size, 0);
-#endif
-	/*
-	 * Some daft arches put -1 at the end to indicate its a full trace.
-	 *
-	 * <rant> this is buggy anyway, since it takes a whole extra entry so a
-	 * complete trace that maxes out the entries provided will be reported
-	 * as incomplete, friggin useless </rant>.
-	 */
-	if (trace->nr_entries != 0 &&
-	    trace->entries[trace->nr_entries - 1] == ULONG_MAX)
-		trace->nr_entries--;
-
+	store_stack_trace(regs, trace, stack_trace->entries + nr_entries,
+			  MAX_TRACE_ENTRIES - nr_entries, 0);
 	stack_trace->nr_entries += trace->nr_entries;
 
 	/**
@@ -142,7 +151,7 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	return true;
 }
 
-static bool trace_irqoff_record(u64 delta, bool hardirq)
+static bool trace_irqoff_record(u64 delta, bool hardirq, bool skip)
 {
 	int index = 0;
 	u64 throttle = sampling_period << 1;
@@ -166,7 +175,7 @@ static bool trace_irqoff_record(u64 delta, bool hardirq)
 		__this_cpu_inc(cpu_stack_trace.softirq_trace.latency_count[index]);
 
 	if (unlikely(delta_old >= trace_irqoff_latency))
-		save_trace(get_irq_regs(), hardirq, delta_old);
+		save_trace(skip ? get_irq_regs() : NULL, hardirq, delta_old);
 
 	return true;
 }
@@ -178,7 +187,7 @@ static enum hrtimer_restart trace_irqoff_hrtimer_handler(struct hrtimer *hrtimer
 	delta = now - __this_cpu_read(cpu_stack_trace.hardirq_trace.last_timestamp);
 	__this_cpu_write(cpu_stack_trace.hardirq_trace.last_timestamp, now);
 
-	if (trace_irqoff_record(delta, true)) {
+	if (trace_irqoff_record(delta, true, true)) {
 		__this_cpu_write(cpu_stack_trace.softirq_trace.last_timestamp,
 				 now);
 	} else if (!__this_cpu_read(cpu_stack_trace.softirq_delayed)) {
@@ -188,9 +197,8 @@ static enum hrtimer_restart trace_irqoff_hrtimer_handler(struct hrtimer *hrtimer
 			__this_cpu_read(cpu_stack_trace.softirq_trace.last_timestamp);
 
 		if (unlikely(delta_soft >= trace_irqoff_latency)) {
-			__this_cpu_write(cpu_stack_trace.softirq_delayed,
-					 true);
-			trace_irqoff_record(delta_soft, false);
+			__this_cpu_write(cpu_stack_trace.softirq_delayed, true);
+			trace_irqoff_record(delta_soft, false, true);
 		}
 	}
 
@@ -208,7 +216,7 @@ static void trace_irqoff_timer_handler(struct timer_list *timer)
 
 	__this_cpu_write(cpu_stack_trace.softirq_delayed, false);
 
-	trace_irqoff_record(delta, false);
+	trace_irqoff_record(delta, false, false);
 
 	mod_timer(timer, jiffies + nsecs_to_jiffies(sampling_period));
 }
@@ -518,6 +526,8 @@ static const struct file_operations sampling_period_fops = {
 static int __init trace_irqoff_init(void)
 {
 	struct proc_dir_entry *parent_dir;
+
+	stack_trace_skip_hardirq_init();
 
 	parent_dir = proc_mkdir("trace_irqoff", NULL);
 	if (!parent_dir)
