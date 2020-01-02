@@ -179,7 +179,7 @@ static bool trace_irqoff_record(u64 delta, bool hardirq, bool skip)
 
 	if (hardirq)
 		__this_cpu_inc(cpu_stack_trace.hardirq_trace.latency_count[index]);
-	else
+	else if (!skip)
 		__this_cpu_inc(cpu_stack_trace.softirq_trace.latency_count[index]);
 
 	if (unlikely(delta_old >= trace_irqoff_latency))
