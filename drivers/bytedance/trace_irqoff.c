@@ -1,10 +1,19 @@
 // SPDX-License-Identifier: GPL-2.0
-/**
- * Code for trace irq or bh off.
+/*
+ * Trace Irqsoff
+ *
+ * Copyright (C) 2020 Bytedance, Inc., Muchun Song
+ *
+ * The main authors of the trace irqsoff code are:
+ *
+ * Muchun Song <songmuchun@bytedance.com>
  */
+#define pr_fmt(fmt) "trace-irqoff: " fmt
+
 #include <linux/hrtimer.h>
 #include <linux/irqflags.h>
 #include <linux/kernel.h>
+#include <linux/kallsyms.h>
 #include <linux/module.h>
 #include <linux/percpu.h>
 #include <linux/proc_fs.h>
@@ -15,10 +24,6 @@
 #include <linux/timer.h>
 #include <asm/irq_regs.h>
 
-#ifndef MODULE
-#define MAX_TRACE_ENTRIES		(SZ_4K / sizeof(unsigned long))
-#define PER_TRACE_ENTRIES_AVERAGE	8
-#else
 /**
  * If we compile as a module, the static per cpu varibles will be
  * dynamically allocated via alloc_percpu(). If requset memory size
@@ -27,7 +32,6 @@
  */
 #define MAX_TRACE_ENTRIES		(SZ_1K / sizeof(unsigned long))
 #define PER_TRACE_ENTRIES_AVERAGE	(8 + 8)
-#endif
 
 #define MAX_STACE_TRACE_ENTRIES		\
 	(MAX_TRACE_ENTRIES / PER_TRACE_ENTRIES_AVERAGE)
@@ -65,7 +69,11 @@ struct stack_trace_metadata {
 
 	/* Task pids*/
 	pid_t pids[MAX_STACE_TRACE_ENTRIES];
-	u64 latency[MAX_STACE_TRACE_ENTRIES];
+
+	struct {
+		u64 nsecs:63;
+		u64 more:1;
+	} latency[MAX_STACE_TRACE_ENTRIES];
 };
 
 struct per_cpu_stack_trace {
@@ -79,6 +87,32 @@ struct per_cpu_stack_trace {
 
 static DEFINE_PER_CPU(struct per_cpu_stack_trace, cpu_stack_trace);
 
+static unsigned int (*stack_trace_save_skip_hardirq)(struct pt_regs *regs,
+						     unsigned long *store,
+						     unsigned int size,
+						     unsigned int skipnr);
+
+static inline void stack_trace_skip_hardirq_init(void)
+{
+	stack_trace_save_skip_hardirq =
+			(void *)kallsyms_lookup_name("stack_trace_save_regs");
+}
+
+static inline void store_stack_trace(struct pt_regs *regs,
+				     struct irqoff_trace *trace,
+				     unsigned long *entries,
+				     unsigned int max_entries, int skip)
+{
+	trace->entries = entries;
+	if (regs && stack_trace_save_skip_hardirq)
+		trace->nr_entries = stack_trace_save_skip_hardirq(regs, entries,
+								  max_entries,
+								  skip);
+	else
+		trace->nr_entries = stack_trace_save(entries, max_entries,
+						     skip);
+}
+
 /**
  * Note: Must be called with irq disabled.
  */
@@ -87,7 +121,6 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	unsigned long nr_entries, nr_irqoff_trace;
 	struct irqoff_trace *trace;
 	struct stack_trace_metadata *stack_trace;
-	unsigned int size;
 
 	stack_trace = hardirq ? this_cpu_ptr(&cpu_stack_trace.hardirq_trace) :
 		      this_cpu_ptr(&cpu_stack_trace.softirq_trace);
@@ -103,28 +136,12 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	strlcpy(stack_trace->comms[nr_irqoff_trace], current->comm,
 		TASK_COMM_LEN);
 	stack_trace->pids[nr_irqoff_trace] = current->pid;
-	stack_trace->latency[nr_irqoff_trace] = latency;
+	stack_trace->latency[nr_irqoff_trace].nsecs = latency;
+	stack_trace->latency[nr_irqoff_trace].more = !hardirq && regs;
 
 	trace = stack_trace->trace + nr_irqoff_trace;
-	trace->entries = stack_trace->entries + nr_entries;
-	size = MAX_TRACE_ENTRIES - nr_entries;
-#ifndef MODULE
-	trace->nr_entries = stack_trace_save_regs(regs, trace->entries, size,
-						  0);
-#else
-	trace->nr_entries = stack_trace_save(trace->entries, size, 0);
-#endif
-	/*
-	 * Some daft arches put -1 at the end to indicate its a full trace.
-	 *
-	 * <rant> this is buggy anyway, since it takes a whole extra entry so a
-	 * complete trace that maxes out the entries provided will be reported
-	 * as incomplete, friggin useless </rant>.
-	 */
-	if (trace->nr_entries != 0 &&
-	    trace->entries[trace->nr_entries - 1] == ULONG_MAX)
-		trace->nr_entries--;
-
+	store_stack_trace(regs, trace, stack_trace->entries + nr_entries,
+			  MAX_TRACE_ENTRIES - nr_entries, 0);
 	stack_trace->nr_entries += trace->nr_entries;
 
 	/**
@@ -135,7 +152,6 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 
 	if (unlikely(stack_trace->nr_entries >= MAX_TRACE_ENTRIES - 1)) {
 		pr_info("BUG: MAX_TRACE_ENTRIES too low!");
-		dump_stack();
 
 		return false;
 	}
@@ -143,7 +159,7 @@ static bool save_trace(struct pt_regs *regs, bool hardirq, u64 latency)
 	return true;
 }
 
-static bool trace_irqoff_record(u64 delta, bool hardirq)
+static bool trace_irqoff_record(u64 delta, bool hardirq, bool skip)
 {
 	int index = 0;
 	u64 throttle = sampling_period << 1;
@@ -163,11 +179,11 @@ static bool trace_irqoff_record(u64 delta, bool hardirq)
 
 	if (hardirq)
 		__this_cpu_inc(cpu_stack_trace.hardirq_trace.latency_count[index]);
-	else
+	else if (!skip)
 		__this_cpu_inc(cpu_stack_trace.softirq_trace.latency_count[index]);
 
 	if (unlikely(delta_old >= trace_irqoff_latency))
-		save_trace(get_irq_regs(), hardirq, delta_old);
+		save_trace(skip ? get_irq_regs() : NULL, hardirq, delta_old);
 
 	return true;
 }
@@ -179,7 +195,7 @@ static enum hrtimer_restart trace_irqoff_hrtimer_handler(struct hrtimer *hrtimer
 	delta = now - __this_cpu_read(cpu_stack_trace.hardirq_trace.last_timestamp);
 	__this_cpu_write(cpu_stack_trace.hardirq_trace.last_timestamp, now);
 
-	if (trace_irqoff_record(delta, true)) {
+	if (trace_irqoff_record(delta, true, true)) {
 		__this_cpu_write(cpu_stack_trace.softirq_trace.last_timestamp,
 				 now);
 	} else if (!__this_cpu_read(cpu_stack_trace.softirq_delayed)) {
@@ -189,9 +205,8 @@ static enum hrtimer_restart trace_irqoff_hrtimer_handler(struct hrtimer *hrtimer
 			__this_cpu_read(cpu_stack_trace.softirq_trace.last_timestamp);
 
 		if (unlikely(delta_soft >= trace_irqoff_latency)) {
-			__this_cpu_write(cpu_stack_trace.softirq_delayed,
-					 true);
-			trace_irqoff_record(delta_soft, false);
+			__this_cpu_write(cpu_stack_trace.softirq_delayed, true);
+			trace_irqoff_record(delta_soft, false, true);
 		}
 	}
 
@@ -209,17 +224,16 @@ static void trace_irqoff_timer_handler(struct timer_list *timer)
 
 	__this_cpu_write(cpu_stack_trace.softirq_delayed, false);
 
-	trace_irqoff_record(delta, false);
+	trace_irqoff_record(delta, false, false);
 
-	mod_timer(timer, jiffies + nsecs_to_jiffies(sampling_period));
+	mod_timer(timer,
+		  jiffies + msecs_to_jiffies(sampling_period / 1000000UL));
 }
 
 static void smp_clear_stack_trace(void *info)
 {
 	int i;
-	struct per_cpu_stack_trace *stack_trace;
-
-	stack_trace = this_cpu_ptr(&cpu_stack_trace);
+	struct per_cpu_stack_trace *stack_trace = info;
 
 	stack_trace->hardirq_trace.nr_entries = 0;
 	stack_trace->hardirq_trace.nr_irqoff_trace = 0;
@@ -239,8 +253,6 @@ static void smp_timers_start(void *info)
 	struct hrtimer *hrtimer = &stack_trace->hrtimer;
 	struct timer_list *timer = &stack_trace->timer;
 
-	smp_clear_stack_trace(NULL);
-
 	stack_trace->hardirq_trace.last_timestamp = now;
 	stack_trace->softirq_trace.last_timestamp = now;
 
@@ -248,17 +260,65 @@ static void smp_timers_start(void *info)
 			       sampling_period >> 3,
 			       HRTIMER_MODE_REL_PINNED);
 
-	timer->expires = jiffies + nsecs_to_jiffies(sampling_period);
+	timer->expires = jiffies + msecs_to_jiffies(sampling_period / 1000000UL);
 	add_timer_on(timer, smp_processor_id());
+}
+
+#define NUMBER_CHARACTER	40
+
+static bool histogram_show(struct seq_file *m, const char *header,
+			   const unsigned long *hist, unsigned long size,
+			   unsigned int factor)
+{
+	int i, zero_index = 0;
+	unsigned long count_max = 0;
+
+	for (i = 0; i < size; i++) {
+		unsigned long count = hist[i];
+
+		if (count > count_max)
+			count_max = count;
+
+		if (count)
+			zero_index = i + 1;
+	}
+	if (count_max == 0)
+		return false;
+
+	/* print header */
+	if (header)
+		seq_printf(m, "%s\n", header);
+	seq_printf(m, "%*c%s%*c : %-9s %s\n", 9, ' ', "msecs", 10, ' ', "count",
+		   "distribution");
+
+	for (i = 0; i < zero_index; i++) {
+		int num;
+		int scale_min, scale_max;
+		char str[NUMBER_CHARACTER + 1];
+
+		scale_max = 2 << i;
+		scale_min = unlikely(i == 0) ? 1 : scale_max / 2;
+
+		num = hist[i] * NUMBER_CHARACTER / count_max;
+		memset(str, '*', num);
+		memset(str + num, ' ', NUMBER_CHARACTER - num);
+		str[NUMBER_CHARACTER] = '\0';
+
+		seq_printf(m, "%10d -> %-10d : %-8lu |%s|\n",
+			   scale_min * factor, scale_max * factor - 1,
+			   hist[i], str);
+	}
+
+	return true;
 }
 
 static void distribute_show_one(struct seq_file *m, void *v, bool hardirq)
 {
-	int i, cpu;
-	int scale = (sampling_period << 1) / (1000 * 1000UL);
+	int cpu;
 	unsigned long latency_count[MAX_LATENCY_RECORD] = { 0 };
 
 	for_each_online_cpu(cpu) {
+		int i;
 		unsigned long *count;
 
 		count = hardirq ?
@@ -269,27 +329,14 @@ static void distribute_show_one(struct seq_file *m, void *v, bool hardirq)
 			latency_count[i] += count[i];
 	}
 
-	seq_puts(m, "scale(ms): ");
-	for (i = 0; i < MAX_LATENCY_RECORD; i++)
-		seq_printf(m, "%-6d ", scale << i);
-
-	seq_putc(m, '\n');
-
-	seq_puts(m, "count    : ");
-	for (i = 0; i < MAX_LATENCY_RECORD; i++)
-		seq_printf(m, "%-6lu ", latency_count[i]);
-
-	seq_putc(m, '\n');
+	histogram_show(m, hardirq ? "hardirq-off:" : "softirq-off:",
+		       latency_count, MAX_LATENCY_RECORD,
+		       (sampling_period << 1) / (1000 * 1000UL));
 }
 
 static int distribute_show(struct seq_file *m, void *v)
 {
-	seq_puts(m, "hardirq:\n");
 	distribute_show_one(m, v, true);
-
-	seq_putc(m, '\n');
-
-	seq_puts(m, "softirq:\n");
 	distribute_show_one(m, v, false);
 
 	return 0;
@@ -321,7 +368,8 @@ static ssize_t trace_latency_write(struct file *file, const char __user *buf,
 
 		for_each_online_cpu(cpu)
 			smp_call_function_single(cpu, smp_clear_stack_trace,
-						 NULL, true);
+						 per_cpu_ptr(&cpu_stack_trace, cpu),
+						 true);
 		return count;
 	} else if (latency < (sampling_period << 1) / (1000 * 1000UL))
 		return -EINVAL;
@@ -357,10 +405,11 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 		for (i = 0; i < nr_irqoff_trace; i++) {
 			struct irqoff_trace *trace = stack_trace->trace + i;
 
-			seq_printf(m, "%*cCOMMAND: %s PID: %d LATENCY: %llums\n",
+			seq_printf(m, "%*cCOMMAND: %s PID: %d LATENCY: %lu%s\n",
 				   5, ' ', stack_trace->comms[i],
 				   stack_trace->pids[i],
-				   stack_trace->latency[i] / (1000 * 1000UL));
+				   stack_trace->latency[i].nsecs / (1000 * 1000UL),
+				   stack_trace->latency[i].more ? "+ms" : "ms");
 			seq_print_stack_trace(m, trace);
 			seq_putc(m, '\n');
 		}
@@ -369,7 +418,7 @@ static void trace_latency_show_one(struct seq_file *m, void *v, bool hardirq)
 
 static int trace_latency_show(struct seq_file *m, void *v)
 {
-	seq_printf(m, "trace_irqoff_latency: %llu ms\n\n",
+	seq_printf(m, "trace_irqoff_latency: %llums\n\n",
 		   trace_irqoff_latency / (1000 * 1000UL));
 
 	seq_puts(m, " hardirq:\n");
@@ -520,6 +569,8 @@ static int __init trace_irqoff_init(void)
 {
 	struct proc_dir_entry *parent_dir;
 
+	stack_trace_skip_hardirq_init();
+
 	parent_dir = proc_mkdir("trace_irqoff", NULL);
 	if (!parent_dir)
 		return -ENOMEM;
@@ -555,12 +606,7 @@ static void __exit trace_irqoff_exit(void)
 {
 	if (trace_enable)
 		trace_irqoff_cancel_timers();
-
-	remove_proc_entry("trace_irqoff/sampling_period", NULL);
-	remove_proc_entry("trace_irqoff/enable", NULL);
-	remove_proc_entry("trace_irqoff/trace_latency", NULL);
-	remove_proc_entry("trace_irqoff/distribute", NULL);
-	remove_proc_entry("trace_irqoff", NULL);
+	remove_proc_subtree("trace_irqoff", NULL);
 }
 
 module_init(trace_irqoff_init);
