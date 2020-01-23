@@ -26,8 +26,6 @@
 #include <net/dst.h>
 #include <net/dst_metadata.h>
 
-#include <uapi/linux/netfilter/nf_conntrack_common.h>
-
 struct fl_flow_key {
 	struct flow_dissector_key_meta meta;
 	struct flow_dissector_key_control control;
@@ -61,7 +59,6 @@ struct fl_flow_key {
 			struct flow_dissector_key_ports tp_max;
 		};
 	} tp_range;
-	struct flow_dissector_key_ct ct;
 } __aligned(BITS_PER_LONG / 8); /* Ensure that we can do comparisons as longs. */
 
 struct fl_flow_mask_range {
@@ -280,27 +277,14 @@ static struct cls_fl_filter *fl_lookup(struct fl_flow_mask *mask,
 	return __fl_lookup(mask, mkey);
 }
 
-static u16 fl_ct_info_to_flower_map[] = {
-	[IP_CT_ESTABLISHED] =		TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED,
-	[IP_CT_RELATED] =		TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_RELATED,
-	[IP_CT_ESTABLISHED_REPLY] =	TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED,
-	[IP_CT_RELATED_REPLY] =		TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_RELATED,
-	[IP_CT_NEW] =			TCA_FLOWER_KEY_CT_FLAGS_TRACKED |
-					TCA_FLOWER_KEY_CT_FLAGS_NEW,
-};
-
 static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		       struct tcf_result *res)
 {
 	struct cls_fl_head *head = rcu_dereference_bh(tp->root);
-	struct fl_flow_key skb_mkey;
-	struct fl_flow_key skb_key;
-	struct fl_flow_mask *mask;
 	struct cls_fl_filter *f;
+	struct fl_flow_mask *mask;
+	struct fl_flow_key skb_key;
+	struct fl_flow_key skb_mkey;
 
 	list_for_each_entry_rcu(mask, &head->masks, list) {
 		flow_dissector_init_keys(&skb_key.control, &skb_key.basic);
@@ -312,9 +296,6 @@ static int fl_classify(struct sk_buff *skb, const struct tcf_proto *tp,
 		 */
 		skb_key.basic.n_proto = skb_protocol(skb, false);
 		skb_flow_dissect_tunnel_info(skb, &mask->dissector, &skb_key);
-		skb_flow_dissect_ct(skb, &mask->dissector, &skb_key,
-				    fl_ct_info_to_flower_map,
-				    ARRAY_SIZE(fl_ct_info_to_flower_map));
 		skb_flow_dissect(skb, &mask->dissector, &skb_key, 0);
 
 		fl_set_masked_key(&skb_mkey, &skb_key, mask);
@@ -680,16 +661,6 @@ static const struct nla_policy fl_policy[TCA_FLOWER_MAX + 1] = {
 	[TCA_FLOWER_KEY_ENC_IP_TTL_MASK] = { .type = NLA_U8 },
 	[TCA_FLOWER_KEY_ENC_OPTS]	= { .type = NLA_NESTED },
 	[TCA_FLOWER_KEY_ENC_OPTS_MASK]	= { .type = NLA_NESTED },
-	[TCA_FLOWER_KEY_CT_STATE]	= { .type = NLA_U16 },
-	[TCA_FLOWER_KEY_CT_STATE_MASK]	= { .type = NLA_U16 },
-	[TCA_FLOWER_KEY_CT_ZONE]	= { .type = NLA_U16 },
-	[TCA_FLOWER_KEY_CT_ZONE_MASK]	= { .type = NLA_U16 },
-	[TCA_FLOWER_KEY_CT_MARK]	= { .type = NLA_U32 },
-	[TCA_FLOWER_KEY_CT_MARK_MASK]	= { .type = NLA_U32 },
-	[TCA_FLOWER_KEY_CT_LABELS]	= { .type = NLA_BINARY,
-					    .len = 128 / BITS_PER_BYTE },
-	[TCA_FLOWER_KEY_CT_LABELS_MASK]	= { .type = NLA_BINARY,
-					    .len = 128 / BITS_PER_BYTE },
 	[TCA_FLOWER_FLAGS]		= { .type = NLA_U32 },
 };
 
@@ -712,11 +683,11 @@ static void fl_set_key_val(struct nlattr **tb,
 {
 	if (!tb[val_type])
 		return;
-	nla_memcpy(val, tb[val_type], len);
+	memcpy(val, nla_data(tb[val_type]), len);
 	if (mask_type == TCA_FLOWER_UNSPEC || !tb[mask_type])
 		memset(mask, 0xff, len);
 	else
-		nla_memcpy(mask, tb[mask_type], len);
+		memcpy(mask, nla_data(tb[mask_type]), len);
 }
 
 static int fl_set_key_port_range(struct nlattr **tb, struct fl_flow_key *key,
@@ -1004,51 +975,6 @@ static int fl_set_enc_opt(struct nlattr **tb, struct fl_flow_key *key,
 	return 0;
 }
 
-static int fl_set_key_ct(struct nlattr **tb,
-			 struct flow_dissector_key_ct *key,
-			 struct flow_dissector_key_ct *mask,
-			 struct netlink_ext_ack *extack)
-{
-	if (tb[TCA_FLOWER_KEY_CT_STATE]) {
-		if (!IS_ENABLED(CONFIG_NF_CONNTRACK)) {
-			NL_SET_ERR_MSG(extack, "Conntrack isn't enabled");
-			return -EOPNOTSUPP;
-		}
-		fl_set_key_val(tb, &key->ct_state, TCA_FLOWER_KEY_CT_STATE,
-			       &mask->ct_state, TCA_FLOWER_KEY_CT_STATE_MASK,
-			       sizeof(key->ct_state));
-	}
-	if (tb[TCA_FLOWER_KEY_CT_ZONE]) {
-		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_ZONES)) {
-			NL_SET_ERR_MSG(extack, "Conntrack zones isn't enabled");
-			return -EOPNOTSUPP;
-		}
-		fl_set_key_val(tb, &key->ct_zone, TCA_FLOWER_KEY_CT_ZONE,
-			       &mask->ct_zone, TCA_FLOWER_KEY_CT_ZONE_MASK,
-			       sizeof(key->ct_zone));
-	}
-	if (tb[TCA_FLOWER_KEY_CT_MARK]) {
-		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_MARK)) {
-			NL_SET_ERR_MSG(extack, "Conntrack mark isn't enabled");
-			return -EOPNOTSUPP;
-		}
-		fl_set_key_val(tb, &key->ct_mark, TCA_FLOWER_KEY_CT_MARK,
-			       &mask->ct_mark, TCA_FLOWER_KEY_CT_MARK_MASK,
-			       sizeof(key->ct_mark));
-	}
-	if (tb[TCA_FLOWER_KEY_CT_LABELS]) {
-		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_LABELS)) {
-			NL_SET_ERR_MSG(extack, "Conntrack labels aren't enabled");
-			return -EOPNOTSUPP;
-		}
-		fl_set_key_val(tb, key->ct_labels, TCA_FLOWER_KEY_CT_LABELS,
-			       mask->ct_labels, TCA_FLOWER_KEY_CT_LABELS_MASK,
-			       sizeof(key->ct_labels));
-	}
-
-	return 0;
-}
-
 static int fl_set_key(struct net *net, struct nlattr **tb,
 		      struct fl_flow_key *key, struct fl_flow_key *mask,
 		      struct netlink_ext_ack *extack)
@@ -1258,10 +1184,6 @@ static int fl_set_key(struct net *net, struct nlattr **tb,
 			return ret;
 	}
 
-	ret = fl_set_key_ct(tb, &key->ct, &mask->ct, extack);
-	if (ret)
-		return ret;
-
 	if (tb[TCA_FLOWER_KEY_FLAGS])
 		ret = fl_set_key_flags(tb, &key->control.flags, &mask->control.flags);
 
@@ -1363,8 +1285,6 @@ static void fl_init_dissector(struct flow_dissector *dissector,
 			     FLOW_DISSECTOR_KEY_ENC_IP, enc_ip);
 	FL_KEY_SET_IF_MASKED(mask, keys, cnt,
 			     FLOW_DISSECTOR_KEY_ENC_OPTS, enc_opts);
-	FL_KEY_SET_IF_MASKED(mask, keys, cnt,
-			     FLOW_DISSECTOR_KEY_CT, ct);
 
 	skb_flow_dissector_init(dissector, keys, cnt);
 }
@@ -2151,40 +2071,6 @@ nla_put_failure:
 	return -EMSGSIZE;
 }
 
-static int fl_dump_key_ct(struct sk_buff *skb,
-			  struct flow_dissector_key_ct *key,
-			  struct flow_dissector_key_ct *mask)
-{
-	if (IS_ENABLED(CONFIG_NF_CONNTRACK) &&
-	    fl_dump_key_val(skb, &key->ct_state, TCA_FLOWER_KEY_CT_STATE,
-			    &mask->ct_state, TCA_FLOWER_KEY_CT_STATE_MASK,
-			    sizeof(key->ct_state)))
-		goto nla_put_failure;
-
-	if (IS_ENABLED(CONFIG_NF_CONNTRACK_ZONES) &&
-	    fl_dump_key_val(skb, &key->ct_zone, TCA_FLOWER_KEY_CT_ZONE,
-			    &mask->ct_zone, TCA_FLOWER_KEY_CT_ZONE_MASK,
-			    sizeof(key->ct_zone)))
-		goto nla_put_failure;
-
-	if (IS_ENABLED(CONFIG_NF_CONNTRACK_MARK) &&
-	    fl_dump_key_val(skb, &key->ct_mark, TCA_FLOWER_KEY_CT_MARK,
-			    &mask->ct_mark, TCA_FLOWER_KEY_CT_MARK_MASK,
-			    sizeof(key->ct_mark)))
-		goto nla_put_failure;
-
-	if (IS_ENABLED(CONFIG_NF_CONNTRACK_LABELS) &&
-	    fl_dump_key_val(skb, &key->ct_labels, TCA_FLOWER_KEY_CT_LABELS,
-			    &mask->ct_labels, TCA_FLOWER_KEY_CT_LABELS_MASK,
-			    sizeof(key->ct_labels)))
-		goto nla_put_failure;
-
-	return 0;
-
-nla_put_failure:
-	return -EMSGSIZE;
-}
-
 static int fl_dump_key_options(struct sk_buff *skb, int enc_opt_type,
 			       struct flow_dissector_key_enc_opts *enc_opts)
 {
@@ -2416,9 +2302,6 @@ static int fl_dump_key(struct sk_buff *skb, struct net *net,
 			    sizeof(key->enc_tp.dst)) ||
 	    fl_dump_key_ip(skb, true, &key->enc_ip, &mask->enc_ip) ||
 	    fl_dump_key_enc_opt(skb, &key->enc_opts, &mask->enc_opts))
-		goto nla_put_failure;
-
-	if (fl_dump_key_ct(skb, &key->ct, &mask->ct))
 		goto nla_put_failure;
 
 	if (fl_dump_key_flags(skb, key->control.flags, mask->control.flags))
