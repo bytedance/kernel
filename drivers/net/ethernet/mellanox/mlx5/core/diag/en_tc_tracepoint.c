@@ -36,7 +36,6 @@ static const char FLOWACT2STR[NUM_FLOW_ACTIONS][NAME_SIZE] = {
 	[FLOW_ACTION_QUEUE]	= "QUEUE",
 	[FLOW_ACTION_SAMPLE]	= "SAMPLE",
 	[FLOW_ACTION_POLICE]	= "POLICE",
-	[FLOW_ACTION_CT]	= "CT",
 };
 
 const char *parse_action(struct trace_seq *p,
