@@ -1213,6 +1213,7 @@ do_append_data:
 	release_sock(sk);
 
 out:
+	trace_udp_send_length(sk, err == 0 ? len : 0, err, 0);
 	ip_rt_put(rt);
 out_free:
 	if (free)
@@ -1277,8 +1278,10 @@ int udp_sendpage(struct sock *sk, struct page *page, int offset,
 			     page, offset, size, flags);
 	if (ret == -EOPNOTSUPP) {
 		release_sock(sk);
-		return sock_no_sendpage(sk->sk_socket, page, offset,
+		ret = sock_no_sendpage(sk->sk_socket, page, offset,
 					size, flags);
+		trace_udp_send_length(sk, ret > 0 ? ret : 0, ret > 0 ? 0 : ret, 0);
+		return ret;
 	}
 	if (ret < 0) {
 		udp_flush_pending_frames(sk);
@@ -1290,6 +1293,7 @@ int udp_sendpage(struct sock *sk, struct page *page, int offset,
 		ret = udp_push_pending_frames(sk);
 	if (!ret)
 		ret = size;
+	trace_udp_send_length(sk, ret > 0 ? ret : 0, ret > 0 ? 0 : ret, 0);
 out:
 	release_sock(sk);
 	return ret;
@@ -1813,6 +1817,11 @@ try_again:
 	err = copied;
 	if (flags & MSG_TRUNC)
 		err = ulen;
+
+	trace_udp_recv_length(sk, (err > 0
+							&& !peeking) ? err : 0,
+							(err > 0
+							&& !peeking) ? 0 : err, flags);
 
 	skb_consume_udp(sk, skb, peeking ? -err : err);
 	return err;
