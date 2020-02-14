@@ -83,10 +83,10 @@ register_chrdev:
   *unloaded*/
 static void __exit cleanup_my_module(void)
 {
+	unregister_hookbind();
 	device_destroy(ebbcharClass, MKDEV(Major, 0));     // remove the device
 	class_destroy(ebbcharClass);                       // remove the device class
 	unregister_chrdev(Major, DEVICE_NAME);
-	unregister_hookbind();
 }
 module_init(init_my_module);
 module_exit(cleanup_my_module);
