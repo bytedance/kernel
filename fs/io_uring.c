@@ -2237,7 +2237,7 @@ static int io_read(struct io_kiocb *req, struct io_kiocb **nxt,
 
 	/* Ensure we clear previously set non-block flag */
 	if (!force_nonblock)
-		req->rw.kiocb.ki_flags &= ~IOCB_NOWAIT;
+		kiocb->ki_flags &= ~IOCB_NOWAIT;
 
 	req->result = 0;
 	io_size = ret;
@@ -2248,10 +2248,8 @@ static int io_read(struct io_kiocb *req, struct io_kiocb **nxt,
 	 * If the file doesn't support async, mark it as REQ_F_MUST_PUNT so
 	 * we know to async punt it even if it was opened O_NONBLOCK
 	 */
-	if (force_nonblock && !io_file_supports_async(req->file)) {
-		req->flags |= REQ_F_MUST_PUNT;
+	if (force_nonblock && !io_file_supports_async(req->file))
 		goto copy_iov;
-	}
 
 	iov_count = iov_iter_count(&iter);
 	ret = rw_verify_area(READ, req->file, &kiocb->ki_pos, iov_count);
@@ -2272,6 +2270,9 @@ copy_iov:
 						inline_vecs, &iter);
 			if (ret)
 				goto out_free;
+			/* any defer here is final, must blocking retry */
+			if (!(req->flags & REQ_F_NOWAIT))
+				req->flags |= REQ_F_MUST_PUNT;
 			return -EAGAIN;
 		}
 	}
@@ -2337,10 +2338,8 @@ static int io_write(struct io_kiocb *req, struct io_kiocb **nxt,
 	 * If the file doesn't support async, mark it as REQ_F_MUST_PUNT so
 	 * we know to async punt it even if it was opened O_NONBLOCK
 	 */
-	if (force_nonblock && !io_file_supports_async(req->file)) {
-		req->flags |= REQ_F_MUST_PUNT;
+	if (force_nonblock && !io_file_supports_async(req->file))
 		goto copy_iov;
-	}
 
 	/* file path doesn't support NOWAIT for non-direct_IO */
 	if (force_nonblock && !(kiocb->ki_flags & IOCB_DIRECT) &&
@@ -2385,6 +2384,8 @@ copy_iov:
 						inline_vecs, &iter);
 			if (ret)
 				goto out_free;
+			/* any defer here is final, must blocking retry */
+			req->flags |= REQ_F_MUST_PUNT;
 			return -EAGAIN;
 		}
 	}
