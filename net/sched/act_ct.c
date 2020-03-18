@@ -478,7 +478,7 @@ static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
 }
 
 static const struct nla_policy conntrack_policy[TCA_CONNTRACK_MAX + 1] = {
-	[TCA_CONNTRACK_PARMS] = { .len = sizeof(struct tc_conntrack) },
+	[TCA_CONNTRACK_PARMS] = { .type = NLA_EXACT_LEN, .len = sizeof(struct tc_conntrack) },
 	/* TODO: should be nested */
 	/* TODO: support IPv6 */
 	[TCA_CONNTRACK_NAT] = { .type = NLA_FLAG },
