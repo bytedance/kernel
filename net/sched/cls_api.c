@@ -37,6 +37,7 @@
 #include <net/tc_act/tc_sample.h>
 #include <net/tc_act/tc_skbedit.h>
 #include <net/tc_act/tc_mpls.h>
+#include <net/tc_act/tc_ct.h>
 #include <net/flow_offload.h>
 
 extern const struct nla_policy rtm_tca_policy[TCA_MAX + 1];
@@ -3610,6 +3611,8 @@ int tc_setup_flow_action(struct flow_action *flow_action,
 		} else if (is_tcf_skbedit_ptype(act)) {
 			entry->id = FLOW_ACTION_PTYPE;
 			entry->ptype = tcf_skbedit_ptype(act);
+		} else if (is_tcf_ct(act)) {
+			entry->id = FLOW_ACTION_CT;
 		} else {
 			err = -EOPNOTSUPP;
 			goto err_out;
