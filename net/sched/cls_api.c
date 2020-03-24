@@ -39,6 +39,7 @@
 #include <net/tc_act/tc_mpls.h>
 #include <net/tc_act/tc_ct.h>
 #include <net/flow_offload.h>
+#include <net/vxlan.h>
 
 extern const struct nla_policy rtm_tca_policy[TCA_MAX + 1];
 
@@ -3306,7 +3307,7 @@ int tc_setup_cb_call_all(struct tcf_block *block, enum tc_setup_type type, void 
 	struct flow_block_cb *block_cb;
 	int err;
 
-	if (block) {
+	if (block && !netif_is_vxlan(block->q->dev_queue->dev)) {
 		/* Assumption: this list has only one element (rep) */
 		list_for_each_entry(block_cb, &block->flow_block.cb_list, list) {
 			err = block_cb->cb(type, type_data,
