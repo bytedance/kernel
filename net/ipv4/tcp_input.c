@@ -6658,6 +6658,8 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 		fastopen_sk = tcp_try_fastopen(sk, skb, req, &foc, dst);
 	}
 	if (fastopen_sk) {
+		struct tcp_sock * tsk = tcp_sk(fastopen_sk);
+		struct tcp_request_sock *treq = tcp_rsk(req);
 		af_ops->send_synack(fastopen_sk, dst, &fl, req,
 				    &foc, TCP_SYNACK_FASTOPEN);
 		/* Add the child socket directly into the accept queue */
@@ -6667,6 +6669,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 			sock_put(fastopen_sk);
 			goto drop_and_free;
 		}
+		tsk->tfo_info = treq->tfo_info;
 		sk->sk_data_ready(sk);
 		bh_unlock_sock(fastopen_sk);
 		sock_put(fastopen_sk);

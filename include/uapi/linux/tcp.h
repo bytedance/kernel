@@ -22,6 +22,16 @@
 #include <asm/byteorder.h>
 #include <linux/socket.h>
 
+#define TCP_COOKIEREQ		(1 << 0)
+#define TCP_COOKIERSP		(1 << 1)
+#define TCP_COOKIE		(1 << 2)
+#define TCP_FASTOPEN_SC	(1 << 3)
+#define TCP_ERR_COOKIE		(1 << 4)
+#define TCP_ERR_OVERFLOW	(1 << 5)
+#define TCP_ERR_OTHER		(1 << 31)
+
+
+
 struct tcphdr {
 	__be16	source;
 	__be16	dest;
@@ -276,6 +286,7 @@ struct tcp_info {
 	__u32	tcpi_snd_wnd;	     /* peer's advertised receive window after
 				      * scaling (bytes)
 				      */
+	__u32	tfo_info;
 };
 
 /* netlink attributes types for SCM_TIMESTAMPING_OPT_STATS */
