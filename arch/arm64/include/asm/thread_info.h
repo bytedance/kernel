@@ -41,6 +41,9 @@ struct thread_info {
 #endif
 		} preempt;
 	};
+#ifdef CONFIG_TANGO_BT
+	int			tango_syscall;	/* tango 32-bit syscall */
+#endif
 };
 
 #define thread_saved_pc(tsk)	\
