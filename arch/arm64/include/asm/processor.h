@@ -165,7 +165,7 @@ static inline void arch_thread_struct_whitelist(unsigned long *offset,
 #define task_user_tls(t)						\
 ({									\
 	unsigned long *__tls;						\
-	if (is_compat_thread(task_thread_info(t)))			\
+	if (is_aarch32_compat_thread(task_thread_info(t)))			\
 		__tls = &(t)->thread.uw.tp2_value;			\
 	else								\
 		__tls = &(t)->thread.uw.tp_value;			\
@@ -254,8 +254,31 @@ extern struct task_struct *cpu_switch_to(struct task_struct *prev,
 #define task_pt_regs(p) \
 	((struct pt_regs *)(THREAD_SIZE + task_stack_page(p)) - 1)
 
+#ifdef CONFIG_TANGO_BT
+
+#define KSTK_EIP(tsk)							\
+({									\
+	unsigned long __out;						\
+	if (task_thread_info(tsk)->tango_syscall)			\
+		__out = (unsigned long)task_pt_regs(tsk)->regs[15];	\
+	else								\
+		__out = (unsigned long)task_pt_regs(tsk)->pc;		\
+	__out;								\
+ })
+#define KSTK_ESP(tsk)							\
+({									\
+	unsigned long __out;						\
+	if (task_thread_info(tsk)->tango_syscall)			\
+		__out = (unsigned long)task_pt_regs(tsk)->regs[13];	\
+	else								\
+		__out = user_stack_pointer(task_pt_regs(tsk));		\
+	__out;								\
+ })
+
+#else
 #define KSTK_EIP(tsk)	((unsigned long)task_pt_regs(tsk)->pc)
 #define KSTK_ESP(tsk)	user_stack_pointer(task_pt_regs(tsk))
+#endif
 
 /*
  * Prefetching support

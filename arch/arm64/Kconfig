@@ -1046,6 +1046,16 @@ config XEN
 	help
 	  Say Y if you want to run Linux in a Virtual Machine on Xen on ARM64.
 
+config TANGO_BT
+	bool "Tango binary translator support"
+	depends on COMPAT
+	select CHECKPOINT_RESTORE
+	select BINFMT_MISC
+	default y
+	help
+	  Kernel support for the Tango binary translator which dynamically
+	  translates 32-bit ARM binaries into 64-bit code.
+
 config FORCE_MAX_ZONEORDER
 	int
 	default "14" if (ARM64_64K_PAGES && TRANSPARENT_HUGEPAGE)

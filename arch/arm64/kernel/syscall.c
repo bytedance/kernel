@@ -21,7 +21,7 @@ static long do_ni_syscall(struct pt_regs *regs, int scno)
 {
 #ifdef CONFIG_COMPAT
 	long ret;
-	if (is_compat_task()) {
+	if (is_aarch32_compat_task()) {
 		ret = compat_arm_syscall(regs, scno);
 		if (ret != -ENOSYS)
 			return ret;
@@ -122,6 +122,9 @@ static void el0_svc_common(struct pt_regs *regs, int scno, int sc_nr,
 		local_daif_mask();
 		flags = current_thread_info()->flags;
 		if (!has_syscall_work(flags)) {
+#ifdef CONFIG_TANGO_BT
+			current_thread_info()->tango_syscall = 0;
+#endif
 			/*
 			 * We're off to userspace, where interrupts are
 			 * always enabled after we restore the flags from
@@ -135,6 +138,9 @@ static void el0_svc_common(struct pt_regs *regs, int scno, int sc_nr,
 
 trace_exit:
 	syscall_trace_exit(regs);
+#ifdef CONFIG_TANGO_BT
+	current_thread_info()->tango_syscall = 0;
+#endif
 }
 
 static inline void sve_user_discard(void)
@@ -157,6 +163,13 @@ static inline void sve_user_discard(void)
 asmlinkage void el0_svc_handler(struct pt_regs *regs)
 {
 	sve_user_discard();
+#ifdef CONFIG_TANGO_BT
+	if (regs->regs[8] & 0x80000000) {
+		current_thread_info()->tango_syscall = 1;
+		el0_svc_common(regs, regs->regs[7], __NR_compat_syscalls,
+			       compat_sys_call_table);
+	} else
+#endif
 	el0_svc_common(regs, regs->regs[8], __NR_syscalls, sys_call_table);
 }
 
