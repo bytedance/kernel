@@ -20,6 +20,9 @@ typedef struct {
 	atomic64_t	id;
 	void		*vdso;
 	unsigned long	flags;
+#ifdef CONFIG_TANGO_BT
+	unsigned long	tango_mmap_base;
+#endif
 } mm_context_t;
 
 /*
@@ -128,6 +131,10 @@ extern void create_pgd_mapping(struct mm_struct *mm, phys_addr_t phys,
 			       pgprot_t prot, bool page_mappings_only);
 extern void *fixmap_remap_fdt(phys_addr_t dt_phys, int *size, pgprot_t prot);
 extern void mark_linear_text_alias_ro(void);
+
+#ifdef CONFIG_TANGO_BT
+extern void process_init_tango_mmap(void);
+#endif
 
 #define INIT_MM_CONTEXT(name)	\
 	.pgd = init_pg_dir,

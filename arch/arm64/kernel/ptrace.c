@@ -175,7 +175,7 @@ static void ptrace_hbptriggered(struct perf_event *bp,
 	const char *desc = "Hardware breakpoint trap (ptrace)";
 
 #ifdef CONFIG_COMPAT
-	if (is_compat_task()) {
+	if (is_aarch32_compat_task()) {
 		int si_errno = 0;
 		int i;
 
@@ -1788,7 +1788,7 @@ const struct user_regset_view *task_user_regset_view(struct task_struct *task)
 	 */
 	if (is_compat_task())
 		return &user_aarch32_view;
-	else if (is_compat_thread(task_thread_info(task)))
+	else if (is_aarch32_compat_thread(task_thread_info(task)))
 		return &user_aarch32_ptrace_view;
 #endif
 	return &user_aarch64_view;
@@ -1951,7 +1951,7 @@ int valid_user_regs(struct user_pt_regs *regs, struct task_struct *task)
 	/* https://lore.kernel.org/lkml/20191118131525.GA4180@willie-the-truck */
 	user_regs_reset_single_step(regs, task);
 
-	if (is_compat_thread(task_thread_info(task)))
+	if (is_aarch32_compat_thread(task_thread_info(task)))
 		return valid_compat_regs(regs);
 	else
 		return valid_native_regs(regs);
