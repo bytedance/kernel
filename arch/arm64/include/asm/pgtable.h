@@ -861,6 +861,16 @@ static inline void update_mmu_cache(struct vm_area_struct *vma,
 #define phys_to_ttbr(addr)	(addr)
 #endif
 
+/*
+ * We provide our own arch_get_unmapped_area to handle 32-bit mmap calls from
+ * tango.
+ */
+#ifdef CONFIG_TANGO_BT
+#define HAVE_ARCH_UNMAPPED_AREA
+#define HAVE_ARCH_UNMAPPED_AREA_TOPDOWN
+#define HAVE_ARCH_HUGETLB_UNMAPPED_AREA
+#endif
+
 #endif /* !__ASSEMBLY__ */
 
 #endif /* __ASM_PGTABLE_H */
