@@ -756,19 +756,32 @@ static int smmu_pmu_probe(struct platform_device *pdev)
 		.capabilities	= PERF_PMU_CAP_NO_EXCLUDE,
 	};
 
+	/*
+	 * If the PMCG registers are embedded into the SMMU regions, the
+	 * resources have to be shared with the SMMU driver. Use ioremap()
+	 * rather than ioremap_resource() to avoid conflicts.
+	 */
 	res_0 = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	smmu_pmu->reg_base = devm_ioremap_resource(dev, res_0);
-	if (IS_ERR(smmu_pmu->reg_base))
-		return PTR_ERR(smmu_pmu->reg_base);
+	if (!res_0)
+		return -ENXIO;
+
+	smmu_pmu->reg_base = devm_ioremap(dev, res_0->start,
+					  resource_size(res_0));
+	if (!smmu_pmu->reg_base)
+		return -ENOMEM;
 
 	cfgr = readl_relaxed(smmu_pmu->reg_base + SMMU_PMCG_CFGR);
 
 	/* Determine if page 1 is present */
 	if (cfgr & SMMU_PMCG_CFGR_RELOC_CTRS) {
 		res_1 = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-		smmu_pmu->reloc_base = devm_ioremap_resource(dev, res_1);
-		if (IS_ERR(smmu_pmu->reloc_base))
-			return PTR_ERR(smmu_pmu->reloc_base);
+		if (!res_1)
+			return -ENXIO;
+
+		smmu_pmu->reloc_base = devm_ioremap(dev, res_1->start,
+						    resource_size(res_1));
+		if (!smmu_pmu->reloc_base)
+			return -ENOMEM;
 	} else {
 		smmu_pmu->reloc_base = smmu_pmu->reg_base;
 	}
