@@ -184,9 +184,17 @@ ENTRY(copy_user_generic_string)
 	ret
 
 	.section .fixup,"ax"
-11:	leal (%rdx,%rcx,8),%ecx
-12:	movl %ecx,%edx		/* ecx is zerorest also */
+11:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 14f
+	leal (%rdx,%rcx,8),%ecx
+	jmp 13f
+12:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 14f
+13:	movl %ecx,%edx		/* ecx is zerorest also */
 	jmp .Lcopy_user_handle_tail
+14:	movl %ecx,%eax		/* return uncopied bytes */
+	ASM_CLAC
+	ret
 	.previous
 
 	_ASM_EXTABLE_CPY_UA(1b, 11b)
