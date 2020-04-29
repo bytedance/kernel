@@ -209,8 +209,13 @@ ENTRY(copy_user_enhanced_fast_string)
 	ret
 
 	.section .fixup,"ax"
-12:	movl %ecx,%edx		/* ecx is zerorest also */
+12:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 13f
+	movl %ecx,%edx		/* ecx is zerorest also */
 	jmp .Lcopy_user_handle_tail
+13:	movl %ecx,%eax		/* return uncopied bytes */
+	ASM_CLAC
+	ret
 	.previous
 
 	_ASM_EXTABLE_CPY_UA(1b, 12b)
