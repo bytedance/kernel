@@ -107,13 +107,22 @@ ENTRY(copy_user_generic_unrolled)
 	ret
 
 	.section .fixup,"ax"
-30:	shll $6,%ecx
+30:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 70f
+	shll $6,%ecx
 	addl %ecx,%edx
 	jmp 60f
-40:	leal (%rdx,%rcx,8),%edx
+40:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 70f
+	leal (%rdx,%rcx,8),%edx
 	jmp 60f
-50:	movl %ecx,%edx
+50:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 70f
+	movl %ecx,%edx
 60:	jmp .Lcopy_user_handle_tail /* ecx is zerorest also */
+70:	movl %ecx,%eax		/* return uncopied bytes */
+	ASM_CLAC
+	ret
 	.previous
 
 	_ASM_EXTABLE_CPY_UA(1b, 30b)
