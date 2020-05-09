@@ -9519,17 +9519,16 @@ M:	Jiri Kosina <jikos@kernel.org>
 M:	Miroslav Benes <mbenes@suse.cz>
 M:	Petr Mladek <pmladek@suse.com>
 R:	Joe Lawrence <joe.lawrence@redhat.com>
+L:	live-patching@vger.kernel.org
 S:	Maintained
-F:	kernel/livepatch/
-F:	include/linux/livepatch.h
-F:	arch/x86/include/asm/livepatch.h
-F:	arch/x86/kernel/livepatch.c
-F:	Documentation/livepatch/
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/livepatching/livepatching.git
 F:	Documentation/ABI/testing/sysfs-kernel-livepatch
+F:	Documentation/livepatch/
+F:	arch/x86/include/asm/livepatch.h
+F:	include/linux/livepatch.h
+F:	kernel/livepatch/
 F:	samples/livepatch/
 F:	tools/testing/selftests/livepatch/
-L:	live-patching@vger.kernel.org
-T:	git git://git.kernel.org/pub/scm/linux/kernel/git/livepatching/livepatching.git
 
 LLC (802.2)
 L:	netdev@vger.kernel.org
