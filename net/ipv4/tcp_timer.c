@@ -23,6 +23,18 @@
 #include <linux/gfp.h>
 #include <net/tcp.h>
 
+/* default value is 200ms */
+int sysctl_tcp_rto_min __read_mostly = 200;
+EXPORT_SYMBOL(sysctl_tcp_rto_min);
+
+/* default value is 120s */
+int sysctl_tcp_rto_max __read_mostly = 120;
+EXPORT_SYMBOL(sysctl_tcp_rto_max);
+
+/* default init timeout is 1s*/
+int sysctl_tcp_init_rto __read_mostly = 1000;
+EXPORT_SYMBOL(sysctl_tcp_init_rto);
+
 static u32 tcp_clamp_rto_to_user_timeout(const struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
@@ -89,7 +101,7 @@ int tcp_out_of_resources(struct sock *sk, bool do_reset)
 
 	/* If peer does not open window for long time, or did not transmit
 	 * anything for long time, penalize it. */
-	if ((s32)(tcp_jiffies32 - tp->lsndtime) > 2*TCP_RTO_MAX || !do_reset)
+	if ((s32)(tcp_jiffies32 - tp->lsndtime) > 2*ORIG_TCP_RTO_MAX || !do_reset)
 		shift++;
 
 	/* If some dubious ICMP arrived, penalize even more. */
@@ -480,7 +492,7 @@ void tcp_retransmit_timer(struct sock *sk)
 					    tp->snd_una, tp->snd_nxt);
 		}
 #endif
-		if (tcp_jiffies32 - tp->rcv_tstamp > TCP_RTO_MAX) {
+		if (tcp_jiffies32 - tp->rcv_tstamp > ORIG_TCP_RTO_MAX) {
 			tcp_write_err(sk);
 			goto out;
 		}
