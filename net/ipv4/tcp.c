@@ -420,6 +420,8 @@ void tcp_init_sock(struct sock *sk)
 
 	icsk->icsk_rto = TCP_TIMEOUT_INIT;
 	tp->mdev_us = jiffies_to_usecs(TCP_TIMEOUT_INIT);
+	tp->rto_max_thresh = TCP_RTO_MAX;
+	tp->rto_min_thresh = TCP_RTO_MIN;
 	minmax_reset(&tp->rtt_min, tcp_jiffies32, ~0U);
 
 	/* So many TCP implementations out there (incorrectly) count the

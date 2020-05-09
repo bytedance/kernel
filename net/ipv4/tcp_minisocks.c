@@ -496,6 +496,8 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 
 	minmax_reset(&newtp->rtt_min, tcp_jiffies32, ~0U);
 	newicsk->icsk_ack.lrcvtime = tcp_jiffies32;
+	newtp->rto_max_thresh = TCP_RTO_MAX;
+	newtp->rto_min_thresh = TCP_RTO_MIN;
 	newtp->lsndtime = tcp_jiffies32;
 	newsk->sk_txhash = treq->txhash;
 	newtp->total_retrans = req->num_retrans;
