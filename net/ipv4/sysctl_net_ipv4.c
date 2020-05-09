@@ -28,8 +28,10 @@
 #include <net/protocol.h>
 #include <net/netevent.h>
 
+static int one = 1;
 static int two = 2;
 static int four = 4;
+static int ten = 10;
 static int thousand = 1000;
 static int gso_max_segs = GSO_MAX_SEGS;
 static int tcp_retr1_max = 255;
@@ -603,6 +605,30 @@ static struct ctl_table ipv4_table[] = {
 		.data		= &tcp_tx_skb_cache_key.key,
 		.mode		= 0644,
 		.proc_handler	= proc_do_static_key,
+	},
+	{
+		.procname	= "tcp_rto_min",
+		.data		= &sysctl_tcp_rto_min,
+		.maxlen		= sizeof(sysctl_tcp_rto_min),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &four,
+	},
+	{
+		.procname	= "tcp_rto_max",
+		.data		= &sysctl_tcp_rto_max,
+		.maxlen		= sizeof(sysctl_tcp_rto_max),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "tcp_init_rto",
+		.data		= &sysctl_tcp_init_rto,
+		.maxlen		= sizeof(sysctl_tcp_init_rto),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &four,
+		.extra2		= &thousand,
 	},
 	{ }
 };
@@ -1314,6 +1340,22 @@ static struct ctl_table ipv4_net_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec_minmax,
 		.extra1		= SYSCTL_ONE
+	},
+	{
+		.procname	= "tcp_init_cwnd",
+		.data		= &init_net.ipv4.sysctl_tcp_init_cwnd,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &ten
+	},
+	{
+		.procname	= "tcp_loss_init_cwnd",
+		.data		= &init_net.ipv4.sysctl_tcp_loss_init_cwnd,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &one
 	},
 	{ }
 };
