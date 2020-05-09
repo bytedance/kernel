@@ -648,7 +648,7 @@ EXPORT_SYMBOL(tcp_v4_send_check);
  *	Exception: precedence violation. We do not implement it in any case.
  */
 
-static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
+void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 {
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct {
@@ -794,6 +794,7 @@ out:
 	rcu_read_unlock();
 #endif
 }
+EXPORT_SYMBOL(tcp_v4_send_reset);
 
 /* The code following below sending ACKs in SYN-RECV and TIME-WAIT states
    outside socket context is ugly, certainly. What can I do?
@@ -885,7 +886,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	local_bh_enable();
 }
 
-static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
+void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 {
 	struct inet_timewait_sock *tw = inet_twsk(sk);
 	struct tcp_timewait_sock *tcptw = tcp_twsk(sk);
@@ -903,6 +904,7 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 
 	inet_twsk_put(tw);
 }
+EXPORT_SYMBOL(tcp_v4_timewait_ack);
 
 static void tcp_v4_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 				  struct request_sock *req)
@@ -1139,7 +1141,7 @@ int tcp_md5_do_del(struct sock *sk, const union tcp_md5_addr *addr, int family,
 }
 EXPORT_SYMBOL(tcp_md5_do_del);
 
-static void tcp_clear_md5_list(struct sock *sk)
+void tcp_clear_md5_list(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_md5sig_key *key;
@@ -1154,6 +1156,7 @@ static void tcp_clear_md5_list(struct sock *sk)
 		kfree_rcu(key, rcu);
 	}
 }
+EXPORT_SYMBOL(tcp_clear_md5_list);
 
 static int tcp_v4_parse_md5_keys(struct sock *sk, int optname,
 				 char __user *optval, int optlen)
@@ -1296,7 +1299,7 @@ EXPORT_SYMBOL(tcp_v4_md5_hash_skb);
 #endif
 
 /* Called with rcu_read_lock() */
-static bool tcp_v4_inbound_md5_hash(const struct sock *sk,
+bool tcp_v4_inbound_md5_hash(const struct sock *sk,
 				    const struct sk_buff *skb)
 {
 #ifdef CONFIG_TCP_MD5SIG
@@ -1353,6 +1356,7 @@ static bool tcp_v4_inbound_md5_hash(const struct sock *sk,
 #endif
 	return false;
 }
+EXPORT_SYMBOL(tcp_v4_inbound_md5_hash);
 
 static void tcp_v4_init_req(struct request_sock *req,
 			    const struct sock *sk_listener,
@@ -1520,7 +1524,7 @@ put_and_exit:
 }
 EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
 
-static struct sock *tcp_v4_cookie_check(struct sock *sk, struct sk_buff *skb)
+struct sock *tcp_v4_cookie_check(struct sock *sk, struct sk_buff *skb)
 {
 #ifdef CONFIG_SYN_COOKIES
 	const struct tcphdr *th = tcp_hdr(skb);
@@ -1530,6 +1534,7 @@ static struct sock *tcp_v4_cookie_check(struct sock *sk, struct sk_buff *skb)
 #endif
 	return sk;
 }
+EXPORT_SYMBOL(tcp_v4_cookie_check);
 
 u16 tcp_v4_get_syncookie(struct sock *sk, struct iphdr *iph,
 			 struct tcphdr *th, u32 *cookie)
@@ -1782,13 +1787,14 @@ int tcp_filter(struct sock *sk, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(tcp_filter);
 
-static void tcp_v4_restore_cb(struct sk_buff *skb)
+void tcp_v4_restore_cb(struct sk_buff *skb)
 {
 	memmove(IPCB(skb), &TCP_SKB_CB(skb)->header.h4,
 		sizeof(struct inet_skb_parm));
 }
+EXPORT_SYMBOL(tcp_v4_restore_cb);
 
-static void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
+void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
 			   const struct tcphdr *th)
 {
 	/* This is tricky : We move IPCB at its correct location into TCP_SKB_CB()
@@ -1809,6 +1815,7 @@ static void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
 	TCP_SKB_CB(skb)->has_rxtstamp =
 			skb->tstamp || skb_hwtstamps(skb)->hwtstamp;
 }
+EXPORT_SYMBOL(tcp_v4_fill_cb);
 
 /*
  *	From tcp_input.c
@@ -2053,7 +2060,7 @@ void inet_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb)
 }
 EXPORT_SYMBOL(inet_sk_rx_dst_set);
 
-const struct inet_connection_sock_af_ops ipv4_specific = {
+struct inet_connection_sock_af_ops ipv4_specific = {
 	.queue_xmit	   = ip_queue_xmit,
 	.send_check	   = tcp_v4_send_check,
 	.rebuild_header	   = inet_sk_rebuild_header,

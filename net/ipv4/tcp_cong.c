@@ -210,6 +210,7 @@ void tcp_cleanup_congestion_control(struct sock *sk)
 		icsk->icsk_ca_ops->release(sk);
 	module_put(icsk->icsk_ca_ops->owner);
 }
+EXPORT_SYMBOL(tcp_cleanup_congestion_control);
 
 /* Used by sysctl to change default congestion control */
 int tcp_set_default_congestion_control(struct net *net, const char *name)

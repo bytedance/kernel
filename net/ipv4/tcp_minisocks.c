@@ -397,11 +397,12 @@ void tcp_openreq_init_rwin(struct request_sock *req,
 }
 EXPORT_SYMBOL(tcp_openreq_init_rwin);
 
-static void tcp_ecn_openreq_child(struct tcp_sock *tp,
+void tcp_ecn_openreq_child(struct tcp_sock *tp,
 				  const struct request_sock *req)
 {
 	tp->ecn_flags = inet_rsk(req)->ecn_ok ? TCP_ECN_OK : 0;
 }
+EXPORT_SYMBOL(tcp_ecn_openreq_child);
 
 void tcp_ca_openreq_child(struct sock *sk, const struct dst_entry *dst)
 {
@@ -432,7 +433,7 @@ void tcp_ca_openreq_child(struct sock *sk, const struct dst_entry *dst)
 }
 EXPORT_SYMBOL_GPL(tcp_ca_openreq_child);
 
-static void smc_check_reset_syn_req(struct tcp_sock *oldtp,
+void smc_check_reset_syn_req(struct tcp_sock *oldtp,
 				    struct request_sock *req,
 				    struct tcp_sock *newtp)
 {
@@ -446,6 +447,7 @@ static void smc_check_reset_syn_req(struct tcp_sock *oldtp,
 	}
 #endif
 }
+EXPORT_SYMBOL(smc_check_reset_syn_req);
 
 /* This is not only more efficient than what we used to do, it eliminates
  * a lot of code duplication between IPv4/IPv6 SYN recv processing. -DaveM
@@ -494,7 +496,6 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 
 	minmax_reset(&newtp->rtt_min, tcp_jiffies32, ~0U);
 	newicsk->icsk_ack.lrcvtime = tcp_jiffies32;
-
 	newtp->lsndtime = tcp_jiffies32;
 	newsk->sk_txhash = treq->txhash;
 	newtp->total_retrans = req->num_retrans;

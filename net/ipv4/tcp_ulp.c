@@ -128,6 +128,7 @@ void tcp_cleanup_ulp(struct sock *sk)
 
 	icsk->icsk_ulp_ops = NULL;
 }
+EXPORT_SYMBOL(tcp_cleanup_ulp);
 
 static int __tcp_set_ulp(struct sock *sk, const struct tcp_ulp_ops *ulp_ops)
 {
