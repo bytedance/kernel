@@ -3164,6 +3164,12 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			tcp_enable_tx_delay();
 		tp->tcp_tx_delay = val;
 		break;
+	case TCP_INIT_SNDCWND:
+		if(val <= TCP_INIT_CWND)
+			err = -EINVAL;
+		else
+			tp->snd_cwnd = val;
+		break;
 	default:
 		err = -ENOPROTOOPT;
 		break;
