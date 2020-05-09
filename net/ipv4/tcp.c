@@ -3150,6 +3150,12 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			tcp_enable_tx_delay();
 		tp->tcp_tx_delay = val;
 		break;
+	case TCP_INIT_SNDCWND:
+		if(val <= TCP_INIT_CWND)
+			err = -EINVAL;
+		else
+			tp->snd_cwnd = val;
+		break;
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -3316,6 +3322,7 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 	info->tcpi_reord_seen = tp->reord_seen;
 	info->tcpi_rcv_ooopack = tp->rcv_ooopack;
 	info->tcpi_snd_wnd = tp->snd_wnd;
+	info->tfo_info = tp->tfo_info;
 	unlock_sock_fast(sk, slow);
 }
 EXPORT_SYMBOL_GPL(tcp_get_info);
