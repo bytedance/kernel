@@ -3104,6 +3104,7 @@ unsigned int skb_rbtree_purge(struct rb_root *root)
 	}
 	return sum;
 }
+EXPORT_SYMBOL(skb_rbtree_purge);
 
 /**
  *	skb_queue_head - queue a buffer at the list head
