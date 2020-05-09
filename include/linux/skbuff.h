@@ -882,6 +882,8 @@ struct sk_buff {
 	unsigned int		truesize;
 	refcount_t		users;
 
+	/* Tcpa reserved buffer. */
+	char			tcpa_skb_priv[32];
 #ifdef CONFIG_SKB_EXTENSIONS
 	/* only useable after checking ->active_extensions != 0 */
 	struct skb_ext		*extensions;

@@ -511,6 +511,12 @@ struct sock {
 	struct bpf_sk_storage __rcu	*sk_bpf_storage;
 #endif
 	struct rcu_head		sk_rcu;
+
+	/*  TCPA SPECIFIC */
+	void			*tcpa_priv1;
+	void			*tcpa_priv2;
+	void			*tcpa_priv3;
+	u32			tcpa_priv4;
 };
 
 enum sk_pacing {
