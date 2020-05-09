@@ -47,7 +47,7 @@ static u32 tcp_clamp_rto_to_user_timeout(const struct sock *sk)
  *  Returns: Nothing (void)
  */
 
-static void tcp_write_err(struct sock *sk)
+void tcp_write_err(struct sock *sk)
 {
 	sk->sk_err = sk->sk_err_soft ? : ETIMEDOUT;
 	sk->sk_error_report(sk);
@@ -56,6 +56,7 @@ static void tcp_write_err(struct sock *sk)
 	tcp_done(sk);
 	__NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPABORTONTIMEOUT);
 }
+EXPORT_SYMBOL(tcp_write_err);
 
 /**
  *  tcp_out_of_resources() - Close socket if out of resources
@@ -81,7 +82,7 @@ static void tcp_write_err(struct sock *sk)
  *  2. If we have strong memory pressure.
  *  3. If our net namespace is exiting.
  */
-static int tcp_out_of_resources(struct sock *sk, bool do_reset)
+int tcp_out_of_resources(struct sock *sk, bool do_reset)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	int shift = 0;
@@ -117,6 +118,7 @@ static int tcp_out_of_resources(struct sock *sk, bool do_reset)
 
 	return 0;
 }
+EXPORT_SYMBOL(tcp_out_of_resources);
 
 /**
  *  tcp_orphan_retries() - Returns maximal number of retries on an orphaned socket
@@ -139,7 +141,7 @@ static int tcp_orphan_retries(struct sock *sk, bool alive)
 	return retries;
 }
 
-static void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
+void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
 {
 	const struct net *net = sock_net(sk);
 	int mss;
@@ -160,8 +162,9 @@ static void tcp_mtu_probing(struct inet_connection_sock *icsk, struct sock *sk)
 	}
 	tcp_sync_mss(sk, icsk->icsk_pmtu_cookie);
 }
+EXPORT_SYMBOL(tcp_mtu_probing);
 
-static unsigned int tcp_model_timeout(struct sock *sk,
+unsigned int tcp_model_timeout(struct sock *sk,
 				      unsigned int boundary,
 				      unsigned int rto_base)
 {
@@ -175,6 +178,7 @@ static unsigned int tcp_model_timeout(struct sock *sk,
 			(boundary - linear_backoff_thresh) * TCP_RTO_MAX;
 	return jiffies_to_msecs(timeout);
 }
+EXPORT_SYMBOL(tcp_model_timeout);
 /**
  *  retransmits_timed_out() - returns true if this connection has timed out
  *  @sk:       The current socket
@@ -188,7 +192,7 @@ static unsigned int tcp_model_timeout(struct sock *sk,
  * after "boundary" unsuccessful, exponentially backed-off
  * retransmissions with an initial RTO of TCP_RTO_MIN.
  */
-static bool retransmits_timed_out(struct sock *sk,
+bool retransmits_timed_out(struct sock *sk,
 				  unsigned int boundary,
 				  unsigned int timeout)
 {
@@ -208,6 +212,7 @@ static bool retransmits_timed_out(struct sock *sk,
 
 	return (s32)(tcp_time_stamp(tcp_sk(sk)) - start_ts - timeout) >= 0;
 }
+EXPORT_SYMBOL(retransmits_timed_out);
 
 /* A write timeout has occurred. Process the after effects. */
 static int tcp_write_timeout(struct sock *sk)
@@ -386,7 +391,7 @@ abort:		tcp_write_err(sk);
  *	Timer for Fast Open socket to retransmit SYNACK. Note that the
  *	sk here is the child socket, not the parent (listener) socket.
  */
-static void tcp_fastopen_synack_timer(struct sock *sk, struct request_sock *req)
+void tcp_fastopen_synack_timer(struct sock *sk, struct request_sock *req)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int max_retries = icsk->icsk_syn_retries ? :
@@ -415,7 +420,7 @@ static void tcp_fastopen_synack_timer(struct sock *sk, struct request_sock *req)
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 			  TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
 }
-
+EXPORT_SYMBOL(tcp_fastopen_synack_timer);
 
 /**
  *  tcp_retransmit_timer() - The TCP retransmit timeout handler
@@ -607,6 +612,7 @@ void tcp_write_timer_handler(struct sock *sk)
 out:
 	sk_mem_reclaim(sk);
 }
+EXPORT_SYMBOL(tcp_write_timer_handler);
 
 static void tcp_write_timer(struct timer_list *t)
 {
@@ -767,3 +773,4 @@ void tcp_init_xmit_timers(struct sock *sk)
 		     HRTIMER_MODE_REL_PINNED_SOFT);
 	tcp_sk(sk)->compressed_ack_timer.function = tcp_compressed_ack_kick;
 }
+EXPORT_SYMBOL(tcp_init_xmit_timers);

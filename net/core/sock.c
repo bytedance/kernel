@@ -1984,6 +1984,7 @@ void __sock_wfree(struct sk_buff *skb)
 	if (refcount_sub_and_test(skb->truesize, &sk->sk_wmem_alloc))
 		__sk_free(sk);
 }
+EXPORT_SYMBOL(__sock_wfree);
 
 void skb_set_owner_w(struct sk_buff *skb, struct sock *sk)
 {
