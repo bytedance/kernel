@@ -322,6 +322,7 @@ DEFINE_STATIC_KEY_FALSE(tcp_rx_skb_cache_key);
 EXPORT_SYMBOL(tcp_rx_skb_cache_key);
 
 DEFINE_STATIC_KEY_FALSE(tcp_tx_skb_cache_key);
+EXPORT_SYMBOL(tcp_tx_skb_cache_key);
 
 void tcp_enter_memory_pressure(struct sock *sk)
 {
@@ -1138,6 +1139,7 @@ void tcp_free_fastopen_req(struct tcp_sock *tp)
 		tp->fastopen_req = NULL;
 	}
 }
+EXPORT_SYMBOL(tcp_free_fastopen_req);
 
 static int tcp_sendmsg_fastopen(struct sock *sk, struct msghdr *msg,
 				int *copied, size_t size,
@@ -2574,6 +2576,7 @@ void tcp_write_queue_purge(struct sock *sk)
 	tcp_sk(sk)->packets_out = 0;
 	inet_csk(sk)->icsk_backoff = 0;
 }
+EXPORT_SYMBOL(tcp_write_queue_purge);
 
 int tcp_disconnect(struct sock *sk, int flags)
 {

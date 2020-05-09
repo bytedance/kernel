@@ -50,6 +50,7 @@ void tcp_fastopen_destroy_cipher(struct sock *sk)
 	if (ctx)
 		call_rcu(&ctx->rcu, tcp_fastopen_ctx_free);
 }
+EXPORT_SYMBOL(tcp_fastopen_destroy_cipher);
 
 void tcp_fastopen_ctx_destroy(struct net *net)
 {
@@ -582,6 +583,7 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
 		dst_release(dst);
 	}
 }
+EXPORT_SYMBOL(tcp_fastopen_active_disable_ofo_check);
 
 void tcp_fastopen_active_detect_blackhole(struct sock *sk, bool expired)
 {
@@ -599,3 +601,5 @@ void tcp_fastopen_active_detect_blackhole(struct sock *sk, bool expired)
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 	}
 }
+EXPORT_SYMBOL(tcp_fastopen_active_detect_blackhole);
+
