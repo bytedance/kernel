@@ -217,6 +217,8 @@ struct tcp_sock {
 	} rack;
 	u16	advmss;		/* Advertised MSS			*/
 	u8	compressed_ack;
+	u8	fast_ack_mode:2, /* which fast ack mode ? */
+		unused1:6;
 	u8	tlp_retrans:1,	/* TLP is a retransmission */
 		unused_1:7;
 	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
