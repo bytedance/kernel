@@ -139,7 +139,8 @@ enum {
 
 #define TCP_TX_DELAY		37	/* delay outgoing packets by XX usec */
 
-#define TCP_INIT_SNDCWND	38	/* TCP set init snd wnd*/
+/*New options for customization in Bytedance */
+#define TCP_INIT_SNDCWND	100	/* TCP set init snd wnd*/
 #define TCP_MAX_RTO		101	/* Set max RTO value in us */
 
 #define TCP_REPAIR_ON		1
