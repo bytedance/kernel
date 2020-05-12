@@ -3657,7 +3657,8 @@ int tcp_connect(struct sock *sk)
 
 	/* Timer for repeating the SYN until an answer. */
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-				  inet_csk(sk)->icsk_rto, TCP_RTO_MAX);
+				  inet_csk(sk)->icsk_rto,
+				  min(tp->rto_max_thresh, TCP_RTO_MAX));
 	return 0;
 }
 EXPORT_SYMBOL(tcp_connect);

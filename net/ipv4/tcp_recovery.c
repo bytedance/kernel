@@ -124,7 +124,8 @@ void tcp_rack_mark_lost(struct sock *sk)
 	if (timeout) {
 		timeout = usecs_to_jiffies(timeout) + TCP_TIMEOUT_MIN;
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_REO_TIMEOUT,
-					  timeout, inet_csk(sk)->icsk_rto);
+					  timeout,
+					  min(tp->rto_max_thresh, inet_csk(sk)->icsk_rto));
 	}
 }
 

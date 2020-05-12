@@ -551,7 +551,8 @@ int tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 		if (remaining > 0) {
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-						  remaining, TCP_RTO_MAX);
+						  remaining,
+						  min(tp->rto_max_thresh, TCP_RTO_MAX));
 		} else {
 			/* RTO revert clocked out retransmission.
 			 * Will retransmit now */

@@ -2081,7 +2081,8 @@ static bool tcp_check_sack_reneging(struct sock *sk, int flag)
 					  msecs_to_jiffies(10));
 
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-					  delay, TCP_RTO_MAX);
+					  delay,
+					  min(tp->rto_max_thresh, TCP_RTO_MAX));
 		return true;
 	}
 	return false;
@@ -6094,7 +6095,8 @@ int tcp_rcv_synsent_state_process(struct sock *sk, struct sk_buff *skb,
 			inet_csk_schedule_ack(sk);
 			tcp_enter_quickack_mode(sk, TCP_MAX_QUICKACKS);
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_DACK,
-						  TCP_DELACK_MAX, TCP_RTO_MAX);
+						  TCP_DELACK_MAX,
+						  min(tp->rto_max_thresh, TCP_RTO_MAX));
 
 discard:
 			tcp_drop(sk, skb);

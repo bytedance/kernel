@@ -3175,6 +3175,12 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		else
 			tp->snd_cwnd = val;
 		break;
+	case TCP_MAX_RTO:
+		if(val <= 0 || !tp->srtt_us || val <= tp->srtt_us >> 3)
+			err = -EINVAL;
+		else
+			tp->rto_max_thresh = usecs_to_jiffies(val);
+		break;
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -3705,6 +3711,9 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		return err;
 	}
 #endif
+	case TCP_MAX_RTO:
+		val = jiffies_to_usecs(tp->rto_max_thresh);
+		break;
 	default:
 		return -ENOPROTOOPT;
 	}
