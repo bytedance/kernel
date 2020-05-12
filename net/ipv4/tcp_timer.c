@@ -430,7 +430,8 @@ void tcp_fastopen_synack_timer(struct sock *sk, struct request_sock *req)
 	if (!tp->retrans_stamp)
 		tp->retrans_stamp = tcp_time_stamp(tp);
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-			  TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
+			  TCP_TIMEOUT_INIT << req->num_timeout,
+			  min(tp->rto_max_thresh, TCP_RTO_MAX));
 }
 EXPORT_SYMBOL(tcp_fastopen_synack_timer);
 
@@ -536,7 +537,7 @@ void tcp_retransmit_timer(struct sock *sk)
 		 */
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
 					  TCP_RESOURCE_PROBE_INTERVAL,
-					  TCP_RTO_MAX);
+					  min(tp->rto_max_thresh, TCP_RTO_MAX));
 		goto out;
 	}
 
@@ -578,7 +579,8 @@ out_reset_timer:
 		icsk->icsk_rto = min(icsk->icsk_rto << 1, TCP_RTO_MAX);
 	}
 	inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-				  tcp_clamp_rto_to_user_timeout(sk), TCP_RTO_MAX);
+				  tcp_clamp_rto_to_user_timeout(sk),
+				  min(tp->rto_max_thresh, TCP_RTO_MAX));
 	if (retransmits_timed_out(sk, net->ipv4.sysctl_tcp_retries1 + 1, 0))
 		__sk_dst_reset(sk);
 
