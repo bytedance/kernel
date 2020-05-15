@@ -218,7 +218,8 @@ struct tcp_sock {
 	u16	advmss;		/* Advertised MSS			*/
 	u8	compressed_ack;
 	u8	fast_ack_mode:2, /* which fast ack mode ? */
-		unused1:6;
+		app_disable_frto:1,/* frto controlled by application*/
+		unused1:5;
 	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
 	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
 	u8	chrono_type:2,	/* current chronograph type */

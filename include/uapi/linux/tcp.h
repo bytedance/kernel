@@ -142,6 +142,7 @@ enum {
 /*New options for customization in Bytedance */
 #define TCP_INIT_SNDCWND	100	/* TCP set init snd wnd*/
 #define TCP_MAX_RTO		101	/* Set max RTO value in us */
+#define TCP_FRTO		102     /* Enable/Disable FRTO */
 
 #define TCP_REPAIR_ON		1
 #define TCP_REPAIR_OFF		0
