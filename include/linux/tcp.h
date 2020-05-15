@@ -220,7 +220,8 @@ struct tcp_sock {
 	u8	tlp_retrans:1,	/* TLP is a retransmission */
 		unused_1:7;
 	u8	fast_ack_mode:2, /* which fast ack mode ? */
-		unused1:6;
+		app_disable_frto:1,/* frto controlled by application*/
+		unused1:5;
 	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
 	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
 	u8	chrono_type:2,	/* current chronograph type */
