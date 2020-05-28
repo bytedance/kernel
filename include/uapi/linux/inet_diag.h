@@ -204,6 +204,15 @@ struct tcp_bbr_info {
 	__u32	bbr_min_rtt;		/* min-filtered RTT in uSec */
 	__u32	bbr_pacing_gain;	/* pacing gain shifted left 8 bits */
 	__u32	bbr_cwnd_gain;		/* cwnd gain shifted left 8 bits */
+	__u8	bbr_mode;		/* current bbr_mode in state machine */
+	__u8	bbr_prev_ca_state;	/* CA state on previous ACK */
+	__u8	bbr_packet_conservation;	/* use packet conservation? */
+	__u8	bbr_cycle_idx;    	/* current index in pacing_gain cycle array */
+	__u8	bbr_lt_use_bw;		/* use lt_bw as our bw estimate? */
+	__u8	bbr_has_seen_rtt;		/* have we seen an RTT sample yet? */
+	__u32	bbr_pacing_rate_lo;		/* lower 32 bits of pacing rate */
+	__u32	bbr_pacing_rate_hi;		/* upper 32 bits of pacing rate */
+	__u32	bbr_snd_cwnd;		/* Sending congestion window */
 };
 
 /* Phase as reported in netlink/ss stats. */
