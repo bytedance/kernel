@@ -112,7 +112,7 @@ endif
 OBJS = $(patsubst %.c,$(OUTPUT)%.o,$(SRCS)) $(OUTPUT)disasm.o
 
 $(OUTPUT)disasm.o: $(srctree)/kernel/bpf/disasm.c
-	$(QUIET_CC)$(COMPILE.c) -MMD -o $@ $<
+	$(QUIET_CC)$(CC) $(CFLAGS) -c -MMD -o $@ $<
 
 $(OUTPUT)feature.o: | zdep
 
@@ -120,7 +120,7 @@ $(OUTPUT)bpftool: $(OBJS) $(LIBBPF)
 	$(QUIET_LINK)$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
 $(OUTPUT)%.o: %.c
-	$(QUIET_CC)$(COMPILE.c) -MMD -o $@ $<
+	$(QUIET_CC)$(CC) $(CFLAGS) -c -MMD -o $@ $<
 
 clean: $(LIBBPF)-clean
 	$(call QUIET_CLEAN, bpftool)
