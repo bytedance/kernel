@@ -2,6 +2,7 @@
 include ../../../../scripts/Kbuild.include
 include ../../../scripts/Makefile.arch
 
+CXX ?= $(CROSS_COMPILE)g++
 LIBDIR := ../../../lib
 BPFDIR := $(LIBDIR)/bpf
 APIDIR := ../../../include/uapi
