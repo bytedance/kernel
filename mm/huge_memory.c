@@ -582,7 +582,7 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 
 	VM_BUG_ON_PAGE(!PageCompound(page), page);
 
-	if (mem_cgroup_charge(page, vma->vm_mm, gfp, false)) {
+	if (mem_cgroup_charge(page, vma->vm_mm, gfp)) {
 		put_page(page);
 		count_vm_event(THP_FAULT_FALLBACK);
 		return VM_FAULT_FALLBACK;
@@ -1215,8 +1215,8 @@ static vm_fault_t do_huge_pmd_wp_page_fallback(struct vm_fault *vmf,
 		pages[i] = alloc_page_vma_node(GFP_HIGHUSER_MOVABLE, vma,
 					       vmf->address, page_to_nid(page));
 		if (unlikely(!pages[i] ||
-			     mem_cgroup_charge(pages[i], vma->vm_mm, GFP_KERNEL,
-					       false))) {
+			     mem_cgroup_charge(pages[i], vma->vm_mm,
+					       GFP_KERNEL))) {
 			if (pages[i])
 				put_page(pages[i]);
 			while (--i >= 0)
@@ -1370,7 +1370,7 @@ alloc:
 		goto out;
 	}
 
-	if (unlikely(mem_cgroup_charge(new_page, vma->vm_mm, huge_gfp, false))) {
+	if (unlikely(mem_cgroup_charge(new_page, vma->vm_mm, huge_gfp))) {
 		put_page(new_page);
 		split_huge_pmd(vma, vmf->pmd, vmf->address);
 		if (page)
