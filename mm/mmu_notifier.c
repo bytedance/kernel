@@ -334,9 +334,9 @@ int mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 {
 	int ret;
 
-	down_write(&mm->mmap_sem);
+	mmap_write_lock(mm);
 	ret = __mmu_notifier_register(mn, mm);
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(mmu_notifier_register);

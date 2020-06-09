@@ -637,7 +637,7 @@ static int vhost_vdpa_va_map(struct vhost_vdpa *v,
 	struct vm_area_struct *vma;
 	int ret;
 
-	down_read(&dev->mm->mmap_sem);
+	mmap_read_lock(dev->mm);
 
 	while (size) {
 		vma = find_vma(dev->mm, uaddr);
@@ -673,7 +673,7 @@ next:
 	if (ret)
 		vhost_vdpa_unmap(v, iova, map_iova - iova);
 
-	up_read(&dev->mm->mmap_sem);
+	mmap_read_unlock(dev->mm);
 
 	return ret;
 }
@@ -705,7 +705,7 @@ static int vhost_vdpa_pa_map(struct vhost_vdpa *v,
 		goto free;
 	}
 
-	down_read(&dev->mm->mmap_sem);
+	mmap_read_lock(dev->mm);
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 	if (npages + atomic64_read(&dev->mm->pinned_vm) > lock_limit) {
@@ -795,7 +795,7 @@ out:
 		vhost_vdpa_unmap(v, start, size);
 	}
 unlock:
-	up_read(&dev->mm->mmap_sem);
+	mmap_read_unlock(dev->mm);
 free:
 	free_page((unsigned long)page_list);
 	return ret;

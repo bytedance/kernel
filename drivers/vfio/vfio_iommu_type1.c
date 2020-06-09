@@ -285,11 +285,11 @@ static int vfio_lock_acct(struct vfio_dma *dma, long npage, bool async)
 	if (!mm)
 		return -ESRCH; /* process exited */
 
-	ret = down_write_killable(&mm->mmap_sem);
+	ret = mmap_write_lock_killable(mm);
 	if (!ret) {
 		ret = __account_locked_vm(mm, abs(npage), npage > 0, dma->task,
 					  dma->lock_cap);
-		up_write(&mm->mmap_sem);
+		mmap_write_unlock(mm);
 	}
 
 	if (async)
@@ -445,7 +445,7 @@ static int vaddr_get_pfns(struct mm_struct *mm, unsigned long vaddr,
 	if (prot & IOMMU_WRITE)
 		flags |= FOLL_WRITE;
 
-	down_read(&mm->mmap_sem);
+	mmap_read_lock(mm);
 	if (mm == current->mm) {
 		ret = get_user_pages(vaddr, npages, flags | FOLL_LONGTERM,
 				     pages, vmas);
@@ -453,7 +453,7 @@ static int vaddr_get_pfns(struct mm_struct *mm, unsigned long vaddr,
 		vmas = kvmalloc(sizeof(struct vm_area_struct *) * npages,
 				GFP_KERNEL);
 		if (!vmas) {
-			up_read(&mm->mmap_sem);
+			mmap_read_unlock(mm);
 			return -ENOMEM;
 		}
 		ret = get_user_pages_remote(NULL, mm, vaddr, npages, flags,
@@ -471,14 +471,14 @@ static int vaddr_get_pfns(struct mm_struct *mm, unsigned long vaddr,
 		}
 		kvfree(vmas);
 	}
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 
 	if (ret > 0) {
 		*pfn = page_to_pfn(pages[0]);
 		return ret;
 	}
 
-	down_read(&mm->mmap_sem);
+	mmap_read_lock(mm);
 
 	vaddr = untagged_addr(vaddr);
 
@@ -498,7 +498,7 @@ retry:
 		}
 	}
 
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 	return ret;
 }
 
