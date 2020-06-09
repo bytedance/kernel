@@ -251,7 +251,7 @@ int __mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 	struct mmu_notifier_mm *mmu_notifier_mm = NULL;
 	int ret;
 
-	lockdep_assert_held_write(&mm->mmap_sem);
+	mmap_assert_write_locked(mm);
 	BUG_ON(atomic_read(&mm->mm_users) <= 0);
 
 	if (IS_ENABLED(CONFIG_LOCKDEP)) {
@@ -385,7 +385,7 @@ struct mmu_notifier *mmu_notifier_get_locked(const struct mmu_notifier_ops *ops,
 	struct mmu_notifier *mn;
 	int ret;
 
-	lockdep_assert_held_write(&mm->mmap_sem);
+	mmap_assert_write_locked(mm);
 
 	if (mm->mmu_notifier_mm) {
 		mn = find_get_mmu_notifier(mm, ops);
