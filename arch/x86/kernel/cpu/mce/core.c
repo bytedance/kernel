@@ -125,6 +125,8 @@ static struct irq_work mce_irq_work;
 
 static void (*quirk_no_way_out)(int bank, struct mce *m, struct pt_regs *regs);
 
+static void no_adjust_mce_log(struct mce *m) {};
+static void (*adjust_mce_log)(struct mce *m) = no_adjust_mce_log;
 /*
  * CPU/chipset specific EDAC code can register a notifier call here to print
  * MCE errors in a human-readable form.
@@ -746,8 +748,10 @@ log_it:
 		 * Don't get the IP here because it's unlikely to
 		 * have anything to do with the actual error location.
 		 */
-		if (!(flags & MCP_DONTLOG) && !mca_cfg.dont_log_ce)
+		if (!(flags & MCP_DONTLOG) && !mca_cfg.dont_log_ce) {
+			adjust_mce_log(&m);
 			mce_log(&m);
+		}
 		else if (mce_usable_address(&m)) {
 			/*
 			 * Although we skipped logging this, we still want
@@ -1632,6 +1636,30 @@ static void quirk_sandybridge_ifu(int bank, struct mce *m, struct pt_regs *regs)
 	m->cs = regs->cs;
 }
 
+/*
+ * SKX has a mode where the user can request that the
+ * memory controller report uncorrected errors found by the
+ * patrol scrubber as corrected. This results in them being
+ * signalled using CMCI, which is less disruptive that a
+ * machine check. quirk to adjust severity of these errors.
+ */
+
+#define MSCOD_UCE_SCRUB	(0x0010 << 16) /* UnCorrected Patrol Scrub Error */
+#define MSCOD_MASK	GENMASK_ULL(31, 16)
+
+/*
+ * Check the error code to see if this is an uncorrected patrol
+ * scrub error from one of the memory controller banks. If so,
+ * then adjust the severity level to MCE_AO_SEVERITY
+ */
+static void quirk_skx_adjust_mce_log(struct mce *m)
+{
+	if (((m->status & MCACOD_SCRUBMSK) == MCACOD_SCRUB) &&
+	    ((m->status & MSCOD_MASK) == MSCOD_UCE_SCRUB) &&
+	    m->bank >= 13 && m->bank <= 18)
+		m->severity = MCE_AO_SEVERITY;
+}
+
 /* Add per CPU specific workarounds here */
 static int __mcheck_cpu_apply_quirks(struct cpuinfo_x86 *c)
 {
@@ -1706,6 +1734,9 @@ static int __mcheck_cpu_apply_quirks(struct cpuinfo_x86 *c)
 
 		if (c->x86 == 6 && c->x86_model == 45)
 			quirk_no_way_out = quirk_sandybridge_ifu;
+
+		if (c->x86 == 6 && c->x86_model == INTEL_FAM6_SKYLAKE_X)
+			adjust_mce_log = quirk_skx_adjust_mce_log;
 	}
 	if (cfg->monarch_timeout < 0)
 		cfg->monarch_timeout = 0;
