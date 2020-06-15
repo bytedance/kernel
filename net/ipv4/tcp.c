@@ -322,6 +322,7 @@ DEFINE_STATIC_KEY_FALSE(tcp_rx_skb_cache_key);
 EXPORT_SYMBOL(tcp_rx_skb_cache_key);
 
 DEFINE_STATIC_KEY_FALSE(tcp_tx_skb_cache_key);
+EXPORT_SYMBOL(tcp_tx_skb_cache_key);
 
 void tcp_enter_memory_pressure(struct sock *sk)
 {
@@ -419,6 +420,8 @@ void tcp_init_sock(struct sock *sk)
 
 	icsk->icsk_rto = TCP_TIMEOUT_INIT;
 	tp->mdev_us = jiffies_to_usecs(TCP_TIMEOUT_INIT);
+	tp->rto_max_thresh = TCP_RTO_MAX;
+	tp->rto_min_thresh = TCP_RTO_MIN;
 	minmax_reset(&tp->rtt_min, tcp_jiffies32, ~0U);
 
 	/* So many TCP implementations out there (incorrectly) count the
@@ -426,7 +429,7 @@ void tcp_init_sock(struct sock *sk)
 	 * algorithms that we must have the following bandaid to talk
 	 * efficiently to them.  -DaveM
 	 */
-	tp->snd_cwnd = TCP_INIT_CWND;
+	tp->snd_cwnd = sock_net(sk)->ipv4.sysctl_tcp_init_cwnd;
 
 	/* There's a bubble in the pipe until at least the first ACK. */
 	tp->app_limited = ~0U;
@@ -1129,6 +1132,7 @@ void tcp_free_fastopen_req(struct tcp_sock *tp)
 		tp->fastopen_req = NULL;
 	}
 }
+EXPORT_SYMBOL(tcp_free_fastopen_req);
 
 static int tcp_sendmsg_fastopen(struct sock *sk, struct msghdr *msg,
 				int *copied, size_t size,
@@ -2562,6 +2566,7 @@ void tcp_write_queue_purge(struct sock *sk)
 	tcp_sk(sk)->packets_out = 0;
 	inet_csk(sk)->icsk_backoff = 0;
 }
+EXPORT_SYMBOL(tcp_write_queue_purge);
 
 int tcp_disconnect(struct sock *sk, int flags)
 {
@@ -2623,7 +2628,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	icsk->icsk_probes_out = 0;
 	icsk->icsk_rto = TCP_TIMEOUT_INIT;
 	tp->snd_ssthresh = TCP_INFINITE_SSTHRESH;
-	tp->snd_cwnd = TCP_INIT_CWND;
+	tp->snd_cwnd = sock_net(sk)->ipv4.sysctl_tcp_init_cwnd;
 	tp->snd_cwnd_cnt = 0;
 	tp->window_clamp = 0;
 	tp->delivered = 0;
@@ -2672,6 +2677,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->rx_opt.dsack = 0;
 	tp->rx_opt.num_sacks = 0;
 	tp->rcv_ooopack = 0;
+	tp->fast_ack_mode = 0;
 
 
 	/* Clean up fastopen related fields */
@@ -3150,6 +3156,24 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			tcp_enable_tx_delay();
 		tp->tcp_tx_delay = val;
 		break;
+	case TCP_INIT_SNDCWND:
+		if(val <= TCP_INIT_CWND)
+			err = -EINVAL;
+		else
+			tp->snd_cwnd = val;
+		break;
+	case TCP_MAX_RTO:
+		if(val <= 0 || !tp->srtt_us || val <= tp->srtt_us >> 3)
+			err = -EINVAL;
+		else
+			tp->rto_max_thresh = usecs_to_jiffies(val);
+		break;
+	case TCP_FRTO:
+		if(val < 0 || val > 1)
+			err = -EINVAL;
+		else
+			tp->app_disable_frto = val;
+		break;
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -3316,6 +3340,7 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 	info->tcpi_reord_seen = tp->reord_seen;
 	info->tcpi_rcv_ooopack = tp->rcv_ooopack;
 	info->tcpi_snd_wnd = tp->snd_wnd;
+	info->tfo_info = tp->tfo_info;
 	unlock_sock_fast(sk, slow);
 }
 EXPORT_SYMBOL_GPL(tcp_get_info);
@@ -3679,6 +3704,12 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		return err;
 	}
 #endif
+	case TCP_MAX_RTO:
+		val = jiffies_to_usecs(tp->rto_max_thresh);
+		break;
+	case TCP_FRTO:
+		val = tp->frto;
+		break;
 	default:
 		return -ENOPROTOOPT;
 	}

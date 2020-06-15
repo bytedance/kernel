@@ -124,7 +124,8 @@ void tcp_rack_mark_lost(struct sock *sk)
 	if (timeout) {
 		timeout = usecs_to_jiffies(timeout) + TCP_TIMEOUT_MIN;
 		inet_csk_reset_xmit_timer(sk, ICSK_TIME_REO_TIMEOUT,
-					  timeout, inet_csk(sk)->icsk_rto);
+					  timeout,
+					  min(tp->rto_max_thresh, inet_csk(sk)->icsk_rto));
 	}
 }
 
@@ -159,6 +160,7 @@ void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
 		tp->rack.end_seq = end_seq;
 	}
 }
+EXPORT_SYMBOL(tcp_rack_advance);
 
 /* We have waited long enough to accommodate reordering. Mark the expired
  * packets lost and retransmit them.
@@ -181,6 +183,7 @@ void tcp_rack_reo_timeout(struct sock *sk)
 	if (inet_csk(sk)->icsk_pending != ICSK_TIME_RETRANS)
 		tcp_rearm_rto(sk);
 }
+EXPORT_SYMBOL(tcp_rack_reo_timeout);
 
 /* Updates the RACK's reo_wnd based on DSACK and no. of recoveries.
  *
@@ -222,6 +225,7 @@ void tcp_rack_update_reo_wnd(struct sock *sk, struct rate_sample *rs)
 		tp->rack.reo_wnd_steps = 1;
 	}
 }
+EXPORT_SYMBOL(tcp_rack_update_reo_wnd);
 
 /* RFC6582 NewReno recovery for non-SACK connection. It simply retransmits
  * the next unacked packet upon receiving

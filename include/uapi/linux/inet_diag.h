@@ -204,11 +204,53 @@ struct tcp_bbr_info {
 	__u32	bbr_min_rtt;		/* min-filtered RTT in uSec */
 	__u32	bbr_pacing_gain;	/* pacing gain shifted left 8 bits */
 	__u32	bbr_cwnd_gain;		/* cwnd gain shifted left 8 bits */
+	__u8	bbr_mode;		/* current bbr_mode in state machine */
+	__u8	bbr_prev_ca_state;	/* CA state on previous ACK */
+	__u8	bbr_packet_conservation;	/* use packet conservation? */
+	__u8	bbr_cycle_idx;    	/* current index in pacing_gain cycle array */
+	__u8	bbr_lt_use_bw;		/* use lt_bw as our bw estimate? */
+	__u8	bbr_has_seen_rtt;		/* have we seen an RTT sample yet? */
+	__u32	bbr_pacing_rate_lo;		/* lower 32 bits of pacing rate */
+	__u32	bbr_pacing_rate_hi;		/* upper 32 bits of pacing rate */
+	__u32	bbr_snd_cwnd;		/* Sending congestion window */
+};
+
+/* Phase as reported in netlink/ss stats. */
+enum tcp_bbr2_phase {
+	BBR2_PHASE_INVALID		= 0,
+	BBR2_PHASE_STARTUP		= 1,
+	BBR2_PHASE_DRAIN		= 2,
+	BBR2_PHASE_PROBE_RTT		= 3,
+	BBR2_PHASE_PROBE_BW_UP		= 4,
+	BBR2_PHASE_PROBE_BW_DOWN	= 5,
+	BBR2_PHASE_PROBE_BW_CRUISE	= 6,
+	BBR2_PHASE_PROBE_BW_REFILL	= 7
+};
+
+struct tcp_bbr2_info {
+	/* u64 bw: bandwidth (app throughput) estimate in Byte per sec: */
+	__u32	bbr_bw_lsb;		/* lower 32 bits of bw */
+	__u32	bbr_bw_msb;		/* upper 32 bits of bw */
+	__u32	bbr_min_rtt;		/* min-filtered RTT in uSec */
+	__u32	bbr_pacing_gain;	/* pacing gain shifted left 8 bits */
+	__u32	bbr_cwnd_gain;		/* cwnd gain shifted left 8 bits */
+	__u32	bbr_bw_hi_lsb;		/* lower 32 bits of bw_hi */
+	__u32	bbr_bw_hi_msb;		/* upper 32 bits of bw_hi */
+	__u32	bbr_bw_lo_lsb;		/* lower 32 bits of bw_lo */
+	__u32	bbr_bw_lo_msb;		/* upper 32 bits of bw_lo */
+	__u8	bbr_mode;		/* current bbr_mode in state machine */
+	__u8	bbr_phase;		/* current state machine phase */
+	__u8	unused1;		/* alignment padding; not used yet */
+	__u8	bbr_version;		/* MUST be at this offset in struct */
+	__u32	bbr_inflight_lo;	/* lower/short-term data volume bound */
+	__u32	bbr_inflight_hi;	/* higher/long-term data volume bound */
+	__u32	bbr_extra_acked;	/* max excess packets ACKed in epoch */
 };
 
 union tcp_cc_info {
 	struct tcpvegas_info	vegas;
 	struct tcp_dctcp_info	dctcp;
 	struct tcp_bbr_info	bbr;
+	struct tcp_bbr2_info	bbr2;
 };
 #endif /* _UAPI_INET_DIAG_H_ */

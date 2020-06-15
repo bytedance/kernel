@@ -551,7 +551,8 @@ int tcp_v4_err(struct sk_buff *icmp_skb, u32 info)
 
 		if (remaining > 0) {
 			inet_csk_reset_xmit_timer(sk, ICSK_TIME_RETRANS,
-						  remaining, TCP_RTO_MAX);
+						  remaining,
+						  min(tp->rto_max_thresh, TCP_RTO_MAX));
 		} else {
 			/* RTO revert clocked out retransmission.
 			 * Will retransmit now */
@@ -648,7 +649,7 @@ EXPORT_SYMBOL(tcp_v4_send_check);
  *	Exception: precedence violation. We do not implement it in any case.
  */
 
-static void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
+void tcp_v4_send_reset(const struct sock *sk, struct sk_buff *skb)
 {
 	const struct tcphdr *th = tcp_hdr(skb);
 	struct {
@@ -794,6 +795,7 @@ out:
 	rcu_read_unlock();
 #endif
 }
+EXPORT_SYMBOL(tcp_v4_send_reset);
 
 /* The code following below sending ACKs in SYN-RECV and TIME-WAIT states
    outside socket context is ugly, certainly. What can I do?
@@ -885,7 +887,7 @@ static void tcp_v4_send_ack(const struct sock *sk,
 	local_bh_enable();
 }
 
-static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
+void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 {
 	struct inet_timewait_sock *tw = inet_twsk(sk);
 	struct tcp_timewait_sock *tcptw = tcp_twsk(sk);
@@ -903,6 +905,7 @@ static void tcp_v4_timewait_ack(struct sock *sk, struct sk_buff *skb)
 
 	inet_twsk_put(tw);
 }
+EXPORT_SYMBOL(tcp_v4_timewait_ack);
 
 static void tcp_v4_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 				  struct request_sock *req)
@@ -1130,7 +1133,7 @@ int tcp_md5_do_del(struct sock *sk, const union tcp_md5_addr *addr, int family,
 }
 EXPORT_SYMBOL(tcp_md5_do_del);
 
-static void tcp_clear_md5_list(struct sock *sk)
+void tcp_clear_md5_list(struct sock *sk)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tcp_md5sig_key *key;
@@ -1145,6 +1148,7 @@ static void tcp_clear_md5_list(struct sock *sk)
 		kfree_rcu(key, rcu);
 	}
 }
+EXPORT_SYMBOL(tcp_clear_md5_list);
 
 static int tcp_v4_parse_md5_keys(struct sock *sk, int optname,
 				 char __user *optval, int optlen)
@@ -1287,7 +1291,7 @@ EXPORT_SYMBOL(tcp_v4_md5_hash_skb);
 #endif
 
 /* Called with rcu_read_lock() */
-static bool tcp_v4_inbound_md5_hash(const struct sock *sk,
+bool tcp_v4_inbound_md5_hash(const struct sock *sk,
 				    const struct sk_buff *skb)
 {
 #ifdef CONFIG_TCP_MD5SIG
@@ -1344,6 +1348,7 @@ static bool tcp_v4_inbound_md5_hash(const struct sock *sk,
 #endif
 	return false;
 }
+EXPORT_SYMBOL(tcp_v4_inbound_md5_hash);
 
 static void tcp_v4_init_req(struct request_sock *req,
 			    const struct sock *sk_listener,
@@ -1511,7 +1516,7 @@ put_and_exit:
 }
 EXPORT_SYMBOL(tcp_v4_syn_recv_sock);
 
-static struct sock *tcp_v4_cookie_check(struct sock *sk, struct sk_buff *skb)
+struct sock *tcp_v4_cookie_check(struct sock *sk, struct sk_buff *skb)
 {
 #ifdef CONFIG_SYN_COOKIES
 	const struct tcphdr *th = tcp_hdr(skb);
@@ -1521,6 +1526,7 @@ static struct sock *tcp_v4_cookie_check(struct sock *sk, struct sk_buff *skb)
 #endif
 	return sk;
 }
+EXPORT_SYMBOL(tcp_v4_cookie_check);
 
 u16 tcp_v4_get_syncookie(struct sock *sk, struct iphdr *iph,
 			 struct tcphdr *th, u32 *cookie)
@@ -1773,13 +1779,14 @@ int tcp_filter(struct sock *sk, struct sk_buff *skb)
 }
 EXPORT_SYMBOL(tcp_filter);
 
-static void tcp_v4_restore_cb(struct sk_buff *skb)
+void tcp_v4_restore_cb(struct sk_buff *skb)
 {
 	memmove(IPCB(skb), &TCP_SKB_CB(skb)->header.h4,
 		sizeof(struct inet_skb_parm));
 }
+EXPORT_SYMBOL(tcp_v4_restore_cb);
 
-static void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
+void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
 			   const struct tcphdr *th)
 {
 	/* This is tricky : We move IPCB at its correct location into TCP_SKB_CB()
@@ -1800,6 +1807,7 @@ static void tcp_v4_fill_cb(struct sk_buff *skb, const struct iphdr *iph,
 	TCP_SKB_CB(skb)->has_rxtstamp =
 			skb->tstamp || skb_hwtstamps(skb)->hwtstamp;
 }
+EXPORT_SYMBOL(tcp_v4_fill_cb);
 
 /*
  *	From tcp_input.c
@@ -2044,7 +2052,7 @@ void inet_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb)
 }
 EXPORT_SYMBOL(inet_sk_rx_dst_set);
 
-const struct inet_connection_sock_af_ops ipv4_specific = {
+struct inet_connection_sock_af_ops ipv4_specific = {
 	.queue_xmit	   = ip_queue_xmit,
 	.send_check	   = tcp_v4_send_check,
 	.rebuild_header	   = inet_sk_rebuild_header,
@@ -2463,7 +2471,7 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i)
 				      READ_ONCE(tp->copied_seq), 0);
 
 	seq_printf(f, "%4d: %08X:%04X %08X:%04X %02X %08X:%08X %02X:%08lX "
-			"%08X %5u %8d %lu %d %pK %lu %lu %u %u %d",
+			"%08X %5u %8d %lu %d %pK %lu %lu %u %u %d %u %d",
 		i, src, srcp, dest, destp, state,
 		READ_ONCE(tp->write_seq) - tp->snd_una,
 		rx_queue,
@@ -2480,7 +2488,9 @@ static void get_tcp4_sock(struct sock *sk, struct seq_file *f, int i)
 		tp->snd_cwnd,
 		state == TCP_LISTEN ?
 		    fastopenq->max_qlen :
-		    (tcp_in_initial_slowstart(tp) ? -1 : tp->snd_ssthresh));
+		    (tcp_in_initial_slowstart(tp) ? -1 : tp->snd_ssthresh),
+		jiffies_to_usecs(tp->rto_max_thresh),
+		tp->frto);
 }
 
 static void get_timewait4_sock(const struct inet_timewait_sock *tw,
@@ -2711,6 +2721,8 @@ static int __net_init tcp_sk_init(struct net *net)
 	net->ipv4.sysctl_tcp_invalid_ratelimit = HZ/2;
 	net->ipv4.sysctl_tcp_pacing_ss_ratio = 200;
 	net->ipv4.sysctl_tcp_pacing_ca_ratio = 120;
+	net->ipv4.sysctl_tcp_init_cwnd = TCP_INIT_CWND;
+	net->ipv4.sysctl_tcp_loss_init_cwnd = TCP_INIT_CWND;
 	if (net != &init_net) {
 		memcpy(net->ipv4.sysctl_tcp_rmem,
 		       init_net.ipv4.sysctl_tcp_rmem,

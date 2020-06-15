@@ -124,6 +124,7 @@ struct tcp_request_sock {
 	u32				snt_isn;
 	u32				ts_off;
 	u32				last_oow_ack_time; /* last SYNACK */
+	u32				tfo_info;
 	u32				rcv_nxt; /* the ack # by SYNACK. For
 						  * FastOpen it's the seq#
 						  * after data-in-SYN.
@@ -216,6 +217,9 @@ struct tcp_sock {
 	} rack;
 	u16	advmss;		/* Advertised MSS			*/
 	u8	compressed_ack;
+	u8	fast_ack_mode:2, /* which fast ack mode ? */
+		app_disable_frto:1,/* frto controlled by application*/
+		unused1:5;
 	u32	chrono_start;	/* Start time in jiffies of a TCP chrono */
 	u32	chrono_stat[3];	/* Time in jiffies for chrono_stat stats */
 	u8	chrono_type:2,	/* current chronograph type */
@@ -238,6 +242,7 @@ struct tcp_sock {
 		save_syn:1,	/* Save headers of SYN packet */
 		is_cwnd_limited:1,/* forward progress limited by snd_cwnd? */
 		syn_smc:1;	/* SYN includes SMC */
+	u32	tfo_info;
 	u32	tlp_high_seq;	/* snd_nxt at the time of TLP retransmit. */
 
 	u32	tcp_tx_delay;	/* delay (in usec) added to TX packets */
@@ -253,6 +258,8 @@ struct tcp_sock {
 	u32	rtt_seq;	/* sequence number to update rttvar	*/
 	struct  minmax rtt_min;
 
+	u32     rto_min_thresh;
+	u32     rto_max_thresh;
 	u32	packets_out;	/* Packets which are "in flight"	*/
 	u32	retrans_out;	/* Retransmitted packets out		*/
 	u32	max_packets_out;  /* max packets_out in last window */

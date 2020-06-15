@@ -179,6 +179,7 @@ void tcp_init_congestion_control(struct sock *sk)
 	const struct inet_connection_sock *icsk = inet_csk(sk);
 
 	tcp_sk(sk)->prior_ssthresh = 0;
+	tcp_sk(sk)->fast_ack_mode = 0;
 	if (icsk->icsk_ca_ops->init)
 		icsk->icsk_ca_ops->init(sk);
 	if (tcp_ca_needs_ecn(sk))
@@ -210,6 +211,7 @@ void tcp_cleanup_congestion_control(struct sock *sk)
 		icsk->icsk_ca_ops->release(sk);
 	module_put(icsk->icsk_ca_ops->owner);
 }
+EXPORT_SYMBOL(tcp_cleanup_congestion_control);
 
 /* Used by sysctl to change default congestion control */
 int tcp_set_default_congestion_control(struct net *net, const char *name)

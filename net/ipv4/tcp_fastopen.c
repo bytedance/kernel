@@ -50,6 +50,7 @@ void tcp_fastopen_destroy_cipher(struct sock *sk)
 	if (ctx)
 		call_rcu(&ctx->rcu, tcp_fastopen_ctx_free);
 }
+EXPORT_SYMBOL(tcp_fastopen_destroy_cipher);
 
 void tcp_fastopen_ctx_destroy(struct net *net)
 {
@@ -149,12 +150,18 @@ static void tcp_fastopen_cookie_gen(struct sock *sk,
 				    struct tcp_fastopen_cookie *foc)
 {
 	struct tcp_fastopen_context *ctx;
+	struct tcp_request_sock *treq=tcp_rsk(req);
+
+	treq->tfo_info |= TCP_COOKIEREQ;
 
 	rcu_read_lock();
 	ctx = tcp_fastopen_get_ctx(sk);
-	if (ctx)
+	if (ctx){
 		__tcp_fastopen_cookie_gen_cipher(req, syn, &ctx->key[0], foc);
+		treq->tfo_info |= TCP_COOKIERSP;
+	}
 	rcu_read_unlock();
+
 }
 
 /* If an incoming SYN or SYNACK frame contains a payload and/or FIN,
@@ -236,12 +243,15 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 	struct tcp_sock *tp;
 	struct request_sock_queue *queue = &inet_csk(sk)->icsk_accept_queue;
 	struct sock *child;
+	struct tcp_request_sock *treq=tcp_rsk(req);
 	bool own_req;
 
 	child = inet_csk(sk)->icsk_af_ops->syn_recv_sock(sk, skb, req, NULL,
 							 NULL, &own_req);
-	if (!child)
+	if (!child){
+		treq->tfo_info |= TCP_ERR_OTHER;
 		return NULL;
+	}
 
 	spin_lock(&queue->fastopenq.lock);
 	queue->fastopenq.qlen++;
@@ -267,7 +277,8 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 	 * because it's been added to the accept queue directly.
 	 */
 	inet_csk_reset_xmit_timer(child, ICSK_TIME_RETRANS,
-				  TCP_TIMEOUT_INIT, TCP_RTO_MAX);
+				  TCP_TIMEOUT_INIT,
+				  min(tp->rto_max_thresh, TCP_RTO_MAX));
 
 	refcount_set(&req->rsk_refcnt, 2);
 
@@ -286,9 +297,10 @@ static struct sock *tcp_fastopen_create_child(struct sock *sk,
 	return child;
 }
 
-static bool tcp_fastopen_queue_check(struct sock *sk)
+static bool tcp_fastopen_queue_check(struct sock *sk,struct request_sock *req)
 {
 	struct fastopen_queue *fastopenq;
+	struct tcp_request_sock *treq=tcp_rsk(req);
 
 	/* Make sure the listener has enabled fastopen, and we don't
 	 * exceed the max # of pending TFO requests allowed before trying
@@ -312,6 +324,7 @@ static bool tcp_fastopen_queue_check(struct sock *sk)
 			__NET_INC_STATS(sock_net(sk),
 					LINUX_MIB_TCPFASTOPENLISTENOVERFLOW);
 			spin_unlock(&fastopenq->lock);
+			treq->tfo_info |= TCP_ERR_OVERFLOW;
 			return false;
 		}
 		fastopenq->rskq_rst_head = req1->dl_next;
@@ -343,6 +356,7 @@ struct sock *tcp_try_fastopen(struct sock *sk, struct sk_buff *skb,
 	bool syn_data = TCP_SKB_CB(skb)->end_seq != TCP_SKB_CB(skb)->seq + 1;
 	int tcp_fastopen = sock_net(sk)->ipv4.sysctl_tcp_fastopen;
 	struct tcp_fastopen_cookie valid_foc = { .len = -1 };
+	struct tcp_request_sock *treq=tcp_rsk(req);
 	struct sock *child;
 	int ret = 0;
 
@@ -351,7 +365,7 @@ struct sock *tcp_try_fastopen(struct sock *sk, struct sk_buff *skb,
 
 	if (!((tcp_fastopen & TFO_SERVER_ENABLE) &&
 	      (syn_data || foc->len >= 0) &&
-	      tcp_fastopen_queue_check(sk))) {
+	      tcp_fastopen_queue_check(sk, req))) {
 		foc->len = -1;
 		return NULL;
 	}
@@ -364,9 +378,11 @@ struct sock *tcp_try_fastopen(struct sock *sk, struct sk_buff *skb,
 		/* Client requests a cookie. */
 		tcp_fastopen_cookie_gen(sk, req, skb, &valid_foc);
 	} else if (foc->len > 0) {
+		treq->tfo_info |= TCP_COOKIE;
 		ret = tcp_fastopen_cookie_gen_check(sk, req, skb, foc,
 						    &valid_foc);
 		if (!ret) {
+			treq->tfo_info |= TCP_ERR_COOKIE;
 			NET_INC_STATS(sock_net(sk),
 				      LINUX_MIB_TCPFASTOPENPASSIVEFAIL);
 		} else {
@@ -392,6 +408,7 @@ fastopen:
 				}
 				NET_INC_STATS(sock_net(sk),
 					      LINUX_MIB_TCPFASTOPENPASSIVE);
+				treq->tfo_info |= TCP_FASTOPEN_SC;
 				return child;
 			}
 			NET_INC_STATS(sock_net(sk),
@@ -544,6 +561,7 @@ void tcp_fastopen_active_disable_ofo_check(struct sock *sk)
 		dst_release(dst);
 	}
 }
+EXPORT_SYMBOL(tcp_fastopen_active_disable_ofo_check);
 
 void tcp_fastopen_active_detect_blackhole(struct sock *sk, bool expired)
 {
@@ -561,3 +579,5 @@ void tcp_fastopen_active_detect_blackhole(struct sock *sk, bool expired)
 		NET_INC_STATS(sock_net(sk), LINUX_MIB_TCPFASTOPENACTIVEFAIL);
 	}
 }
+EXPORT_SYMBOL(tcp_fastopen_active_detect_blackhole);
+

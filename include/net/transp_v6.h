@@ -57,7 +57,7 @@ ip6_dgram_sock_seq_show(struct seq_file *seq, struct sock *sp, __u16 srcp,
 #define LOOPBACK4_IPV6 cpu_to_be32(0x7f000006)
 
 /* address family specific functions */
-extern const struct inet_connection_sock_af_ops ipv4_specific;
+extern struct inet_connection_sock_af_ops ipv4_specific;
 
 void inet6_destroy_sock(struct sock *sk);
 
