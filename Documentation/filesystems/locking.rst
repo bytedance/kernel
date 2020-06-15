@@ -428,14 +428,14 @@ prototypes::
 
 locking rules:
 
-==========		=============	=================	=========
+======================	=============	=================	=========
 ops			inode->i_lock	blocked_lock_lock	may block
-==========		=============	=================	=========
+======================	=============	=================	=========
 lm_notify:		yes		yes			no
 lm_grant:		no		no			no
 lm_break:		yes		no			no
 lm_change		yes		no			no
-==========		=============	=================	=========
+======================	=============	=================	=========
 
 buffer_head
 ===========
@@ -610,9 +610,9 @@ prototypes::
 
 locking rules:
 
-=============	========	===========================
+=============	=========	===========================
 ops		mmap_sem	PageLocked(page)
-=============	========	===========================
+=============	=========	===========================
 open:		yes
 close:		yes
 fault:		yes		can return with page locked
@@ -620,7 +620,7 @@ map_pages:	yes
 page_mkwrite:	yes		can return with page locked
 pfn_mkwrite:	yes
 access:		yes
-=============	========	===========================
+=============	=========	===========================
 
 ->fault() is called when a previously not present pte is about
 to be faulted in. The filesystem must find and return the page associated
