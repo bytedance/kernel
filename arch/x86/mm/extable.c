@@ -160,6 +160,7 @@ __visible bool ex_handler_copy_uaccess(const struct exception_table_entry *fixup
 {
 	WARN_ONCE(trapnr == X86_TRAP_GP, "General protection fault in user access. Non-canonical address?");
 	regs->ip = ex_fixup_addr(fixup);
+	regs->ax = trapnr;
 	return true;
 }
 EXPORT_SYMBOL(ex_handler_copy_uaccess);
