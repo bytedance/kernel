@@ -1354,6 +1354,16 @@ void do_machine_check(struct pt_regs *regs, long error_code)
 			if (!fixup_exception(regs, X86_TRAP_MC, error_code, 0))
 				mce_panic("Failed kernel mode recovery", &m, msg);
 		}
+
+		if (m.kflags & (MCE_IN_KERNEL_USRCPY | MCE_IN_KERNEL_USRGET)) {
+			current->mce_addr = m.addr;
+			current->mce_ripv = !!(m.mcgstatus & MCG_STATUS_RIPV);
+			current->mce_whole_page = whole_page(&m);
+			current->mce_kill_me.func = kill_me_maybe;
+			if (kill_it)
+				current->mce_kill_me.func = kill_me_now;
+			task_work_add(current, &current->mce_kill_me, true);
+		}
 	}
 
 out_ist:
