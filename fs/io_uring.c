@@ -226,7 +226,7 @@ struct io_ring_ctx {
 	struct {
 		unsigned int		flags;
 		unsigned int		compat: 1;
-		unsigned int		account_mem: 1;
+		unsigned int		limit_mem: 1;
 		unsigned int		cq_overflow_flushed: 1;
 		unsigned int		drain_next: 1;
 		unsigned int		eventfd_async: 1;
@@ -7062,13 +7062,13 @@ static inline int __io_account_mem(struct user_struct *user,
 
 static void io_unaccount_mem(struct io_ring_ctx *ctx, unsigned long nr_pages)
 {
-	if (ctx->account_mem)
+	if (ctx->limit_mem)
 		__io_unaccount_mem(ctx->user, nr_pages);
 }
 
 static int io_account_mem(struct io_ring_ctx *ctx, unsigned long nr_pages)
 {
-	if (ctx->account_mem)
+	if (ctx->limit_mem)
 		return __io_account_mem(ctx->user, nr_pages);
 
 	return 0;
@@ -7483,7 +7483,7 @@ static void io_ring_ctx_wait_and_kill(struct io_ring_ctx *ctx)
 	 * is closed but resources aren't reaped yet. This can cause
 	 * spurious failure in setting up a new ring.
 	 */
-	if (ctx->account_mem)
+	if (ctx->limit_mem)
 		io_unaccount_mem(ctx,
 				ring_pages(ctx->sq_entries, ctx->cq_entries));
 
@@ -7931,7 +7931,7 @@ static int io_uring_create(unsigned entries, struct io_uring_params *p,
 {
 	struct user_struct *user = NULL;
 	struct io_ring_ctx *ctx;
-	bool account_mem;
+	bool limit_mem;
 	int ret;
 
 	if (!entries)
@@ -7970,9 +7970,9 @@ static int io_uring_create(unsigned entries, struct io_uring_params *p,
 	}
 
 	user = get_uid(current_user());
-	account_mem = !capable(CAP_IPC_LOCK);
+	limit_mem = !capable(CAP_IPC_LOCK);
 
-	if (account_mem) {
+	if (limit_mem) {
 		ret = __io_account_mem(user,
 				ring_pages(p->sq_entries, p->cq_entries));
 		if (ret) {
@@ -7983,14 +7983,14 @@ static int io_uring_create(unsigned entries, struct io_uring_params *p,
 
 	ctx = io_ring_ctx_alloc(p);
 	if (!ctx) {
-		if (account_mem)
+		if (limit_mem)
 			__io_unaccount_mem(user, ring_pages(p->sq_entries,
 								p->cq_entries));
 		free_uid(user);
 		return -ENOMEM;
 	}
 	ctx->compat = in_compat_syscall();
-	ctx->account_mem = account_mem;
+	ctx->limit_mem = limit_mem;
 	ctx->user = user;
 	ctx->creds = get_current_cred();
 
