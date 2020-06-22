@@ -1365,15 +1365,50 @@ static void io_cqring_add_event(struct io_kiocb *req, long res, long cflags)
 	io_cqring_ev_posted(ctx);
 }
 
-static void __io_req_complete(struct io_kiocb *req, long res, unsigned cflags)
+static void io_submit_flush_completions(struct io_comp_state *cs)
 {
-	io_cqring_add_event(req, res, cflags);
-	io_put_req(req);
+	struct io_ring_ctx *ctx = cs->ctx;
+
+	spin_lock_irq(&ctx->completion_lock);
+	while (!list_empty(&cs->list)) {
+		struct io_kiocb *req;
+
+		req = list_first_entry(&cs->list, struct io_kiocb, list);
+		list_del(&req->list);
+		io_cqring_fill_event(req, req->result);
+		if (!(req->flags & REQ_F_LINK_HEAD)) {
+			req->flags |= REQ_F_COMP_LOCKED;
+			io_put_req(req);
+		} else {
+			spin_unlock_irq(&ctx->completion_lock);
+			io_put_req(req);
+			spin_lock_irq(&ctx->completion_lock);
+		}
+	}
+	io_commit_cqring(ctx);
+	spin_unlock_irq(&ctx->completion_lock);
+
+	io_cqring_ev_posted(ctx);
+	cs->nr = 0;
+}
+
+static void __io_req_complete(struct io_kiocb *req, long res, unsigned cflags,
+			      struct io_comp_state *cs)
+{
+	if (!cs) {
+		io_cqring_add_event(req, res, cflags);
+		io_put_req(req);
+	} else {
+		req->result = res;
+		list_add_tail(&req->list, &cs->list);
+		if (++cs->nr >= 32)
+			io_submit_flush_completions(cs);
+	}
 }
 
 static void io_req_complete(struct io_kiocb *req, long res)
 {
-	__io_req_complete(req, res, 0);
+	__io_req_complete(req, res, 0, NULL);
 }
 
 static inline bool io_is_fallback_req(struct io_kiocb *req)
@@ -3190,14 +3225,14 @@ static int io_splice(struct io_kiocb *req, bool force_nonblock)
 /*
  * IORING_OP_NOP just posts a completion event, nothing else.
  */
-static int io_nop(struct io_kiocb *req)
+static int io_nop(struct io_kiocb *req, struct io_comp_state *cs)
 {
 	struct io_ring_ctx *ctx = req->ctx;
 
 	if (unlikely(ctx->flags & IORING_SETUP_IOPOLL))
 		return -EINVAL;
 
-	io_req_complete(req, 0);
+	__io_req_complete(req, 0, 0, cs);
 	return 0;
 }
 
@@ -3419,7 +3454,8 @@ static int __io_remove_buffers(struct io_ring_ctx *ctx, struct io_buffer *buf,
 	return i;
 }
 
-static int io_remove_buffers(struct io_kiocb *req, bool force_nonblock)
+static int io_remove_buffers(struct io_kiocb *req, bool force_nonblock,
+			     struct io_comp_state *cs)
 {
 	struct io_provide_buf *p = &req->pbuf;
 	struct io_ring_ctx *ctx = req->ctx;
@@ -3438,7 +3474,7 @@ static int io_remove_buffers(struct io_kiocb *req, bool force_nonblock)
 	io_ring_submit_lock(ctx, !force_nonblock);
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
@@ -3496,7 +3532,8 @@ static int io_add_buffers(struct io_provide_buf *pbuf, struct io_buffer **head)
 	return i ? i : -ENOMEM;
 }
 
-static int io_provide_buffers(struct io_kiocb *req, bool force_nonblock)
+static int io_provide_buffers(struct io_kiocb *req, bool force_nonblock,
+			      struct io_comp_state *cs)
 {
 	struct io_provide_buf *p = &req->pbuf;
 	struct io_ring_ctx *ctx = req->ctx;
@@ -3525,7 +3562,7 @@ out:
 	io_ring_submit_unlock(ctx, !force_nonblock);
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
@@ -3556,7 +3593,8 @@ static int io_epoll_ctl_prep(struct io_kiocb *req,
 #endif
 }
 
-static int io_epoll_ctl(struct io_kiocb *req, bool force_nonblock)
+static int io_epoll_ctl(struct io_kiocb *req, bool force_nonblock,
+			struct io_comp_state *cs)
 {
 #if defined(CONFIG_EPOLL)
 	struct io_epoll *ie = &req->epoll;
@@ -3568,7 +3606,7 @@ static int io_epoll_ctl(struct io_kiocb *req, bool force_nonblock)
 
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 #else
 	return -EOPNOTSUPP;
@@ -3713,7 +3751,8 @@ static int io_close_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
-static int io_close(struct io_kiocb *req, bool force_nonblock)
+static int io_close(struct io_kiocb *req, bool force_nonblock,
+		    struct io_comp_state *cs)
 {
 	struct io_close *close = &req->close;
 	int ret;
@@ -3740,7 +3779,7 @@ static int io_close(struct io_kiocb *req, bool force_nonblock)
 		req_set_fail_links(req);
 	fput(close->put_file);
 	close->put_file = NULL;
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
@@ -3827,7 +3866,8 @@ static int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return ret;
 }
 
-static int io_sendmsg(struct io_kiocb *req, bool force_nonblock)
+static int io_sendmsg(struct io_kiocb *req, bool force_nonblock,
+		      struct io_comp_state *cs)
 {
 	struct io_async_msghdr *kmsg = NULL;
 	struct socket *sock;
@@ -3876,11 +3916,12 @@ static int io_sendmsg(struct io_kiocb *req, bool force_nonblock)
 	req->flags &= ~REQ_F_NEED_CLEANUP;
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
-static int io_send(struct io_kiocb *req, bool force_nonblock)
+static int io_send(struct io_kiocb *req, bool force_nonblock,
+		   struct io_comp_state *cs)
 {
 	struct socket *sock;
 	int ret;
@@ -3918,7 +3959,7 @@ static int io_send(struct io_kiocb *req, bool force_nonblock)
 
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
@@ -4062,7 +4103,8 @@ static int io_recvmsg_prep(struct io_kiocb *req,
 	return ret;
 }
 
-static int io_recvmsg(struct io_kiocb *req, bool force_nonblock)
+static int io_recvmsg(struct io_kiocb *req, bool force_nonblock,
+		      struct io_comp_state *cs)
 {
 	struct io_async_msghdr *kmsg = NULL;
 	struct socket *sock;
@@ -4124,11 +4166,12 @@ static int io_recvmsg(struct io_kiocb *req, bool force_nonblock)
 	req->flags &= ~REQ_F_NEED_CLEANUP;
 	if (ret < 0)
 		req_set_fail_links(req);
-	__io_req_complete(req, ret, cflags);
+	__io_req_complete(req, ret, cflags, cs);
 	return 0;
 }
 
-static int io_recv(struct io_kiocb *req, bool force_nonblock)
+static int io_recv(struct io_kiocb *req, bool force_nonblock,
+		   struct io_comp_state *cs)
 {
 	struct io_buffer *kbuf = NULL;
 	struct socket *sock;
@@ -4180,7 +4223,7 @@ static int io_recv(struct io_kiocb *req, bool force_nonblock)
 	req->flags &= ~REQ_F_NEED_CLEANUP;
 	if (ret < 0)
 		req_set_fail_links(req);
-	__io_req_complete(req, ret, cflags);
+	__io_req_complete(req, ret, cflags, cs);
 	return 0;
 }
 
@@ -4200,7 +4243,8 @@ static int io_accept_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 	return 0;
 }
 
-static int io_accept(struct io_kiocb *req, bool force_nonblock)
+static int io_accept(struct io_kiocb *req, bool force_nonblock,
+		     struct io_comp_state *cs)
 {
 	struct io_accept *accept = &req->accept;
 	unsigned int file_flags = force_nonblock ? O_NONBLOCK : 0;
@@ -4219,7 +4263,7 @@ static int io_accept(struct io_kiocb *req, bool force_nonblock)
 			ret = -EINTR;
 		req_set_fail_links(req);
 	}
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
@@ -4243,7 +4287,8 @@ static int io_connect_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 					&io->connect.address);
 }
 
-static int io_connect(struct io_kiocb *req, bool force_nonblock)
+static int io_connect(struct io_kiocb *req, bool force_nonblock,
+		      struct io_comp_state *cs)
 {
 	struct io_async_ctx __io, *io;
 	unsigned file_flags;
@@ -4279,7 +4324,7 @@ static int io_connect(struct io_kiocb *req, bool force_nonblock)
 out:
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 #else /* !CONFIG_NET */
@@ -5195,7 +5240,8 @@ static int io_files_update_prep(struct io_kiocb *req,
 	return 0;
 }
 
-static int io_files_update(struct io_kiocb *req, bool force_nonblock)
+static int io_files_update(struct io_kiocb *req, bool force_nonblock,
+			   struct io_comp_state *cs)
 {
 	struct io_ring_ctx *ctx = req->ctx;
 	struct io_uring_files_update up;
@@ -5213,7 +5259,7 @@ static int io_files_update(struct io_kiocb *req, bool force_nonblock)
 
 	if (ret < 0)
 		req_set_fail_links(req);
-	io_req_complete(req, ret);
+	__io_req_complete(req, ret, 0, cs);
 	return 0;
 }
 
@@ -5414,7 +5460,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 
 	switch (req->opcode) {
 	case IORING_OP_NOP:
-		ret = io_nop(req);
+		ret = io_nop(req, cs);
 		break;
 	case IORING_OP_READV:
 	case IORING_OP_READ_FIXED:
@@ -5476,9 +5522,9 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 				break;
 		}
 		if (req->opcode == IORING_OP_SENDMSG)
-			ret = io_sendmsg(req, force_nonblock);
+			ret = io_sendmsg(req, force_nonblock, cs);
 		else
-			ret = io_send(req, force_nonblock);
+			ret = io_send(req, force_nonblock, cs);
 		break;
 	case IORING_OP_RECVMSG:
 	case IORING_OP_RECV:
@@ -5488,9 +5534,9 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 				break;
 		}
 		if (req->opcode == IORING_OP_RECVMSG)
-			ret = io_recvmsg(req, force_nonblock);
+			ret = io_recvmsg(req, force_nonblock, cs);
 		else
-			ret = io_recv(req, force_nonblock);
+			ret = io_recv(req, force_nonblock, cs);
 		break;
 	case IORING_OP_TIMEOUT:
 		if (sqe) {
@@ -5514,7 +5560,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_accept(req, force_nonblock);
+		ret = io_accept(req, force_nonblock, cs);
 		break;
 	case IORING_OP_CONNECT:
 		if (sqe) {
@@ -5522,7 +5568,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_connect(req, force_nonblock);
+		ret = io_connect(req, force_nonblock, cs);
 		break;
 	case IORING_OP_ASYNC_CANCEL:
 		if (sqe) {
@@ -5554,7 +5600,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_close(req, force_nonblock);
+		ret = io_close(req, force_nonblock, cs);
 		break;
 	case IORING_OP_FILES_UPDATE:
 		if (sqe) {
@@ -5562,7 +5608,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_files_update(req, force_nonblock);
+		ret = io_files_update(req, force_nonblock, cs);
 		break;
 	case IORING_OP_STATX:
 		if (sqe) {
@@ -5602,7 +5648,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_epoll_ctl(req, force_nonblock);
+		ret = io_epoll_ctl(req, force_nonblock, cs);
 		break;
 	case IORING_OP_SPLICE:
 		if (sqe) {
@@ -5618,7 +5664,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_provide_buffers(req, force_nonblock);
+		ret = io_provide_buffers(req, force_nonblock, cs);
 		break;
 	case IORING_OP_REMOVE_BUFFERS:
 		if (sqe) {
@@ -5626,7 +5672,7 @@ static int io_issue_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 			if (ret)
 				break;
 		}
-		ret = io_remove_buffers(req, force_nonblock);
+		ret = io_remove_buffers(req, force_nonblock, cs);
 		break;
 	case IORING_OP_TEE:
 		if (sqe) {
@@ -6056,33 +6102,6 @@ static int io_submit_sqe(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 	}
 
 	return 0;
-}
-
-static void io_submit_flush_completions(struct io_comp_state *cs)
-{
-	struct io_ring_ctx *ctx = cs->ctx;
-
-	spin_lock_irq(&ctx->completion_lock);
-	while (!list_empty(&cs->list)) {
-		struct io_kiocb *req;
-
-		req = list_first_entry(&cs->list, struct io_kiocb, list);
-		list_del(&req->list);
-		io_cqring_fill_event(req, req->result);
-		if (!(req->flags & REQ_F_LINK_HEAD)) {
-			req->flags |= REQ_F_COMP_LOCKED;
-			io_put_req(req);
-		} else {
-			spin_unlock_irq(&ctx->completion_lock);
-			io_put_req(req);
-			spin_lock_irq(&ctx->completion_lock);
-		}
-	}
-	io_commit_cqring(ctx);
-	spin_unlock_irq(&ctx->completion_lock);
-
-	io_cqring_ev_posted(ctx);
-	cs->nr = 0;
 }
 
 /*
