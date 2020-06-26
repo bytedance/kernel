@@ -103,11 +103,14 @@ arch_dma_alloc(struct device *dev, size_t size, dma_addr_t *dma_handle,
 	 * We need to iterate through the pages, clearing the dcache for
 	 * them and setting the cache-inhibit bit.
 	 */
+	mmap_read_lock(&init_mm);
 	if (walk_page_range(&init_mm, va, va + size, &set_nocache_walk_ops,
 			NULL)) {
+		mmap_read_unlock(&init_mm);
 		free_pages_exact(page, size);
 		return NULL;
 	}
+	mmap_read_unlock(&init_mm);
 
 	return (void *)va;
 }
@@ -119,8 +122,10 @@ arch_dma_free(struct device *dev, size_t size, void *vaddr,
 	unsigned long va = (unsigned long)vaddr;
 
 	/* walk_page_range shouldn't be able to fail here */
+	mmap_read_lock(&init_mm);
 	WARN_ON(walk_page_range(&init_mm, va, va + size,
 			&clear_nocache_walk_ops, NULL));
+	mmap_read_unlock(&init_mm);
 
 	free_pages_exact(vaddr, size);
 }
