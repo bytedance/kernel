@@ -258,6 +258,11 @@ static void memcg_unlink_cache(struct kmem_cache *s)
 		list_del(&s->memcg_params.kmem_caches_node);
 	}
 }
+
+static inline bool memcg_kmem_cache_dying(struct kmem_cache *s)
+{
+	return s->memcg_params.dying;
+}
 #else
 static inline int init_memcg_params(struct kmem_cache *s,
 				    struct kmem_cache *root_cache)
@@ -271,6 +276,11 @@ static inline void destroy_memcg_params(struct kmem_cache *s)
 
 static inline void memcg_unlink_cache(struct kmem_cache *s)
 {
+}
+
+static inline bool memcg_kmem_cache_dying(struct kmem_cache *s)
+{
+	return false;
 }
 #endif /* CONFIG_MEMCG_KMEM */
 
@@ -324,6 +334,13 @@ int slab_unmergeable(struct kmem_cache *s)
 	 * We may have set a slab to be unmergeable during bootstrap.
 	 */
 	if (s->refcount < 0)
+		return 1;
+
+	/*
+	 * If the kmem_cache is dying. We should also skip this
+	 * kmem_cache.
+	 */
+	if (memcg_kmem_cache_dying(s))
 		return 1;
 
 	return 0;
@@ -886,12 +903,15 @@ static int shutdown_memcg_caches(struct kmem_cache *s)
 	return 0;
 }
 
-static void flush_memcg_workqueue(struct kmem_cache *s)
+static void memcg_set_kmem_cache_dying(struct kmem_cache *s)
 {
 	spin_lock_irq(&memcg_kmem_wq_lock);
 	s->memcg_params.dying = true;
 	spin_unlock_irq(&memcg_kmem_wq_lock);
+}
 
+static void flush_memcg_workqueue(struct kmem_cache *s)
+{
 	/*
 	 * SLAB and SLUB deactivate the kmem_caches through call_rcu. Make
 	 * sure all registered rcu callbacks have been invoked.
@@ -924,6 +944,10 @@ static inline int shutdown_memcg_caches(struct kmem_cache *s)
 	return 0;
 }
 
+static void memcg_set_kmem_cache_dying(struct kmem_cache *s)
+{
+}
+
 static inline void flush_memcg_workqueue(struct kmem_cache *s)
 {
 }
@@ -944,6 +968,15 @@ void kmem_cache_destroy(struct kmem_cache *s)
 	if (unlikely(!s))
 		return;
 
+	mutex_lock(&slab_mutex);
+	s->refcount--;
+	if (s->refcount) {
+		mutex_unlock(&slab_mutex);
+		return;
+	}
+	memcg_set_kmem_cache_dying(s);
+	mutex_unlock(&slab_mutex);
+
 	flush_memcg_workqueue(s);
 
 	get_online_cpus();
@@ -951,8 +984,8 @@ void kmem_cache_destroy(struct kmem_cache *s)
 
 	mutex_lock(&slab_mutex);
 
-	s->refcount--;
-	if (s->refcount)
+	if (WARN(s->refcount, "kmem_cache_destroy %s: Slab refcount is %d\n",
+		 s->name, s->refcount))
 		goto out_unlock;
 
 	err = shutdown_memcg_caches(s);
