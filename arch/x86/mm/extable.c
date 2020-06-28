@@ -141,6 +141,18 @@ __visible bool ex_handler_ext(const struct exception_table_entry *fixup,
 }
 EXPORT_SYMBOL(ex_handler_ext);
 
+__visible bool ex_handler_get_uaccess(const struct exception_table_entry *fixup,
+				  struct pt_regs *regs, int trapnr,
+				  unsigned long error_code,
+				  unsigned long fault_addr)
+{
+	WARN_ONCE(trapnr == X86_TRAP_GP, "General protection fault in user access. Non-canonical address?");
+	regs->ip = ex_fixup_addr(fixup);
+	return true;
+}
+EXPORT_SYMBOL(ex_handler_get_uaccess);
+
+
 __visible bool ex_handler_copy_uaccess(const struct exception_table_entry *fixup,
 				  struct pt_regs *regs, int trapnr,
 				  unsigned long error_code,
@@ -209,6 +221,19 @@ __visible bool ex_has_fault_handler(unsigned long ip)
 	handler = ex_fixup_handler(e);
 
 	return handler == ex_handler_fault;
+}
+
+bool ex_has_get_uaccess_handler(unsigned long ip)
+{
+	const struct exception_table_entry *e;
+	ex_handler_t handler;
+
+	e = search_exception_tables(ip);
+	if (!e)
+		return false;
+	handler = ex_fixup_handler(e);
+
+	return handler == ex_handler_get_uaccess;
 }
 
 bool ex_has_copy_uaccess_handler(unsigned long ip)

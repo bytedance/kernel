@@ -133,6 +133,9 @@
 # define _ASM_EXTABLE_UA(from, to)				\
 	_ASM_EXTABLE_HANDLE(from, to, ex_handler_uaccess)
 
+# define _ASM_EXTABLE_GET_UA(from, to)				\
+	_ASM_EXTABLE_HANDLE(from, to, ex_handler_get_uaccess)
+
 # define _ASM_EXTABLE_CPY_UA(from, to)				\
 	_ASM_EXTABLE_HANDLE(from, to, ex_handler_copy_uaccess)
 
@@ -166,6 +169,9 @@
 
 # define _ASM_EXTABLE_UA(from, to)				\
 	_ASM_EXTABLE_HANDLE(from, to, ex_handler_uaccess)
+
+# define _ASM_EXTABLE_GET_UA(from, to)				\
+	_ASM_EXTABLE_HANDLE(from, to, ex_handler_get_uaccess)
 
 # define _ASM_EXTABLE_CPY_UA(from, to)				\
 	_ASM_EXTABLE_HANDLE(from, to, ex_handler_copy_uaccess)
