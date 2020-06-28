@@ -2388,7 +2388,6 @@ static int io_prep_rw(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 
 		kiocb->ki_flags |= IOCB_HIPRI;
 		kiocb->ki_complete = io_complete_rw_iopoll;
-		req->result = 0;
 		req->iopoll_completed = 0;
 	} else {
 		if (kiocb->ki_flags & IOCB_HIPRI)
@@ -2961,10 +2960,8 @@ static int io_read(struct io_kiocb *req, bool force_nonblock,
 	if (!force_nonblock)
 		kiocb->ki_flags &= ~IOCB_NOWAIT;
 
-	req->result = 0;
 	io_size = ret;
-	if (req->flags & REQ_F_LINK_HEAD)
-		req->result = io_size;
+	req->result = io_size;
 
 	/* If the file doesn't support async, just async punt */
 	if (force_nonblock && !io_file_supports_async(req->file, READ))
@@ -3058,10 +3055,8 @@ static int io_write(struct io_kiocb *req, bool force_nonblock,
 	if (!force_nonblock)
 		req->rw.kiocb.ki_flags &= ~IOCB_NOWAIT;
 
-	req->result = 0;
 	io_size = ret;
-	if (req->flags & REQ_F_LINK_HEAD)
-		req->result = io_size;
+	req->result = io_size;
 
 	/* If the file doesn't support async, just async punt */
 	if (force_nonblock && !io_file_supports_async(req->file, WRITE))
