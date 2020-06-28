@@ -233,13 +233,17 @@ static int error_context(struct mce *m, struct pt_regs *regs)
 		return IN_USER;
 
 	if (mc_recoverable(m->mcgstatus) && (ex_has_fault_handler(m->ip) ||
-					ex_has_copy_uaccess_handler(m->ip))) {
+					ex_has_copy_uaccess_handler(m->ip) ||
+					ex_has_get_uaccess_handler(m->ip))) {
 		if (ex_has_copy_uaccess_handler(m->ip)) {
 			if (regs != NULL && is_copy_from_user(regs))
 				m->kflags |= MCE_IN_KERNEL_USRCPY;
 			else if (regs != NULL)
 				return IN_KERNEL;
 		}
+
+		if (ex_has_get_uaccess_handler(m->ip))
+			m->kflags |= MCE_IN_KERNEL_USRGET;
 
 		m->kflags |= MCE_IN_KERNEL_RECOV;
 		return IN_KERNEL_RECOV;

@@ -136,6 +136,7 @@
 #define	MCE_HANDLED_MCELOG	BIT_ULL(5)
 #define MCE_IN_KERNEL_RECOV	BIT_ULL(6)
 #define MCE_IN_KERNEL_USRCPY	BIT_ULL(7)
+#define MCE_IN_KERNEL_USRGET	BIT_ULL(8)
 
 /*
  * This structure contains all data related to the MCE log.  Also

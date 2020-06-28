@@ -328,8 +328,8 @@ do {									\
 		     "	xorl %%edx,%%edx\n"				\
 		     "	jmp 3b\n"					\
 		     ".previous\n"					\
-		     _ASM_EXTABLE_UA(1b, 4b)				\
-		     _ASM_EXTABLE_UA(2b, 4b)				\
+		     _ASM_EXTABLE_GET_UA(1b, 4b)				\
+		     _ASM_EXTABLE_GET_UA(2b, 4b)				\
 		     : "=r" (retval), "=&A"(x)				\
 		     : "m" (__m(__ptr)), "m" __m(((u32 __user *)(__ptr)) + 1),	\
 		       "i" (errret), "0" (retval));			\
@@ -374,7 +374,7 @@ do {									\
 		     "	xor"itype" %"rtype"1,%"rtype"1\n"		\
 		     "	jmp 2b\n"					\
 		     ".previous\n"					\
-		     _ASM_EXTABLE_UA(1b, 3b)				\
+		     _ASM_EXTABLE_GET_UA(1b, 3b)				\
 		     : "=r" (err), ltype(x)				\
 		     : "m" (__m(addr)), "i" (errret), "0" (err))
 
@@ -386,7 +386,7 @@ do {									\
 		     "3:	mov %3,%0\n"				\
 		     "	jmp 2b\n"					\
 		     ".previous\n"					\
-		     _ASM_EXTABLE_UA(1b, 3b)				\
+		     _ASM_EXTABLE_GET_UA(1b, 3b)				\
 		     : "=r" (err), ltype(x)				\
 		     : "m" (__m(addr)), "i" (errret), "0" (err))
 
