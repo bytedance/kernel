@@ -36,8 +36,8 @@
 	jmp .Lcopy_user_handle_tail
 	.previous
 
-	_ASM_EXTABLE_UA(100b, 103b)
-	_ASM_EXTABLE_UA(101b, 103b)
+	_ASM_EXTABLE_CPY_UA(100b, 103b)
+	_ASM_EXTABLE_CPY_UA(101b, 103b)
 	.endm
 
 /*
@@ -116,26 +116,26 @@ ENTRY(copy_user_generic_unrolled)
 60:	jmp .Lcopy_user_handle_tail /* ecx is zerorest also */
 	.previous
 
-	_ASM_EXTABLE_UA(1b, 30b)
-	_ASM_EXTABLE_UA(2b, 30b)
-	_ASM_EXTABLE_UA(3b, 30b)
-	_ASM_EXTABLE_UA(4b, 30b)
-	_ASM_EXTABLE_UA(5b, 30b)
-	_ASM_EXTABLE_UA(6b, 30b)
-	_ASM_EXTABLE_UA(7b, 30b)
-	_ASM_EXTABLE_UA(8b, 30b)
-	_ASM_EXTABLE_UA(9b, 30b)
-	_ASM_EXTABLE_UA(10b, 30b)
-	_ASM_EXTABLE_UA(11b, 30b)
-	_ASM_EXTABLE_UA(12b, 30b)
-	_ASM_EXTABLE_UA(13b, 30b)
-	_ASM_EXTABLE_UA(14b, 30b)
-	_ASM_EXTABLE_UA(15b, 30b)
-	_ASM_EXTABLE_UA(16b, 30b)
-	_ASM_EXTABLE_UA(18b, 40b)
-	_ASM_EXTABLE_UA(19b, 40b)
-	_ASM_EXTABLE_UA(21b, 50b)
-	_ASM_EXTABLE_UA(22b, 50b)
+	_ASM_EXTABLE_CPY_UA(1b, 30b)
+	_ASM_EXTABLE_CPY_UA(2b, 30b)
+	_ASM_EXTABLE_CPY_UA(3b, 30b)
+	_ASM_EXTABLE_CPY_UA(4b, 30b)
+	_ASM_EXTABLE_CPY_UA(5b, 30b)
+	_ASM_EXTABLE_CPY_UA(6b, 30b)
+	_ASM_EXTABLE_CPY_UA(7b, 30b)
+	_ASM_EXTABLE_CPY_UA(8b, 30b)
+	_ASM_EXTABLE_CPY_UA(9b, 30b)
+	_ASM_EXTABLE_CPY_UA(10b, 30b)
+	_ASM_EXTABLE_CPY_UA(11b, 30b)
+	_ASM_EXTABLE_CPY_UA(12b, 30b)
+	_ASM_EXTABLE_CPY_UA(13b, 30b)
+	_ASM_EXTABLE_CPY_UA(14b, 30b)
+	_ASM_EXTABLE_CPY_UA(15b, 30b)
+	_ASM_EXTABLE_CPY_UA(16b, 30b)
+	_ASM_EXTABLE_CPY_UA(18b, 40b)
+	_ASM_EXTABLE_CPY_UA(19b, 40b)
+	_ASM_EXTABLE_CPY_UA(21b, 50b)
+	_ASM_EXTABLE_CPY_UA(22b, 50b)
 ENDPROC(copy_user_generic_unrolled)
 EXPORT_SYMBOL(copy_user_generic_unrolled)
 
@@ -180,8 +180,8 @@ ENTRY(copy_user_generic_string)
 	jmp .Lcopy_user_handle_tail
 	.previous
 
-	_ASM_EXTABLE_UA(1b, 11b)
-	_ASM_EXTABLE_UA(3b, 12b)
+	_ASM_EXTABLE_CPY_UA(1b, 11b)
+	_ASM_EXTABLE_CPY_UA(3b, 12b)
 ENDPROC(copy_user_generic_string)
 EXPORT_SYMBOL(copy_user_generic_string)
 
@@ -213,7 +213,7 @@ ENTRY(copy_user_enhanced_fast_string)
 	jmp .Lcopy_user_handle_tail
 	.previous
 
-	_ASM_EXTABLE_UA(1b, 12b)
+	_ASM_EXTABLE_CPY_UA(1b, 12b)
 ENDPROC(copy_user_enhanced_fast_string)
 EXPORT_SYMBOL(copy_user_enhanced_fast_string)
 
@@ -238,7 +238,7 @@ ALIGN;
 	ASM_CLAC
 	ret
 
-	_ASM_EXTABLE_UA(1b, 2b)
+	_ASM_EXTABLE_CPY_UA(1b, 2b)
 END(.Lcopy_user_handle_tail)
 
 /*
@@ -367,27 +367,27 @@ ENTRY(__copy_user_nocache)
 	jmp .Lcopy_user_handle_tail
 	.previous
 
-	_ASM_EXTABLE_UA(1b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(2b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(3b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(4b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(5b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(6b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(7b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(8b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(9b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(10b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(11b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(12b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(13b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(14b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(15b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(16b, .L_fixup_4x8b_copy)
-	_ASM_EXTABLE_UA(20b, .L_fixup_8b_copy)
-	_ASM_EXTABLE_UA(21b, .L_fixup_8b_copy)
-	_ASM_EXTABLE_UA(30b, .L_fixup_4b_copy)
-	_ASM_EXTABLE_UA(31b, .L_fixup_4b_copy)
-	_ASM_EXTABLE_UA(40b, .L_fixup_1b_copy)
-	_ASM_EXTABLE_UA(41b, .L_fixup_1b_copy)
+	_ASM_EXTABLE_CPY_UA(1b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(2b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(3b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(4b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(5b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(6b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(7b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(8b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(9b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(10b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(11b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(12b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(13b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(14b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(15b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(16b, .L_fixup_4x8b_copy)
+	_ASM_EXTABLE_CPY_UA(20b, .L_fixup_8b_copy)
+	_ASM_EXTABLE_CPY_UA(21b, .L_fixup_8b_copy)
+	_ASM_EXTABLE_CPY_UA(30b, .L_fixup_4b_copy)
+	_ASM_EXTABLE_CPY_UA(31b, .L_fixup_4b_copy)
+	_ASM_EXTABLE_CPY_UA(40b, .L_fixup_1b_copy)
+	_ASM_EXTABLE_CPY_UA(41b, .L_fixup_1b_copy)
 ENDPROC(__copy_user_nocache)
 EXPORT_SYMBOL(__copy_user_nocache)

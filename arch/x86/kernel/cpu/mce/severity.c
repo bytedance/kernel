@@ -198,6 +198,24 @@ static struct severity {
 #define mc_recoverable(mcg) (((mcg) & (MCG_STATUS_RIPV|MCG_STATUS_EIPV)) == \
 				(MCG_STATUS_RIPV|MCG_STATUS_EIPV))
 
+static bool in_kernel_space(unsigned long address)
+{
+	/*
+	 * On 64-bit systems, the vsyscall page is at an address above
+	 * TASK_SIZE_MAX, but is not considered part of the kernel
+	 * address space.
+	 */
+	if (IS_ENABLED(CONFIG_X86_64) && (address & PAGE_MASK) == VSYSCALL_ADDR)
+		return false;
+
+	return address >= TASK_SIZE_MAX;
+}
+
+static bool is_copy_from_user(struct pt_regs *regs)
+{
+	return in_kernel_space(regs->di) && !in_kernel_space(regs->si);
+}
+
 /*
  * If mcgstatus indicated that ip/cs on the stack were
  * no good, then "m->cs" will be zero and we will have
@@ -209,12 +227,20 @@ static struct severity {
  * distinguish an exception taken in user from from one
  * taken in the kernel.
  */
-static int error_context(struct mce *m)
+static int error_context(struct mce *m, struct pt_regs *regs)
 {
 	if ((m->cs & 3) == 3)
 		return IN_USER;
 
-	if (mc_recoverable(m->mcgstatus) && ex_has_fault_handler(m->ip)) {
+	if (mc_recoverable(m->mcgstatus) && (ex_has_fault_handler(m->ip) ||
+					ex_has_copy_uaccess_handler(m->ip))) {
+		if (ex_has_copy_uaccess_handler(m->ip)) {
+			if (regs != NULL && is_copy_from_user(regs))
+				m->kflags |= MCE_IN_KERNEL_USRCPY;
+			else if (regs != NULL)
+				return IN_KERNEL;
+		}
+
 		m->kflags |= MCE_IN_KERNEL_RECOV;
 		return IN_KERNEL_RECOV;
 	}
@@ -253,9 +279,10 @@ static int mce_severity_amd_smca(struct mce *m, enum context err_ctx)
  * See AMD Error Scope Hierarchy table in a newer BKDG. For example
  * 49125_15h_Models_30h-3Fh_BKDG.pdf, section "RAS Features"
  */
-static int mce_severity_amd(struct mce *m, int tolerant, char **msg, bool is_excp)
+static int mce_severity_amd(struct mce *m, struct pt_regs *regs, int tolerant,
+		char **msg, bool is_excp)
 {
-	enum context ctx = error_context(m);
+	enum context ctx = error_context(m, regs);
 
 	/* Processor Context Corrupt, no need to fumble too much, die! */
 	if (m->status & MCI_STATUS_PCC)
@@ -305,10 +332,11 @@ static int mce_severity_amd(struct mce *m, int tolerant, char **msg, bool is_exc
 	return MCE_KEEP_SEVERITY;
 }
 
-static int mce_severity_intel(struct mce *m, int tolerant, char **msg, bool is_excp)
+static int mce_severity_intel(struct mce *m, struct pt_regs *regs,
+		int tolerant, char **msg, bool is_excp)
 {
 	enum exception excp = (is_excp ? EXCP_CONTEXT : NO_EXCP);
-	enum context ctx = error_context(m);
+	enum context ctx = error_context(m, regs);
 	struct severity *s;
 
 	for (s = severities;; s++) {
@@ -336,7 +364,7 @@ static int mce_severity_intel(struct mce *m, int tolerant, char **msg, bool is_e
 }
 
 /* Default to mce_severity_intel */
-int (*mce_severity)(struct mce *m, int tolerant, char **msg, bool is_excp) =
+int (*mce_severity)(struct mce *m, struct pt_regs *regs, int tolerant, char **msg, bool is_excp) =
 		    mce_severity_intel;
 
 void __init mcheck_vendor_init_severity(void)
