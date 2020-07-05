@@ -33,6 +33,7 @@ extern int fixup_exception(struct pt_regs *regs, int trapnr,
 			   unsigned long error_code, unsigned long fault_addr);
 extern int fixup_bug(struct pt_regs *regs, int trapnr);
 extern bool ex_has_fault_handler(unsigned long ip);
+extern bool ex_has_copy_uaccess_handler(unsigned long ip);
 extern void early_fixup_exception(struct pt_regs *regs, int trapnr);
 
 #endif
