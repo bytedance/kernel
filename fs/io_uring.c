@@ -2049,7 +2049,7 @@ static int io_iopoll_getevents(struct io_ring_ctx *ctx, unsigned int *nr_events,
 		ret = io_do_iopoll(ctx, nr_events, min);
 		if (ret < 0)
 			return ret;
-		if (!min || *nr_events >= min)
+		if (*nr_events >= min)
 			return 0;
 	}
 
@@ -2092,8 +2092,6 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
 	 */
 	mutex_lock(&ctx->uring_lock);
 	do {
-		int tmin = 0;
-
 		/*
 		 * Don't enter poll loop if we already have events pending.
 		 * If we do, we can potentially be spinning for commands that
@@ -2118,10 +2116,7 @@ static int io_iopoll_check(struct io_ring_ctx *ctx, unsigned *nr_events,
 			mutex_lock(&ctx->uring_lock);
 		}
 
-		if (*nr_events < min)
-			tmin = min - *nr_events;
-
-		ret = io_iopoll_getevents(ctx, nr_events, tmin);
+		ret = io_iopoll_getevents(ctx, nr_events, min);
 		if (ret <= 0)
 			break;
 		ret = 0;
