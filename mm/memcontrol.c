@@ -1405,11 +1405,12 @@ static const struct memory_stat memory_stats[] = {
 	{ "inactive_file", PAGE_SIZE, NR_INACTIVE_FILE },
 	{ "active_file", PAGE_SIZE, NR_ACTIVE_FILE },
 	{ "unevictable", PAGE_SIZE, NR_UNEVICTABLE },
-	{ "slab_reclaimable", PAGE_SIZE, NR_SLAB_RECLAIMABLE },
-	{ "slab_unreclaimable", PAGE_SIZE, NR_SLAB_UNRECLAIMABLE },
+	{ "slab_reclaimable", 1, NR_SLAB_RECLAIMABLE_B },
+	{ "slab_unreclaimable", 1, NR_SLAB_UNRECLAIMABLE_B },
 #ifdef CONFIG_MEMCG_BGD_RECLAIM
 	{ "bgd_reclaim", PAGE_SIZE, MEMCG_BGD_RECLAIM },
 #endif
+
 	/* The memory events */
 	{ "workingset_refault", 1, WORKINGSET_REFAULT },
 	{ "workingset_activate", 1, WORKINGSET_ACTIVATE },
@@ -1443,8 +1444,8 @@ static char *memory_stat_format(struct mem_cgroup *memcg)
 		size *= memory_stats[i].ratio;
 		seq_buf_printf(&s, "%s %llu\n", memory_stats[i].name, size);
 
-		if (unlikely(memory_stats[i].idx == NR_SLAB_UNRECLAIMABLE)) {
-			size += memcg_page_state(memcg, NR_SLAB_RECLAIMABLE) *
+		if (unlikely(memory_stats[i].idx == NR_SLAB_UNRECLAIMABLE_B)) {
+			size += memcg_page_state(memcg, NR_SLAB_RECLAIMABLE_B) *
 				memory_stats[i - 1].ratio;
 			seq_buf_printf(&s, "slab %llu\n", size);
 		}
