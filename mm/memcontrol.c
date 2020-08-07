@@ -1502,7 +1502,7 @@ struct memory_stat {
 static const struct memory_stat memory_stats[] = {
 	{ "anon", PAGE_SIZE, NR_ANON_MAPPED },
 	{ "file", PAGE_SIZE, NR_FILE_PAGES },
-	{ "kernel_stack", 1024, MEMCG_KERNEL_STACK_KB },
+	{ "kernel_stack", 1024, NR_KERNEL_STACK_KB },
 	{ "sock", PAGE_SIZE, MEMCG_SOCK },
 	{ "shmem", PAGE_SIZE, NR_SHMEM },
 	{ "file_mapped", PAGE_SIZE, NR_FILE_MAPPED },
