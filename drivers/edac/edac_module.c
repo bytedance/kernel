@@ -36,7 +36,7 @@ static int edac_set_debug_level(const char *buf,
 }
 
 /* Values of 0 to 4 will generate output */
-int edac_debug_level = 2;
+int edac_debug_level = 0;
 EXPORT_SYMBOL_GPL(edac_debug_level);
 
 module_param_call(edac_debug_level, edac_set_debug_level, param_get_int,
