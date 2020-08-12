@@ -340,6 +340,9 @@ void tcp_v4_mtu_reduced(struct sock *sk)
 	struct inet_sock *inet = inet_sk(sk);
 	struct dst_entry *dst;
 	u32 mtu;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	if ((1 << sk->sk_state) & (TCPF_LISTEN | TCPF_CLOSE))
 		return;
@@ -366,7 +369,14 @@ void tcp_v4_mtu_reduced(struct sock *sk)
 		 * dropped. This is the new "fast" path mtu
 		 * discovery.
 		 */
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_SIMPLE_RETRANSMIT);
+#endif
 		tcp_simple_retransmit(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	} /* else let the usual retransmit timer handle it */
 }
 EXPORT_SYMBOL(tcp_v4_mtu_reduced);

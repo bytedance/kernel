@@ -343,6 +343,9 @@ failure:
 static void tcp_v6_mtu_reduced(struct sock *sk)
 {
 	struct dst_entry *dst;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	if ((1 << sk->sk_state) & (TCPF_LISTEN | TCPF_CLOSE))
 		return;
@@ -353,7 +356,14 @@ static void tcp_v6_mtu_reduced(struct sock *sk)
 
 	if (inet_csk(sk)->icsk_pmtu_cookie > dst_mtu(dst)) {
 		tcp_sync_mss(sk, dst_mtu(dst));
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_SIMPLE_RETRANSMIT);
+#endif
 		tcp_simple_retransmit(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	}
 }
 

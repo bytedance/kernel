@@ -39,6 +39,9 @@
 #include <net/tcp_states.h>
 #include <net/inet_ecn.h>
 #include <net/dst.h>
+#ifdef CONFIG_TCP_SKB_TRACE
+#include <net/tcp_skb_trace.h>
+#endif
 
 #include <linux/seq_file.h>
 #include <linux/memcontrol.h>
@@ -59,6 +62,9 @@ struct tcp_out_options {
 	__u8 *hash_location;    /* temporary pointer, overloaded */
 	__u32 tsval, tsecr;     /* need to include OPTION_TS */
 	struct tcp_fastopen_cookie *fastopen_cookie;    /* Fast open cookie */
+#ifdef CONFIG_TCP_SKB_TRACE
+	struct tcp_trace_opt_info trace_info;
+#endif
 };
 
 struct tcp_sacktag_state {
@@ -208,6 +214,9 @@ struct tcp_sacktag_state {
 #define TCPOPT_TIMESTAMP	8	/* Better RTT estimations/PAWS */
 #define TCPOPT_MD5SIG		19	/* MD5 Signature (RFC2385) */
 #define TCPOPT_FASTOPEN		34	/* Fast open (RFC7413) */
+#ifdef CONFIG_TCP_SKB_TRACE
+#define TCPOPT_TRACE_OPT	251	/* ByteDance TCP Trace Option */
+#endif
 #define TCPOPT_EXP		254	/* Experimental */
 /* Magic number to be after the option value for sharing TCP
  * experimental options. See draft-ietf-tcpm-experimental-options-00.txt
@@ -224,6 +233,9 @@ struct tcp_sacktag_state {
 #define TCPOLEN_SACK_PERM      2
 #define TCPOLEN_TIMESTAMP      10
 #define TCPOLEN_MD5SIG         18
+#ifdef CONFIG_TCP_SKB_TRACE
+#define TCPOLEN_TRACE_OPT	28
+#endif
 #define TCPOLEN_FASTOPEN_BASE  2
 #define TCPOLEN_EXP_FASTOPEN_BASE  4
 #define TCPOLEN_EXP_SMC_BASE   6
@@ -237,6 +249,9 @@ struct tcp_sacktag_state {
 #define TCPOLEN_SACK_PERBLOCK		8
 #define TCPOLEN_MD5SIG_ALIGNED		20
 #define TCPOLEN_MSS_ALIGNED		4
+#ifdef CONFIG_TCP_SKB_TRACE
+#define TCPOLEN_TRACE_OPT_ALIGNED	28
+#endif
 #define TCPOLEN_EXP_SMC_BASE_ALIGNED	8
 
 /* Flags in tp->nonagle */
@@ -1080,6 +1095,12 @@ struct tcp_skb_cb {
 			void *data_end;
 		} bpf;
 	};
+#ifdef CONFIG_TCP_SKB_TRACE
+	__u8		tcp_trace_opt_retrans;
+	__u8		reserve;
+	__u32		tcp_trace_opt_calls_snapshot;
+	__u32		tcp_trace_opt_tstamp;
+#endif
 };
 
 #define TCP_SKB_CB(__skb)	((struct tcp_skb_cb *)&((__skb)->cb[0]))

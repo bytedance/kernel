@@ -525,6 +525,10 @@ struct sock *tcp_create_openreq_child(const struct sock *sk,
 	newtp->snd_wnd = ntohs(tcp_hdr(skb)->window) << newtp->rx_opt.snd_wscale;
 	newtp->max_window = newtp->snd_wnd;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+	newtp->trace_opt.tcp_trace_opt_ctx = TCP_TRACE_OPT_CTX_INIT;
+	newtp->trace_opt.tcp_trace_opt_calls = 0;
+#endif
 	if (newtp->rx_opt.tstamp_ok) {
 		newtp->rx_opt.ts_recent = req->ts_recent;
 		newtp->rx_opt.ts_recent_stamp = ktime_get_seconds();

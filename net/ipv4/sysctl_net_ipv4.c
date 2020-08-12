@@ -52,9 +52,16 @@ static int ip_ping_group_range_max[] = { GID_T_MAX, GID_T_MAX };
 static int comp_sack_nr_max = 255;
 static u32 u32_max_div_HZ = UINT_MAX / HZ;
 static int one_day_secs = 24 * 3600;
+#ifdef CONFIG_TCP_SKB_TRACE
+static int tcp_trace_opt_min;
+#endif
 
 /* obsolete */
 static int sysctl_tcp_low_latency __read_mostly;
+#ifdef CONFIG_TCP_SKB_TRACE
+int sysctl_tcp_trace_opt __read_mostly;
+EXPORT_SYMBOL(sysctl_tcp_trace_opt);
+#endif
 
 /* Update system visible IP port range */
 static void set_local_port_range(struct net *net, int range[2])
@@ -480,6 +487,16 @@ static int proc_fib_multipath_hash_policy(struct ctl_table *table, int write,
 #endif
 
 static struct ctl_table ipv4_table[] = {
+#ifdef CONFIG_TCP_SKB_TRACE
+	{
+		.procname	= "tcp_trace_opt",
+		.data           = &sysctl_tcp_trace_opt,
+		.maxlen		= sizeof(sysctl_tcp_trace_opt),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &tcp_trace_opt_min
+	},
+#endif
 	{
 		.procname	= "tcp_max_orphans",
 		.data		= &sysctl_tcp_max_orphans,

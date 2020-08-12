@@ -402,6 +402,12 @@ struct tcp_sock {
 	 */
 	struct request_sock __rcu *fastopen_rsk;
 	u32	*saved_syn;
+#ifdef CONFIG_TCP_SKB_TRACE
+	struct {
+		u32	tcp_trace_opt_calls;
+		u8	tcp_trace_opt_ctx;
+	} trace_opt;
+#endif
 };
 
 enum tsq_enum {
