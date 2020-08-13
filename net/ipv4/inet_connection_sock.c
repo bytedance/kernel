@@ -736,11 +736,19 @@ static void reqsk_timer_handler(struct timer_list *t)
 	    (!resend ||
 	     !inet_rtx_syn_ack(sk_listener, req) ||
 	     inet_rsk(req)->acked)) {
-		unsigned long timeo;
+		unsigned long timeo, to_init;
 
 		if (req->num_timeout++ == 0)
 			atomic_dec(&queue->young);
-		timeo = min(TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
+		if (sysctl_tcp_synack_timeout_init == 0)
+			to_init = TCP_TIMEOUT_INIT;
+		else
+			to_init = sysctl_tcp_synack_timeout_init;
+
+		if (sysctl_tcp_synack_beb_close == 0)
+			timeo = min(to_init << req->num_timeout, TCP_RTO_MAX);
+		else
+			timeo = min(to_init, TCP_RTO_MAX);
 		mod_timer(&req->rsk_timer, jiffies + timeo);
 		return;
 	}

@@ -749,3 +749,12 @@ config TCP_MD5SIG
 	  on the Internet.
 
 	  If unsure, say N.
+
+config TCP_SKB_TRACE
+	bool "TCP: SKB Trace Option support"
+	default y
+	---help---
+	  ByteDance specifies a method of adding trace info to tcp options for
+	  analyse tcp stack context.
+
+	  If unsure, say N.
