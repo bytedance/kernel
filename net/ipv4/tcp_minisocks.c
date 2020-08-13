@@ -635,9 +635,13 @@ struct sock *tcp_check_req(struct sock *sk, struct sk_buff *skb,
 
 		    !inet_rtx_syn_ack(sk, req)) {
 			unsigned long expires = jiffies;
+			unsigned int timeout = TCP_TIMEOUT_INIT;
 
-			expires += min(TCP_TIMEOUT_INIT << req->num_timeout,
-				       TCP_RTO_MAX);
+			if (sysctl_tcp_synack_timeout_init != 0)
+				timeout = sysctl_tcp_synack_timeout_init;
+			if (sysctl_tcp_synack_beb_close == 0)
+				timeout = timeout << req->num_timeout;
+			expires += min(timeout, TCP_RTO_MAX);
 			if (!fastopen)
 				mod_timer_pending(&req->rsk_timer, expires);
 			else

@@ -63,6 +63,16 @@ int sysctl_tcp_trace_opt __read_mostly;
 EXPORT_SYMBOL(sysctl_tcp_trace_opt);
 #endif
 
+static unsigned int tcp_synack_timeout_init_min;
+static unsigned int tcp_synack_beb_close_min;
+static unsigned int tcp_synack_beb_close_max = 1;
+/* the value of 0 indicates that TCP_TIMEOUT_INIT is used */
+unsigned int sysctl_tcp_synack_timeout_init __read_mostly;
+EXPORT_SYMBOL(sysctl_tcp_synack_timeout_init);
+
+unsigned int sysctl_tcp_synack_beb_close __read_mostly;
+EXPORT_SYMBOL(sysctl_tcp_synack_beb_close);
+
 /* Update system visible IP port range */
 static void set_local_port_range(struct net *net, int range[2])
 {
@@ -487,6 +497,23 @@ static int proc_fib_multipath_hash_policy(struct ctl_table *table, int write,
 #endif
 
 static struct ctl_table ipv4_table[] = {
+	{
+		.procname	= "tcp_synack_beb_close",
+		.data		= &sysctl_tcp_synack_beb_close,
+		.maxlen		= sizeof(sysctl_tcp_synack_beb_close),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &tcp_synack_beb_close_min,
+		.extra2		= &tcp_synack_beb_close_max
+	},
+	{
+		.procname	= "tcp_synack_timeout_init",
+		.data		= &sysctl_tcp_synack_timeout_init,
+		.maxlen		= sizeof(sysctl_tcp_synack_timeout_init),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &tcp_synack_timeout_init_min
+	},
 #ifdef CONFIG_TCP_SKB_TRACE
 	{
 		.procname	= "tcp_trace_opt",

@@ -48,6 +48,8 @@
 #include <linux/bpf-cgroup.h>
 #include <linux/siphash.h>
 
+extern unsigned int sysctl_tcp_synack_timeout_init;
+extern unsigned int sysctl_tcp_synack_beb_close;
 extern struct inet_hashinfo tcp_hashinfo;
 
 extern struct percpu_counter tcp_orphan_count;
