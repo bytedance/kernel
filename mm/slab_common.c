@@ -258,11 +258,6 @@ static void memcg_unlink_cache(struct kmem_cache *s)
 		list_del(&s->memcg_params.kmem_caches_node);
 	}
 }
-
-static inline bool memcg_kmem_cache_dying(struct kmem_cache *s)
-{
-	return s->memcg_params.dying;
-}
 #else
 static inline int init_memcg_params(struct kmem_cache *s,
 				    struct kmem_cache *root_cache)
@@ -276,11 +271,6 @@ static inline void destroy_memcg_params(struct kmem_cache *s)
 
 static inline void memcg_unlink_cache(struct kmem_cache *s)
 {
-}
-
-static inline bool memcg_kmem_cache_dying(struct kmem_cache *s)
-{
-	return false;
 }
 #endif /* CONFIG_MEMCG_KMEM */
 
@@ -336,12 +326,13 @@ int slab_unmergeable(struct kmem_cache *s)
 	if (s->refcount < 0)
 		return 1;
 
+#ifdef CONFIG_MEMCG_KMEM
 	/*
-	 * If the kmem_cache is dying. We should also skip this
-	 * kmem_cache.
+	 * Skip the dying kmem_cache.
 	 */
-	if (memcg_kmem_cache_dying(s))
+	if (s->memcg_params.dying)
 		return 1;
+#endif
 
 	return 0;
 }
@@ -943,14 +934,6 @@ static inline int shutdown_memcg_caches(struct kmem_cache *s)
 {
 	return 0;
 }
-
-static void memcg_set_kmem_cache_dying(struct kmem_cache *s)
-{
-}
-
-static inline void flush_memcg_workqueue(struct kmem_cache *s)
-{
-}
 #endif /* CONFIG_MEMCG_KMEM */
 
 void slab_kmem_cache_release(struct kmem_cache *s)
@@ -968,14 +951,22 @@ void kmem_cache_destroy(struct kmem_cache *s)
 	if (unlikely(!s))
 		return;
 
+	get_online_cpus();
+	get_online_mems();
+
 	mutex_lock(&slab_mutex);
+
 	s->refcount--;
-	if (s->refcount) {
-		mutex_unlock(&slab_mutex);
-		return;
-	}
+	if (s->refcount)
+		goto out_unlock;
+
+#ifdef CONFIG_MEMCG_KMEM
 	memcg_set_kmem_cache_dying(s);
+
 	mutex_unlock(&slab_mutex);
+
+	put_online_mems();
+	put_online_cpus();
 
 	flush_memcg_workqueue(s);
 
@@ -983,10 +974,7 @@ void kmem_cache_destroy(struct kmem_cache *s)
 	get_online_mems();
 
 	mutex_lock(&slab_mutex);
-
-	if (WARN(s->refcount, "kmem_cache_destroy %s: Slab refcount is %d\n",
-		 s->name, s->refcount))
-		goto out_unlock;
+#endif
 
 	err = shutdown_memcg_caches(s);
 	if (!err)
@@ -1773,7 +1761,7 @@ void kzfree(const void *p)
 	if (unlikely(ZERO_OR_NULL_PTR(mem)))
 		return;
 	ks = ksize(mem);
-	memset(mem, 0, ks);
+	memzero_explicit(mem, ks);
 	kfree(mem);
 }
 EXPORT_SYMBOL(kzfree);
