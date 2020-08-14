@@ -2848,6 +2848,9 @@ static void tcp_fastretrans_alert(struct sock *sk, const u32 prior_snd_una,
 	int fast_rexmit = 0, flag = *ack_flag;
 	bool do_lost = num_dupack || ((flag & FLAG_DATA_SACKED) &&
 				      tcp_force_fast_retransmit(sk));
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	if (!tp->packets_out && tp->sacked_out)
 		tp->sacked_out = 0;
@@ -2940,7 +2943,14 @@ static void tcp_fastretrans_alert(struct sock *sk, const u32 prior_snd_una,
 			tcp_mtup_probe_failed(sk);
 			/* Restores the reduction we did in tcp_mtup_probe() */
 			tp->snd_cwnd++;
+#ifdef CONFIG_TCP_SKB_TRACE
+			old_ctx = tcp_set_trace_opt_ctx(sk,
+				  TCP_TRACE_OPT_CTX_TCP_SIMPLE_RETRANSMIT);
+#endif
 			tcp_simple_retransmit(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+			tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 			return;
 		}
 
@@ -3618,18 +3628,35 @@ EXPORT_SYMBOL(tcp_in_ack_event);
 static void tcp_xmit_recovery(struct sock *sk, int rexmit)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	if (rexmit == REXMIT_NONE || sk->sk_state == TCP_SYN_SENT)
 		return;
 
 	if (unlikely(rexmit == 2)) {
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_PROCESS_LOSS_FRTO);
+#endif
 		__tcp_push_pending_frames(sk, tcp_current_mss(sk),
 					  TCP_NAGLE_OFF);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		if (after(tp->snd_nxt, tp->high_seq))
 			return;
 		tp->frto = 0;
 	}
+#ifdef CONFIG_TCP_SKB_TRACE
+	old_ctx = tcp_set_trace_opt_ctx(sk,
+			TCP_TRACE_OPT_CTX_TCP_FASTRETRANS_ALERT);
+#endif
 	tcp_xmit_retransmit_queue(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 }
 
 /* Returns the number of packets newly acked or sacked by the current ACK */
@@ -5312,7 +5339,14 @@ EXPORT_SYMBOL(tcp_check_space);
 
 void tcp_data_snd_check(struct sock *sk)
 {
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx = tcp_set_trace_opt_ctx(sk,
+			TCP_TRACE_OPT_CTX_TCP_DATA_SND_CHECK);
+#endif
 	tcp_push_pending_frames(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	tcp_check_space(sk);
 }
 EXPORT_SYMBOL(tcp_data_snd_check);
@@ -6668,6 +6702,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	bool want_cookie = false;
 	struct dst_entry *dst;
 	struct flowi fl;
+	u32 timeout_init;
 
 	/* TW buckets are converted to open requests without
 	 * limitations, they conserve resources and peer is
@@ -6780,9 +6815,13 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 		sock_put(fastopen_sk);
 	} else {
 		tcp_rsk(req)->tfo_listener = false;
-		if (!want_cookie)
-			inet_csk_reqsk_queue_hash_add(sk, req,
-				tcp_timeout_init((struct sock *)req));
+		if (!want_cookie) {
+			if (sysctl_tcp_synack_timeout_init == 0)
+				timeout_init = tcp_timeout_init((struct sock *)req);
+			else
+				timeout_init = sysctl_tcp_synack_timeout_init;
+			inet_csk_reqsk_queue_hash_add(sk, req, timeout_init);
+		}
 		af_ops->send_synack(sk, dst, &fl, req, &foc,
 				    !want_cookie ? TCP_SYNACK_NORMAL :
 						   TCP_SYNACK_COOKIE);

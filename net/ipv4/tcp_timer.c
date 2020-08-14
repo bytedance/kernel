@@ -288,6 +288,9 @@ static int tcp_write_timeout(struct sock *sk)
 void tcp_delack_timer_handler(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	sk_mem_reclaim_partial(sk);
 
@@ -313,7 +316,14 @@ void tcp_delack_timer_handler(struct sock *sk)
 			icsk->icsk_ack.ato      = TCP_ATO_MIN;
 		}
 		tcp_mstamp_refresh(tcp_sk(sk));
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_DELACK_TIMER_HANDLER);
+#endif
 		tcp_send_ack(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		__NET_INC_STATS(sock_net(sk), LINUX_MIB_DELAYEDACKS);
 	}
 
@@ -394,8 +404,15 @@ static void tcp_probe_timer(struct sock *sk)
 	if (icsk->icsk_probes_out >= max_probes) {
 abort:		tcp_write_err(sk);
 	} else {
+#ifdef CONFIG_TCP_SKB_TRACE
+		u8 old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_PROBE_TIMER);
+#endif
 		/* Only send another probe if we didn't close things up. */
 		tcp_send_probe0(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	}
 }
 
@@ -593,6 +610,9 @@ void tcp_write_timer_handler(struct sock *sk)
 {
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	int event;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	if (((1 << sk->sk_state) & (TCPF_CLOSE | TCPF_LISTEN)) ||
 	    !icsk->icsk_pending)
@@ -608,14 +628,35 @@ void tcp_write_timer_handler(struct sock *sk)
 
 	switch (event) {
 	case ICSK_TIME_REO_TIMEOUT:
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_REO_TIMEOUT);
+#endif
 		tcp_rack_reo_timeout(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		break;
 	case ICSK_TIME_LOSS_PROBE:
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_SEND_LOSS_PROBE);
+#endif
 		tcp_send_loss_probe(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		break;
 	case ICSK_TIME_RETRANS:
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_RETRANSMIT_TIMER);
+#endif
 		icsk->icsk_pending = 0;
 		tcp_retransmit_timer(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		break;
 	case ICSK_TIME_PROBE0:
 		icsk->icsk_pending = 0;
@@ -673,6 +714,10 @@ static void tcp_keepalive_timer (struct timer_list *t)
 	struct inet_connection_sock *icsk = inet_csk(sk);
 	struct tcp_sock *tp = tcp_sk(sk);
 	u32 elapsed;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx = tcp_set_trace_opt_ctx(sk,
+			TCP_TRACE_OPT_CTX_TCP_KEEPALIVE_TIMER);
+#endif
 
 	/* Only process if socket is not in use. */
 	bh_lock_sock(sk);
@@ -751,6 +796,9 @@ death:
 
 out:
 	bh_unlock_sock(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	sock_put(sk);
 }
 
