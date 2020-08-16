@@ -440,6 +440,26 @@ void tcp_grow_window(struct sock *sk, const struct sk_buff *skb)
 }
 EXPORT_SYMBOL(tcp_grow_window);
 
+void tcp_fixup_rcvbuf(struct sock *sk)
+{
+	u32 mss = tcp_sk(sk)->advmss;
+	u32 irwnd = sysctl_tcp_init_rwnd;
+	int rcvmem;
+
+	if (mss > 1460)
+		irwnd = max_t(u32, (1460 * sysctl_tcp_init_rwnd) / mss, 2);
+
+	rcvmem = SKB_TRUESIZE(mss + MAX_TCP_HEADER);
+	while (tcp_win_from_space(sk, rcvmem) < mss)
+		rcvmem += 128;
+
+	rcvmem *= irwnd;
+	if (sk->sk_rcvbuf < rcvmem)
+		sk->sk_rcvbuf = min(rcvmem,
+				    sock_net(sk)->ipv4.sysctl_tcp_rmem[2]);
+}
+EXPORT_SYMBOL(tcp_fixup_rcvbuf);
+
 /* 3. Try to fixup all. It is made immediately after connection enters
  *    established state.
  */
@@ -451,6 +471,8 @@ void tcp_init_buffer_space(struct sock *sk)
 
 	if (!(sk->sk_userlocks & SOCK_SNDBUF_LOCK))
 		tcp_sndbuf_expand(sk);
+	if (sysctl_tcp_init_rwnd && !(sk->sk_userlocks & SOCK_RCVBUF_LOCK))
+		tcp_fixup_rcvbuf(sk);
 
 	tp->rcvq_space.space = min_t(u32, tp->rcv_wnd, TCP_INIT_CWND * tp->advmss);
 	tcp_mstamp_refresh(tp);

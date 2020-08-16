@@ -239,6 +239,11 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 	if (init_rcv_wnd)
 		*rcv_wnd = min(*rcv_wnd, init_rcv_wnd * mss);
 
+	if (sysctl_tcp_init_rwnd) {
+		*rcv_wnd = max(*rcv_wnd, sysctl_tcp_init_rwnd * mss);
+		*rcv_wnd = min(*rcv_wnd, U16_MAX);
+	}
+
 	*rcv_wscale = 0;
 	if (wscale_ok) {
 		/* Set window scaling on max possible window */

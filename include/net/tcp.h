@@ -48,6 +48,7 @@
 #include <linux/bpf-cgroup.h>
 #include <linux/siphash.h>
 
+extern unsigned int sysctl_tcp_init_rwnd;
 extern unsigned int sysctl_tcp_synack_timeout_init;
 extern unsigned int sysctl_tcp_synack_beb_close;
 extern struct inet_hashinfo tcp_hashinfo;
@@ -870,6 +871,7 @@ void tcp_initialize_rcv_mss(struct sock *sk);
 int tcp_mtu_to_mss(struct sock *sk, int pmtu);
 int tcp_mss_to_mtu(struct sock *sk, int mss);
 void tcp_mtup_init(struct sock *sk);
+void tcp_fixup_rcvbuf(struct sock *sk);
 void tcp_init_buffer_space(struct sock *sk);
 
 static inline void tcp_bound_rto(const struct sock *sk)
