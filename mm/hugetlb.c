@@ -1207,6 +1207,8 @@ static void update_hpage_vmemmap_workfn(struct work_struct *work)
 		page->mapping = NULL;
 		h = page_hstate(page);
 
+		alloc_huge_page_vmemmap(h, page);
+
 		spin_lock(&hugetlb_lock);
 		__free_hugepage(h, page);
 		spin_unlock(&hugetlb_lock);
