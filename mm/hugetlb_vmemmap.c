@@ -169,6 +169,7 @@
 #define pr_fmt(fmt)	"HugeTLB: " fmt
 
 #include <linux/list.h>
+#include <linux/memblock.h>
 #include <asm/pgalloc.h>
 
 #include "hugetlb_vmemmap.h"
@@ -262,6 +263,68 @@ int vmemmap_pgtable_prealloc(struct hstate *h, struct list_head *pgtables)
 out:
 	vmemmap_pgtable_free(pgtables);
 	return -ENOMEM;
+}
+
+unsigned long __init gigantic_vmemmap_pgtable_prealloc(void)
+{
+	struct huge_bootmem_page *m, *tmp;
+	unsigned long nr_free = 0;
+
+	list_for_each_entry_safe(m, tmp, &huge_boot_pages, list) {
+		struct hstate *h = m->hstate;
+		unsigned int nr = pgtable_pages_to_prealloc_per_hpage(h);
+		unsigned long size;
+
+		if (!nr)
+			continue;
+
+		size = nr << PAGE_SHIFT;
+		m->vmemmap_pte = memblock_alloc_try_nid(size, PAGE_SIZE, 0,
+							MEMBLOCK_ALLOC_ACCESSIBLE,
+							NUMA_NO_NODE);
+		if (!m->vmemmap_pte) {
+			nr_free++;
+			list_del(&m->list);
+			memblock_free_early(__pa(m), huge_page_size(h));
+		}
+	}
+
+	return nr_free;
+}
+
+void __init gigantic_vmemmap_pgtable_init(struct huge_bootmem_page *m,
+					  struct page *head)
+{
+	struct hstate *h = m->hstate;
+	unsigned long pte = (unsigned long)m->vmemmap_pte;
+	unsigned int nr = pgtable_pages_to_prealloc_per_hpage(h);
+
+	if (!nr)
+		return;
+
+	/*
+	 * If we had gigantic hugepages allocated at boot time, we need
+	 * to restore the 'stolen' pages to totalram_pages in order to
+	 * fix confusing memory reports from free(1) and another
+	 * side-effects, like CommitLimit going negative.
+	 */
+	adjust_managed_page_count(head, nr);
+
+	/*
+	 * Use the huge page lru list to temporarily store the preallocated
+	 * pages. The preallocated pages are used and the list is emptied
+	 * before the huge page is put into use. When the huge page is put
+	 * into use by prep_new_huge_page() the list will be reinitialized.
+	 */
+	INIT_LIST_HEAD(&head->lru);
+
+	while (nr--) {
+		struct page *pte_page = virt_to_page(pte);
+
+		__ClearPageReserved(pte_page);
+		list_add(&pte_page->lru, &head->lru);
+		pte += PAGE_SIZE;
+	}
 }
 
 void alloc_huge_page_vmemmap(struct hstate *h, struct page *head)
