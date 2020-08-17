@@ -69,6 +69,9 @@ Hugetlb
         will exceed HugePages_Total \* Hugepagesize. To get more
         detailed information, please, refer to
         ``/sys/kernel/mm/hugepages`` (described below).
+hugetlb_free_vmemmap
+	When CONFIG_HUGETLB_PAGE_FREE_VMEMMAP is set, this enables freeing
+	unused vmemmap pages associated with each HugeTLB page.
 
 
 ``/proc/filesystems`` should also show a filesystem of type "hugetlbfs"
