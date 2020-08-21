@@ -73,6 +73,10 @@ EXPORT_SYMBOL(sysctl_tcp_synack_timeout_init);
 unsigned int sysctl_tcp_synack_beb_close __read_mostly;
 EXPORT_SYMBOL(sysctl_tcp_synack_beb_close);
 
+static unsigned int tcp_init_rwnd_min;
+unsigned int sysctl_tcp_init_rwnd __read_mostly;
+EXPORT_SYMBOL(sysctl_tcp_init_rwnd);
+
 /* Update system visible IP port range */
 static void set_local_port_range(struct net *net, int range[2])
 {
@@ -497,6 +501,14 @@ static int proc_fib_multipath_hash_policy(struct ctl_table *table, int write,
 #endif
 
 static struct ctl_table ipv4_table[] = {
+	{
+		.procname	= "tcp_init_rwnd",
+		.data		= &sysctl_tcp_init_rwnd,
+		.maxlen		= sizeof(sysctl_tcp_init_rwnd),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= &tcp_init_rwnd_min
+	},
 	{
 		.procname	= "tcp_synack_beb_close",
 		.data		= &sysctl_tcp_synack_beb_close,
