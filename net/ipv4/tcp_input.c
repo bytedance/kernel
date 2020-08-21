@@ -447,17 +447,15 @@ void tcp_fixup_rcvbuf(struct sock *sk)
 	u32 irwnd = sysctl_tcp_init_rwnd;
 	int rcvmem;
 
-	if (mss > 1460)
-		irwnd = max_t(u32, (1460 * sysctl_tcp_init_rwnd) / mss, 2);
-
 	rcvmem = SKB_TRUESIZE(mss + MAX_TCP_HEADER);
 	while (tcp_win_from_space(sk, rcvmem) < mss)
 		rcvmem += 128;
 
 	rcvmem *= irwnd;
 	if (sk->sk_rcvbuf < rcvmem)
-		sk->sk_rcvbuf = min(rcvmem,
-				    sock_net(sk)->ipv4.sysctl_tcp_rmem[2]);
+		WRITE_ONCE(sk->sk_rcvbuf,
+			   min(rcvmem,
+			       sock_net(sk)->ipv4.sysctl_tcp_rmem[2]));
 }
 EXPORT_SYMBOL(tcp_fixup_rcvbuf);
 
