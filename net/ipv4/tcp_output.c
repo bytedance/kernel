@@ -239,6 +239,11 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 	if (init_rcv_wnd)
 		*rcv_wnd = min(*rcv_wnd, init_rcv_wnd * mss);
 
+	if (sysctl_tcp_init_rwnd) {
+		*rcv_wnd = max(*rcv_wnd, sysctl_tcp_init_rwnd * mss);
+		*rcv_wnd = min(*rcv_wnd, U16_MAX);
+	}
+
 	*rcv_wscale = 0;
 	if (wscale_ok) {
 		/* Set window scaling on max possible window */
@@ -400,6 +405,11 @@ void tcp_init_nondata_skb(struct sk_buff *skb, u32 seq, u8 flags)
 
 	TCP_SKB_CB(skb)->tcp_flags = flags;
 	TCP_SKB_CB(skb)->sacked = 0;
+#ifdef CONFIG_TCP_SKB_TRACE
+	TCP_SKB_CB(skb)->tcp_trace_opt_retrans = 0;
+	TCP_SKB_CB(skb)->tcp_trace_opt_calls_snapshot = 0;
+	TCP_SKB_CB(skb)->tcp_trace_opt_tstamp = tcp_jiffies32;
+#endif
 
 	tcp_skb_pcount_set(skb, 1);
 
@@ -422,6 +432,9 @@ EXPORT_SYMBOL(tcp_urg_mode);
 #define OPTION_WSCALE		(1 << 3)
 #define OPTION_FAST_OPEN_COOKIE	(1 << 8)
 #define OPTION_SMC		(1 << 9)
+#ifdef CONFIG_TCP_SKB_TRACE
+#define OPTION_TRACE_OPT	(1 << 10)
+#endif
 
 static void smc_options_write(__be32 *ptr, u16 *options)
 {
@@ -455,6 +468,9 @@ void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 			      struct tcp_out_options *opts)
 {
 	u16 options = opts->options;	/* mungable copy */
+#ifdef CONFIG_TCP_SKB_TRACE
+	struct tcp_trace_opt_info *info = &opts->trace_info;
+#endif
 
 	if (unlikely(OPTION_MD5 & options)) {
 		*ptr++ = htonl((TCPOPT_NOP << 24) | (TCPOPT_NOP << 16) |
@@ -546,6 +562,29 @@ void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 	}
 
 	smc_options_write(ptr, &options);
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(OPTION_TRACE_OPT & options)) {
+		*ptr++ = htonl((TCPOPT_TRACE_OPT << 24) |
+				(TCPOLEN_TRACE_OPT << 16) |
+				(info->tcp_trace_opt_ctx << 8) |
+				info->tcp_trace_opt_retrans);
+		*ptr++ = htonl((info->tcp_trace_opt_skc_state << 24) |
+				(info->tcp_trace_opt_icsk_ca_state << 16) |
+				(info->tcp_trace_opt_icsk_pending << 8) |
+				info->tcp_trace_opt_calls);
+		*ptr++ = htonl((info->tcp_trace_opt_reordering << 24) |
+				(info->tcp_trace_opt_icsk_retransmits << 16) |
+				(htons(info->tcp_trace_opt_elapsed)));
+		*ptr++ = htonl((htons(info->tcp_trace_opt_srtt) << 16) |
+				(htons(info->tcp_trace_opt_minrtt)));
+		*ptr++ = htonl((htons(info->tcp_trace_opt_snd_cwnd) << 16) |
+				(htons(info->tcp_trace_opt_pkts_in_flight)));
+		*ptr++ = htonl((htons(info->tcp_trace_opt_pacing_rate) << 16) |
+				(htons(info->tcp_trace_opt_snd_ssthresh)));
+		*ptr++ = htonl((htons(info->tcp_trace_opt_icsk_rto) << 16) |
+				(htons(info->tcp_trace_opt_sk_write_queue_qlen)));
+	}
+#endif
 }
 EXPORT_SYMBOL(tcp_options_write);
 
@@ -728,8 +767,15 @@ unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb,
 					struct tcp_md5sig_key **md5)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	unsigned int size = 0;
 	unsigned int eff_sacks;
+#ifdef CONFIG_TCP_SKB_TRACE
+	struct tcp_skb_cb *tcb = NULL;
+
+	if (skb != NULL)
+		tcb = TCP_SKB_CB(skb);
+#endif
 
 	opts->options = 0;
 
@@ -763,6 +809,44 @@ unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb,
 			size += TCPOLEN_SACK_BASE_ALIGNED +
 				opts->num_sack_blocks * TCPOLEN_SACK_PERBLOCK;
 	}
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt) &&
+	    sizeof(struct tcphdr) + size + TCPOLEN_TRACE_OPT_ALIGNED <= 60) {
+		opts->options |= OPTION_TRACE_OPT;
+		opts->trace_info.tcp_trace_opt_ctx =
+				tp->trace_opt.tcp_trace_opt_ctx;
+		opts->trace_info.tcp_trace_opt_retrans =
+				tcb ? tcb->tcp_trace_opt_retrans : 0;
+		opts->trace_info.tcp_trace_opt_skc_state = sk->sk_state;
+		opts->trace_info.tcp_trace_opt_icsk_ca_state =
+				inet_csk(sk)->icsk_ca_state;
+		opts->trace_info.tcp_trace_opt_icsk_pending =
+				inet_csk(sk)->icsk_pending;
+		opts->trace_info.tcp_trace_opt_calls =
+				tcb ? tcb->tcp_trace_opt_calls_snapshot : 0;
+		opts->trace_info.tcp_trace_opt_reordering = tp->reordering;
+		opts->trace_info.tcp_trace_opt_icsk_retransmits =
+				inet_csk(sk)->icsk_retransmits;
+		opts->trace_info.tcp_trace_opt_elapsed =
+				tcb ? (u16)(tcp_jiffies32 - tcb->tcp_trace_opt_tstamp) : 0;
+		opts->trace_info.tcp_trace_opt_srtt =
+				(u16)((tp->srtt_us >> 3) / USEC_PER_MSEC);
+		opts->trace_info.tcp_trace_opt_minrtt =
+				(u16)(tcp_min_rtt(tp) / USEC_PER_MSEC);
+		opts->trace_info.tcp_trace_opt_snd_cwnd = (u16)tp->snd_cwnd;
+		opts->trace_info.tcp_trace_opt_pkts_in_flight =
+				(u16)tcp_packets_in_flight(tp);
+		opts->trace_info.tcp_trace_opt_pacing_rate =
+				(u16)(sk->sk_pacing_rate >> 10);
+		opts->trace_info.tcp_trace_opt_snd_ssthresh =
+				(u16)tp->snd_ssthresh;
+		opts->trace_info.tcp_trace_opt_icsk_rto =
+				(u16)jiffies_to_msecs(inet_csk(sk)->icsk_rto);
+		opts->trace_info.tcp_trace_opt_sk_write_queue_qlen =
+				(u16)sk->sk_write_queue.qlen;
+		size += TCPOLEN_TRACE_OPT_ALIGNED;
+	}
+#endif
 
 	return size;
 }
@@ -830,6 +914,9 @@ static void tcp_tasklet_func(unsigned long data)
 	struct list_head *q, *n;
 	struct tcp_sock *tp;
 	struct sock *sk;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	local_irq_save(flags);
 	list_splice_init(&tsq->head, &list);
@@ -843,7 +930,14 @@ static void tcp_tasklet_func(unsigned long data)
 		smp_mb__before_atomic();
 		clear_bit(TSQ_QUEUED, &sk->sk_tsq_flags);
 
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_TASKLET_FUNC);
+#endif
 		tcp_tsq_handler(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		sk_free(sk);
 	}
 }
@@ -862,6 +956,9 @@ static void tcp_tasklet_func(unsigned long data)
 void tcp_release_cb(struct sock *sk)
 {
 	unsigned long flags, nflags;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	/* perform an atomic operation only if at least one flag is set */
 	do {
@@ -872,7 +969,14 @@ void tcp_release_cb(struct sock *sk)
 	} while (cmpxchg(&sk->sk_tsq_flags, flags, nflags) != flags);
 
 	if (flags & TCPF_TSQ_DEFERRED) {
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_RELEASE_CB);
+#endif
 		tcp_tsq_write(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		__sock_put(sk);
 	}
 	/* Here begins the tricky part :
@@ -925,6 +1029,9 @@ void tcp_wfree(struct sk_buff *skb)
 	struct sock *sk = skb->sk;
 	struct tcp_sock *tp = tcp_sk(sk);
 	unsigned long flags, nval, oval;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	/* Keep one reference on sk_wmem_alloc.
 	 * Will be released by sk_free() from here or tcp_tasklet_func()
@@ -953,6 +1060,10 @@ void tcp_wfree(struct sk_buff *skb)
 		if (nval != oval)
 			continue;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_WFREE);
+#endif
 		/* queue this socket to tasklet queue */
 		local_irq_save(flags);
 		tsq = this_cpu_ptr(&tsq_tasklet);
@@ -961,6 +1072,9 @@ void tcp_wfree(struct sk_buff *skb)
 		if (empty)
 			tasklet_schedule(&tsq->tasklet);
 		local_irq_restore(flags);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		return;
 	}
 out:
@@ -976,7 +1090,14 @@ enum hrtimer_restart tcp_pace_kick(struct hrtimer *timer)
 	struct tcp_sock *tp = container_of(timer, struct tcp_sock, pacing_timer);
 	struct sock *sk = (struct sock *)tp;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx = tcp_set_trace_opt_ctx(sk,
+			TCP_TRACE_OPT_CTX_TCP_PACING_TIMER);
+#endif
 	tcp_tsq_handler(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	sock_put(sk);
 
 	return HRTIMER_NORESTART;
@@ -1364,6 +1485,16 @@ int tcp_fragment(struct sock *sk, enum tcp_queue tcp_queue,
 	TCP_SKB_CB(buff)->tcp_flags = flags;
 	TCP_SKB_CB(buff)->sacked = TCP_SKB_CB(skb)->sacked;
 	tcp_skb_fragment_eor(skb, buff);
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt)) {
+		TCP_SKB_CB(buff)->tcp_trace_opt_retrans =
+			TCP_SKB_CB(skb)->tcp_trace_opt_retrans;
+		TCP_SKB_CB(buff)->tcp_trace_opt_calls_snapshot =
+			TCP_SKB_CB(skb)->tcp_trace_opt_calls_snapshot;
+		TCP_SKB_CB(buff)->tcp_trace_opt_tstamp =
+			TCP_SKB_CB(skb)->tcp_trace_opt_tstamp;
+	}
+#endif
 
 	skb_split(skb, buff, len);
 
@@ -1937,6 +2068,16 @@ int tso_fragment(struct sock *sk, struct sk_buff *skb, unsigned int len,
 
 	/* This packet was never sent out yet, so no SACK bits. */
 	TCP_SKB_CB(buff)->sacked = 0;
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt)) {
+		TCP_SKB_CB(buff)->tcp_trace_opt_retrans =
+			TCP_SKB_CB(skb)->tcp_trace_opt_retrans;
+		TCP_SKB_CB(buff)->tcp_trace_opt_calls_snapshot =
+			TCP_SKB_CB(skb)->tcp_trace_opt_calls_snapshot;
+		TCP_SKB_CB(buff)->tcp_trace_opt_tstamp =
+			TCP_SKB_CB(skb)->tcp_trace_opt_tstamp;
+	}
+#endif
 
 	tcp_skb_fragment_eor(skb, buff);
 
@@ -2196,6 +2337,13 @@ int tcp_mtu_probe(struct sock *sk)
 	TCP_SKB_CB(nskb)->end_seq = TCP_SKB_CB(skb)->seq + probe_size;
 	TCP_SKB_CB(nskb)->tcp_flags = TCPHDR_ACK;
 	TCP_SKB_CB(nskb)->sacked = 0;
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt)) {
+		TCP_SKB_CB(nskb)->tcp_trace_opt_retrans = 0;
+		TCP_SKB_CB(nskb)->tcp_trace_opt_calls_snapshot = 0;
+		TCP_SKB_CB(nskb)->tcp_trace_opt_tstamp = tcp_jiffies32;
+	}
+#endif
 	nskb->csum = 0;
 	nskb->ip_summed = CHECKSUM_PARTIAL;
 
@@ -3009,6 +3157,10 @@ int __tcp_retransmit_skb(struct sock *sk, struct sk_buff *skb, int segs)
 	tp->bytes_retrans += skb->len;
 	IP_ADD_STATS(sock_net(sk), IPSTATS_MIB_TCPOUTRETRSOCTETS,
 			skb->len);
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt))
+		TCP_SKB_CB(skb)->tcp_trace_opt_retrans++;
+#endif
 	/* make sure skb->data is aligned on arches that require it
 	 * and check if ack-trimming & collapsing extended the headroom
 	 * beyond what csum_start can cover.
@@ -3795,6 +3947,13 @@ int tcp_xmit_probe_skb(struct sock *sk, int urgent, int mib)
 	 */
 	tcp_init_nondata_skb(skb, tp->snd_una - !urgent, TCPHDR_ACK);
 	NET_INC_STATS(sock_net(sk), mib);
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt)) {
+		TCP_SKB_CB(skb)->tcp_trace_opt_retrans = 0;
+		TCP_SKB_CB(skb)->tcp_trace_opt_calls_snapshot = 0;
+		TCP_SKB_CB(skb)->tcp_trace_opt_tstamp = tcp_jiffies32;
+	}
+#endif
 	return tcp_transmit_skb(sk, skb, 0, (__force gfp_t)0);
 }
 EXPORT_SYMBOL(tcp_xmit_probe_skb);

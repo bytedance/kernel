@@ -74,8 +74,8 @@ static void	tcp_v6_reqsk_send_ack(const struct sock *sk, struct sk_buff *skb,
 
 static int	tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb);
 
-static const struct inet_connection_sock_af_ops ipv6_mapped;
-static const struct inet_connection_sock_af_ops ipv6_specific;
+static struct inet_connection_sock_af_ops ipv6_mapped;
+static struct inet_connection_sock_af_ops ipv6_specific;
 #ifdef CONFIG_TCP_MD5SIG
 static const struct tcp_sock_af_ops tcp_sock_ipv6_specific;
 static const struct tcp_sock_af_ops tcp_sock_ipv6_mapped_specific;
@@ -343,6 +343,9 @@ failure:
 static void tcp_v6_mtu_reduced(struct sock *sk)
 {
 	struct dst_entry *dst;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	if ((1 << sk->sk_state) & (TCPF_LISTEN | TCPF_CLOSE))
 		return;
@@ -353,7 +356,14 @@ static void tcp_v6_mtu_reduced(struct sock *sk)
 
 	if (inet_csk(sk)->icsk_pmtu_cookie > dst_mtu(dst)) {
 		tcp_sync_mss(sk, dst_mtu(dst));
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_SIMPLE_RETRANSMIT);
+#endif
 		tcp_simple_retransmit(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	}
 }
 
@@ -1739,7 +1749,7 @@ static struct timewait_sock_ops tcp6_timewait_sock_ops = {
 	.twsk_destructor = tcp_twsk_destructor,
 };
 
-static const struct inet_connection_sock_af_ops ipv6_specific = {
+static struct inet_connection_sock_af_ops ipv6_specific = {
 	.queue_xmit	   = inet6_csk_xmit,
 	.send_check	   = tcp_v6_send_check,
 	.rebuild_header	   = inet6_sk_rebuild_header,
@@ -1770,7 +1780,7 @@ static const struct tcp_sock_af_ops tcp_sock_ipv6_specific = {
 /*
  *	TCP over IPv4 via INET6 API
  */
-static const struct inet_connection_sock_af_ops ipv6_mapped = {
+static struct inet_connection_sock_af_ops ipv6_mapped = {
 	.queue_xmit	   = ip_queue_xmit,
 	.send_check	   = tcp_v4_send_check,
 	.rebuild_header	   = inet_sk_rebuild_header,

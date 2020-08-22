@@ -459,6 +459,10 @@ void tcp_init_sock(struct sock *sk)
 
 	sk_sockets_allocated_inc(sk);
 	sk->sk_route_forced_caps = NETIF_F_GSO;
+#ifdef CONFIG_TCP_SKB_TRACE
+	tp->trace_opt.tcp_trace_opt_ctx = TCP_TRACE_OPT_CTX_INIT;
+	tp->trace_opt.tcp_trace_opt_calls = 0;
+#endif
 }
 EXPORT_SYMBOL(tcp_init_sock);
 
@@ -972,6 +976,9 @@ ssize_t do_tcp_sendpages(struct sock *sk, struct page *page, int offset,
 	int mss_now, size_goal;
 	int err;
 	ssize_t copied;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 	long timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
 
 	if (IS_ENABLED(CONFIG_DEBUG_VM) &&
@@ -998,6 +1005,10 @@ ssize_t do_tcp_sendpages(struct sock *sk, struct page *page, int offset,
 	if (sk->sk_err || (sk->sk_shutdown & SEND_SHUTDOWN))
 		goto out_err;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt))
+		tp->trace_opt.tcp_trace_opt_calls++;
+#endif
 	while (size > 0) {
 		struct sk_buff *skb = tcp_write_queue_tail(sk);
 		int copy, i;
@@ -1014,6 +1025,15 @@ new_segment:
 			if (!skb)
 				goto wait_for_memory;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+			if (unlikely(sysctl_tcp_trace_opt)) {
+				TCP_SKB_CB(skb)->tcp_trace_opt_retrans = 0;
+				TCP_SKB_CB(skb)->tcp_trace_opt_calls_snapshot =
+					tp->trace_opt.tcp_trace_opt_calls;
+				TCP_SKB_CB(skb)->tcp_trace_opt_tstamp =
+					tcp_jiffies32;
+			}
+#endif
 #ifdef CONFIG_TLS_DEVICE
 			skb->decrypted = !!(flags & MSG_SENDPAGE_DECRYPTED);
 #endif
@@ -1065,18 +1085,32 @@ new_segment:
 		if (skb->len < size_goal || (flags & MSG_OOB))
 			continue;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_DO_TCP_SENDPAGES);
+#endif
 		if (forced_push(tp)) {
 			tcp_mark_push(tp, skb);
 			__tcp_push_pending_frames(sk, mss_now, TCP_NAGLE_PUSH);
 		} else if (skb == tcp_send_head(sk))
 			tcp_push_one(sk, mss_now);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		continue;
 
 wait_for_sndbuf:
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 wait_for_memory:
+#ifdef CONFIG_TCP_SKB_TRACE
+		old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_DO_TCP_SENDPAGES);
+#endif
 		tcp_push(sk, flags & ~MSG_MORE, mss_now,
 			 TCP_NAGLE_PUSH, size_goal);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 
 		err = sk_stream_wait_memory(sk, &timeo);
 		if (err != 0)
@@ -1088,8 +1122,16 @@ wait_for_memory:
 out:
 	if (copied) {
 		tcp_tx_timestamp(sk, sk->sk_tsflags);
-		if (!(flags & MSG_SENDPAGE_NOTLAST))
+		if (!(flags & MSG_SENDPAGE_NOTLAST)) {
+#ifdef CONFIG_TCP_SKB_TRACE
+			old_ctx = tcp_set_trace_opt_ctx(sk,
+					TCP_TRACE_OPT_CTX_DO_TCP_SENDPAGES);
+#endif
 			tcp_push(sk, flags, mss_now, tp->nonagle, size_goal);
+#ifdef CONFIG_TCP_SKB_TRACE
+			tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
+		}
 	}
 	return copied;
 
@@ -1203,6 +1245,10 @@ int tcp_sendmsg_locked(struct sock *sk, struct msghdr *msg, size_t size)
 
 	flags = msg->msg_flags;
 
+#ifdef CONFIG_TCP_SKB_TRACE
+	if (unlikely(sysctl_tcp_trace_opt))
+		tp->trace_opt.tcp_trace_opt_calls++;
+#endif
 	if (flags & MSG_ZEROCOPY && size && sock_flag(sk, SOCK_ZEROCOPY)) {
 		skb = tcp_write_queue_tail(sk);
 		uarg = sock_zerocopy_realloc(sk, size, skb_zcopy(skb));
@@ -1299,6 +1345,15 @@ new_segment:
 						  first_skb);
 			if (!skb)
 				goto wait_for_memory;
+#ifdef CONFIG_TCP_SKB_TRACE
+			if (unlikely(sysctl_tcp_trace_opt)) {
+				TCP_SKB_CB(skb)->tcp_trace_opt_retrans = 0;
+				TCP_SKB_CB(skb)->tcp_trace_opt_calls_snapshot =
+					tp->trace_opt.tcp_trace_opt_calls;
+				TCP_SKB_CB(skb)->tcp_trace_opt_tstamp =
+					tcp_jiffies32;
+			}
+#endif
 
 			process_backlog++;
 			skb->ip_summed = CHECKSUM_PARTIAL;
@@ -1443,9 +1498,18 @@ EXPORT_SYMBOL_GPL(tcp_sendmsg_locked);
 int tcp_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 {
 	int ret;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	lock_sock(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+	old_ctx = tcp_set_trace_opt_ctx(sk, TCP_TRACE_OPT_CTX_TCP_SENDMSG);
+#endif
 	ret = tcp_sendmsg_locked(sk, msg, size);
+#ifdef CONFIG_TCP_SKB_TRACE
+	tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	release_sock(sk);
 	trace_tcp_send_length(sk, ret > 0 ? ret : 0, ret > 0 ? 0 : ret, 0);
 
@@ -2334,9 +2398,16 @@ void tcp_shutdown(struct sock *sk, int how)
 	if ((1 << sk->sk_state) &
 	    (TCPF_ESTABLISHED | TCPF_SYN_SENT |
 	     TCPF_SYN_RECV | TCPF_CLOSE_WAIT)) {
+#ifdef CONFIG_TCP_SKB_TRACE
+		u8 old_ctx = tcp_set_trace_opt_ctx(sk,
+				TCP_TRACE_OPT_CTX_TCP_SHUTDOWN);
+#endif
 		/* Clear out any half completed packets.  FIN if needed. */
 		if (tcp_close_state(sk))
 			tcp_send_fin(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+		tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	}
 }
 EXPORT_SYMBOL(tcp_shutdown);
@@ -2360,9 +2431,15 @@ void tcp_close(struct sock *sk, long timeout)
 	struct sk_buff *skb;
 	int data_was_unread = 0;
 	int state;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	lock_sock(sk);
 	sk->sk_shutdown = SHUTDOWN_MASK;
+#ifdef CONFIG_TCP_SKB_TRACE
+	old_ctx = tcp_set_trace_opt_ctx(sk, TCP_TRACE_OPT_CTX_TCP_CLOSE);
+#endif
 
 	if (sk->sk_state == TCP_LISTEN) {
 		tcp_set_state(sk, TCP_CLOSE);
@@ -2523,6 +2600,9 @@ adjudge_to_death:
 	/* Otherwise, socket is reprieved until protocol close. */
 
 out:
+#ifdef CONFIG_TCP_SKB_TRACE
+	tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 	bh_unlock_sock(sk);
 	local_bh_enable();
 	release_sock(sk);
@@ -2824,6 +2904,9 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 	struct net *net = sock_net(sk);
 	int val;
 	int err = 0;
+#ifdef CONFIG_TCP_SKB_TRACE
+	u8 old_ctx;
+#endif
 
 	/* These are data/string values, all the others are ints */
 	switch (optname) {
@@ -2920,7 +3003,14 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			 * for currently queued segments.
 			 */
 			tp->nonagle |= TCP_NAGLE_OFF|TCP_NAGLE_PUSH;
+#ifdef CONFIG_TCP_SKB_TRACE
+			old_ctx = tcp_set_trace_opt_ctx(sk,
+				  TCP_TRACE_OPT_CTX_DO_TCP_SETSOCKOPT_NODELAY);
+#endif
 			tcp_push_pending_frames(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+			tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		} else {
 			tp->nonagle &= ~TCP_NAGLE_OFF;
 		}
@@ -3008,7 +3098,14 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			tp->nonagle &= ~TCP_NAGLE_CORK;
 			if (tp->nonagle&TCP_NAGLE_OFF)
 				tp->nonagle |= TCP_NAGLE_PUSH;
+#ifdef CONFIG_TCP_SKB_TRACE
+			old_ctx = tcp_set_trace_opt_ctx(sk,
+				  TCP_TRACE_OPT_CTX_DO_TCP_SETSOCKOPT_CORK);
+#endif
 			tcp_push_pending_frames(sk);
+#ifdef CONFIG_TCP_SKB_TRACE
+			tcp_set_trace_opt_ctx(sk, old_ctx);
+#endif
 		}
 		break;
 
