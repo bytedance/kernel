@@ -101,6 +101,7 @@ void __exit skx_adxl_put(void)
 
 static bool skx_adxl_decode(struct decoded_addr *res)
 {
+	struct skx_dev *d;
 	int i, len = 0;
 
 	if (res->addr >= skx_tohm || (res->addr >= skx_tolm &&
@@ -118,6 +119,24 @@ static bool skx_adxl_decode(struct decoded_addr *res)
 	res->imc     = (int)adxl_values[component_indices[INDEX_MEMCTRL]];
 	res->channel = (int)adxl_values[component_indices[INDEX_CHANNEL]];
 	res->dimm    = (int)adxl_values[component_indices[INDEX_DIMM]];
+
+	if (res->imc > NUM_IMC - 1) {
+		skx_printk(KERN_ERR, "Bad imc %d\n", res->imc);
+		return false;
+	}
+
+	list_for_each_entry(d, &dev_edac_list, list) {
+		if (d->imc[0].src_id == res->socket) {
+			res->dev = d;
+			break;
+		}
+	}
+
+	if (!res->dev) {
+		skx_printk(KERN_ERR, "No device for src_id %d imc %d\n",
+			   res->socket, res->imc);
+		return false;
+	}
 
 	for (i = 0; i < adxl_component_count; i++) {
 		if (adxl_values[i] == ~0x0ull)
@@ -178,12 +197,11 @@ static int get_width(u32 mtr)
 }
 
 /*
- * We use the per-socket device @did to count how many sockets are present,
+ * We use the per-socket device @cfg->did to count how many sockets are present,
  * and to detemine which PCI buses are associated with each socket. Allocate
  * and build the full list of all the skx_dev structures that we need here.
  */
-int skx_get_all_bus_mappings(unsigned int did, int off, enum type type,
-			     struct list_head **list)
+int skx_get_all_bus_mappings(struct res_config *cfg, struct list_head **list)
 {
 	struct pci_dev *pdev, *prev;
 	struct skx_dev *d;
@@ -192,7 +210,7 @@ int skx_get_all_bus_mappings(unsigned int did, int off, enum type type,
 
 	prev = NULL;
 	for (;;) {
-		pdev = pci_get_device(PCI_VENDOR_ID_INTEL, did, prev);
+		pdev = pci_get_device(PCI_VENDOR_ID_INTEL, cfg->decs_did, prev);
 		if (!pdev)
 			break;
 		ndev++;
@@ -202,7 +220,7 @@ int skx_get_all_bus_mappings(unsigned int did, int off, enum type type,
 			return -ENOMEM;
 		}
 
-		if (pci_read_config_dword(pdev, off, &reg)) {
+		if (pci_read_config_dword(pdev, cfg->busno_cfg_offset, &reg)) {
 			kfree(d);
 			pci_dev_put(pdev);
 			skx_printk(KERN_ERR, "Failed to read bus idx\n");
@@ -211,7 +229,7 @@ int skx_get_all_bus_mappings(unsigned int did, int off, enum type type,
 
 		d->bus[0] = GET_BITFIELD(reg, 0, 7);
 		d->bus[1] = GET_BITFIELD(reg, 8, 15);
-		if (type == SKX) {
+		if (cfg->type == SKX) {
 			d->seg = pci_domain_nr(pdev->bus);
 			d->bus[2] = GET_BITFIELD(reg, 16, 23);
 			d->bus[3] = GET_BITFIELD(reg, 24, 31);
@@ -454,24 +472,6 @@ static void skx_unregister_mci(struct skx_imc *imc)
 	edac_mc_free(mci);
 }
 
-static struct mem_ctl_info *get_mci(int src_id, int lmc)
-{
-	struct skx_dev *d;
-
-	if (lmc > NUM_IMC - 1) {
-		skx_printk(KERN_ERR, "Bad lmc %d\n", lmc);
-		return NULL;
-	}
-
-	list_for_each_entry(d, &dev_edac_list, list) {
-		if (d->imc[0].src_id == src_id)
-			return d->imc[lmc].mci;
-	}
-
-	skx_printk(KERN_ERR, "No mci for src_id %d lmc %d\n", src_id, lmc);
-	return NULL;
-}
-
 static void skx_mce_output_error(struct mem_ctl_info *mci,
 				 const struct mce *m,
 				 struct decoded_addr *res)
@@ -592,14 +592,11 @@ int skx_mce_check_error(struct notifier_block *nb, unsigned long val,
 	if (adxl_component_count) {
 		if (!skx_adxl_decode(&res))
 			return NOTIFY_DONE;
-
-		mci = get_mci(res.socket, res.imc);
-	} else {
-		if (!skx_decode || !skx_decode(&res))
-			return NOTIFY_DONE;
-
-		mci = res.dev->imc[res.imc].mci;
+	} else if (!skx_decode || !skx_decode(&res)) {
+		return NOTIFY_DONE;
 	}
+
+	mci = res.dev->imc[res.imc].mci;
 
 	if (!mci)
 		return NOTIFY_DONE;
