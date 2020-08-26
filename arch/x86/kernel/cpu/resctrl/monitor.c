@@ -18,6 +18,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <asm/cpu_device_id.h>
+#include <asm/intel-family.h>
 #include "internal.h"
 
 struct rmid_entry {
@@ -627,6 +628,21 @@ int rdt_get_mon_l3_config(struct rdt_resource *r)
 	 * For a 35MB LLC and 56 RMIDs, this is ~1.8% of the LLC.
 	 */
 	resctrl_cqm_threshold = cl_size * 1024 / r->num_rmid;
+
+	/*
+	 * Due to known CQM h/w errata on Skylake server, in some cases the
+	 * RMIDs are always marked busy because the occupancy values never drop
+	 * to less than cache occupancy threshold. This may lead to unexpected
+	 * out of RMIDs.
+	 *
+	 * Workaround: set default cache occupancy threshold as cache size on
+	 * Skylake server. When a RMID is freed, the RMID entry added to limbo
+	 * list will never be marked busy. It will be moved to free list
+	 * immediately.
+	 */
+	if (boot_cpu_data.x86_model == INTEL_FAM6_SKYLAKE_X &&
+	    boot_cpu_data.x86_stepping <= 4)
+		resctrl_cqm_threshold = cl_size * 1024;
 
 	/* h/w works in units of "boot_cpu_data.x86_cache_occ_scale" */
 	resctrl_cqm_threshold /= r->mon_scale;
