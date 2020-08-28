@@ -883,6 +883,7 @@ BPF_CALL_2(bpf_sk_storage_delete, struct bpf_map *, map, struct sock *, sk)
 }
 
 const struct bpf_map_ops sk_storage_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc_check = bpf_sk_storage_map_alloc_check,
 	.map_alloc = bpf_sk_storage_map_alloc,
 	.map_free = bpf_sk_storage_map_free,
