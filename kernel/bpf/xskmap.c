@@ -308,6 +308,7 @@ void xsk_map_try_sock_delete(struct xsk_map *map, struct xdp_sock *xs,
 }
 
 const struct bpf_map_ops xsk_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc = xsk_map_alloc,
 	.map_free = xsk_map_free,
 	.map_get_next_key = xsk_map_get_next_key,
