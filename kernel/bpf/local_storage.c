@@ -410,6 +410,7 @@ static void cgroup_storage_seq_show_elem(struct bpf_map *map, void *_key,
 }
 
 const struct bpf_map_ops cgroup_storage_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc = cgroup_storage_map_alloc,
 	.map_free = cgroup_storage_map_free,
 	.map_get_next_key = cgroup_storage_get_next_key,
