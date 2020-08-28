@@ -1227,17 +1227,17 @@ static inline void flush_hpage_update_work(struct hstate *h)
 #ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
 static inline bool PageHugeInflight(struct page *head)
 {
-	return page_private(head + 5) == 1;
+	return page_private(head + SUBPAGE_INDEX_INFLIGHT) == 1;
 }
 
 static inline void SetPageHugeInflight(struct page *head)
 {
-	set_page_private(head + 5, 1);
+	set_page_private(head + SUBPAGE_INDEX_INFLIGHT, 1);
 }
 
 static inline void ClearPageHugeInflight(struct page *head)
 {
-	set_page_private(head + 5, 0);
+	set_page_private(head + SUBPAGE_INDEX_INFLIGHT, 0);
 }
 #else
 static inline bool PageHugeInflight(struct page *head)
@@ -1285,7 +1285,7 @@ static inline void hwpoison_subpage_deliver(struct hstate *h, struct page *head)
 	if (!PageHWPoison(head) || !free_vmemmap_pages_per_hpage(h))
 		return;
 
-	page = head + page_private(head + 4);
+	page = head + page_private(head + SUBPAGE_INDEX_HWPOISON);
 
 	/*
 	 * Move PageHWPoison flag from head page to the raw error page,
@@ -1304,7 +1304,7 @@ static inline void hwpoison_subpage_set(struct hstate *h, struct page *head,
 		return;
 
 	if (free_vmemmap_pages_per_hpage(h)) {
-		set_page_private(head + 4, page - head);
+		set_page_private(head + SUBPAGE_INDEX_HWPOISON, page - head);
 	} else if (page != head) {
 		/*
 		 * Move PageHWPoison flag from head page to the raw error page,
@@ -1314,7 +1314,6 @@ static inline void hwpoison_subpage_set(struct hstate *h, struct page *head,
 		ClearPageHWPoison(head);
 	}
 }
-
 #else
 static inline void hwpoison_subpage_deliver(struct hstate *h, struct page *head)
 {
@@ -1388,20 +1387,20 @@ struct hstate *size_to_hstate(unsigned long size)
 bool page_huge_active(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageHuge(page), page);
-	return PageHead(page) && PagePrivate(&page[1]);
+	return PageHead(page) && PagePrivate(&page[SUBPAGE_INDEX_ACTIVE]);
 }
 
 /* never called for tail page */
 static void set_page_huge_active(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageHeadHuge(page), page);
-	SetPagePrivate(&page[1]);
+	SetPagePrivate(&page[SUBPAGE_INDEX_ACTIVE]);
 }
 
 static void clear_page_huge_active(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageHeadHuge(page), page);
-	ClearPagePrivate(&page[1]);
+	ClearPagePrivate(&page[SUBPAGE_INDEX_ACTIVE]);
 }
 
 /*
@@ -1413,17 +1412,17 @@ static inline bool PageHugeTemporary(struct page *page)
 	if (!PageHuge(page))
 		return false;
 
-	return (unsigned long)page[2].mapping == -1U;
+	return (unsigned long)page[SUBPAGE_INDEX_TEMPORARY].mapping == -1U;
 }
 
 static inline void SetPageHugeTemporary(struct page *page)
 {
-	page[2].mapping = (void *)-1U;
+	page[SUBPAGE_INDEX_TEMPORARY].mapping = (void *)-1U;
 }
 
 static inline void ClearPageHugeTemporary(struct page *page)
 {
-	page[2].mapping = NULL;
+	page[SUBPAGE_INDEX_TEMPORARY].mapping = NULL;
 }
 
 static void __free_huge_page(struct page *page)
