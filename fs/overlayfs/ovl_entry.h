@@ -17,6 +17,7 @@ struct ovl_config {
 	bool nfs_export;
 	int xino;
 	bool metacopy;
+	bool ovl_volatile;
 };
 
 struct ovl_sb {
@@ -74,6 +75,11 @@ struct ovl_fs {
 	/* Inode numbers in all layers do not use the high xino_bits */
 	unsigned int xino_bits;
 };
+
+static inline bool ovl_should_sync(struct ovl_fs *ofs)
+{
+	return !ofs->config.ovl_volatile;
+}
 
 /* private information held for every overlayfs dentry */
 struct ovl_entry {
