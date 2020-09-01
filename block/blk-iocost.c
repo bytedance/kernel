@@ -1230,6 +1230,8 @@ static void iocg_kick_waitq(struct ioc_gq *iocg, struct ioc_now *now)
 		atomic64_add(delta, &iocg->vtime);
 		atomic64_add(delta, &iocg->done_vtime);
 		iocg->abs_vdebt -= abs_delta;
+
+		iocg_kick_delay(iocg, now);
 	}
 
 	/*
@@ -1387,7 +1389,6 @@ static void ioc_timer_fn(struct timer_list *timer)
 		if (waitqueue_active(&iocg->waitq) || iocg->abs_vdebt) {
 			/* might be oversleeping vtime / hweight changes, kick */
 			iocg_kick_waitq(iocg, &now);
-			iocg_kick_delay(iocg, &now);
 		} else if (iocg_is_idle(iocg)) {
 			/* no waiter and idle, deactivate */
 			iocg->last_inuse = iocg->inuse;
