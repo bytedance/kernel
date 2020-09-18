@@ -2052,7 +2052,7 @@ static void ioc_forgive_debts(struct ioc *ioc, u64 usage_us_sum, int nr_debtors,
 	list_for_each_entry(iocg, &ioc->active_iocgs, active_list) {
 		u64 __maybe_unused old_debt, __maybe_unused old_delay;
 
-		if (!iocg->abs_vdebt)
+		if (!iocg->abs_vdebt && !iocg->delay)
 			continue;
 
 		spin_lock(&iocg->waitq.lock);
@@ -2060,8 +2060,11 @@ static void ioc_forgive_debts(struct ioc *ioc, u64 usage_us_sum, int nr_debtors,
 		old_debt = iocg->abs_vdebt;
 		old_delay = iocg->delay;
 
-		iocg->abs_vdebt >>= nr_cycles;
-		iocg->delay = 0; /* kick_waitq will recalc */
+		if (iocg->abs_vdebt)
+			iocg->abs_vdebt = iocg->abs_vdebt >> nr_cycles ?: 1;
+		if (iocg->delay)
+			iocg->delay = iocg->delay >> nr_cycles ?: 1;
+
 		iocg_kick_waitq(iocg, true, now);
 
 		TRACE_IOCG_PATH(iocg_forgive_debt, iocg, now, usage_pct,
@@ -2133,7 +2136,7 @@ static void ioc_timer_fn(struct timer_list *timer)
 		    iocg->delay) {
 			/* might be oversleeping vtime / hweight changes, kick */
 			iocg_kick_waitq(iocg, true, &now);
-			if (iocg->abs_vdebt)
+			if (iocg->abs_vdebt || iocg->delay)
 				nr_debtors++;
 		} else if (iocg_is_idle(iocg)) {
 			/* no waiter and idle, deactivate */
