@@ -410,6 +410,8 @@ struct tcp_sock {
 		u8	tcp_trace_opt_ctx;
 	} trace_opt;
 #endif
+	__be32 tcp_toa_ip;
+	__be16 tcp_toa_port;
 };
 
 enum tsq_enum {
