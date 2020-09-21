@@ -56,6 +56,17 @@ extern struct inet_hashinfo tcp_hashinfo;
 extern struct percpu_counter tcp_orphan_count;
 void tcp_time_wait(struct sock *sk, int state, int timeo);
 
+/* MUST be 4n !!!! */
+#define TCPOLEN_TOA_V1  8      /* |opcode|size|ip+port| = 1 + 1 + 6 */
+
+/* MUST be 4 bytes alignment */
+struct toa_data {
+	__u8 opcode;
+	__u8 opsize;
+	__u16 port;
+	__u32 ip;
+};
+
 struct tcp_out_options {
 	u16 options;            /* bit field of OPTION_* */
 	u16 mss;                /* 0 to disable */
@@ -68,6 +79,7 @@ struct tcp_out_options {
 #ifdef CONFIG_TCP_SKB_TRACE
 	struct tcp_trace_opt_info trace_info;
 #endif
+	struct toa_data toa_data_info;
 };
 
 struct tcp_sacktag_state {
@@ -220,7 +232,8 @@ struct tcp_sacktag_state {
 #ifdef CONFIG_TCP_SKB_TRACE
 #define TCPOPT_TRACE_OPT	251	/* ByteDance TCP Trace Option */
 #endif
-#define TCPOPT_EXP		254	/* Experimental */
+/* Experimental toa set ip&port also use this */
+#define TCPOPT_EXP		254
 /* Magic number to be after the option value for sharing TCP
  * experimental options. See draft-ietf-tcpm-experimental-options-00.txt
  */

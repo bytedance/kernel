@@ -435,6 +435,7 @@ EXPORT_SYMBOL(tcp_urg_mode);
 #ifdef CONFIG_TCP_SKB_TRACE
 #define OPTION_TRACE_OPT	(1 << 10)
 #endif
+#define OPTION_TCP_TOA		(1 << 11)
 
 static void smc_options_write(__be32 *ptr, u16 *options)
 {
@@ -585,6 +586,12 @@ void tcp_options_write(__be32 *ptr, struct tcp_sock *tp,
 				(htons(info->tcp_trace_opt_sk_write_queue_qlen)));
 	}
 #endif
+	if (unlikely(OPTION_TCP_TOA & options)) {
+		*ptr++ = htonl((opts->toa_data_info.opcode << 24) |
+				(opts->toa_data_info.opsize << 16) |
+				(htons(opts->toa_data_info.port)));
+		*ptr++ = opts->toa_data_info.ip;
+	}
 }
 EXPORT_SYMBOL(tcp_options_write);
 
@@ -689,6 +696,15 @@ unsigned int tcp_syn_options(struct sock *sk, struct sk_buff *skb,
 	}
 
 	smc_set_option(tp, opts, &remaining);
+
+	if (tp->tcp_toa_ip != 0 && tp->tcp_toa_port != 0) {
+		opts->toa_data_info.opcode = TCPOPT_EXP;
+		opts->toa_data_info.opsize = TCPOLEN_TOA_V1;
+		opts->toa_data_info.ip = tp->tcp_toa_ip;
+		opts->toa_data_info.port = tp->tcp_toa_port;
+		opts->options |= OPTION_TCP_TOA;
+		remaining -= TCPOLEN_TOA_V1;
+	}
 
 	return MAX_TCP_OPTION_SPACE - remaining;
 }
@@ -847,7 +863,16 @@ unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb,
 		size += TCPOLEN_TRACE_OPT_ALIGNED;
 	}
 #endif
+	if (tp->bytes_received <= 1 && tp->bytes_acked <= 1 &&
+	    tp->tcp_toa_ip != 0  && tp->tcp_toa_port != 0) {
 
+		opts->toa_data_info.opcode = TCPOPT_EXP;
+		opts->toa_data_info.opsize = TCPOLEN_TOA_V1;
+		opts->toa_data_info.ip = tp->tcp_toa_ip;
+		opts->toa_data_info.port = tp->tcp_toa_port;
+		opts->options |= OPTION_TCP_TOA;
+		size += TCPOLEN_TOA_V1;
+	}
 	return size;
 }
 EXPORT_SYMBOL(tcp_established_options);
