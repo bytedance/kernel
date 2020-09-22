@@ -107,22 +107,13 @@ ENTRY(copy_user_generic_unrolled)
 	ret
 
 	.section .fixup,"ax"
-30:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
-	je 70f
-	shll $6,%ecx
+30:	shll $6,%ecx
 	addl %ecx,%edx
 	jmp 60f
-40:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
-	je 70f
-	leal (%rdx,%rcx,8),%edx
+40:	leal (%rdx,%rcx,8),%edx
 	jmp 60f
-50:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
-	je 70f
-	movl %ecx,%edx
+50:	movl %ecx,%edx
 60:	jmp .Lcopy_user_handle_tail /* ecx is zerorest also */
-70:	movl %ecx,%eax		/* return uncopied bytes */
-	ASM_CLAC
-	ret
 	.previous
 
 	_ASM_EXTABLE_CPY_UA(1b, 30b)
@@ -184,17 +175,9 @@ ENTRY(copy_user_generic_string)
 	ret
 
 	.section .fixup,"ax"
-11:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
-	je 14f
-	leal (%rdx,%rcx,8),%ecx
-	jmp 13f
-12:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
-	je 14f
-13:	movl %ecx,%edx		/* ecx is zerorest also */
+11:	leal (%rdx,%rcx,8),%ecx
+12:	movl %ecx,%edx		/* ecx is zerorest also */
 	jmp .Lcopy_user_handle_tail
-14:	movl %ecx,%eax		/* return uncopied bytes */
-	ASM_CLAC
-	ret
 	.previous
 
 	_ASM_EXTABLE_CPY_UA(1b, 11b)
@@ -226,13 +209,8 @@ ENTRY(copy_user_enhanced_fast_string)
 	ret
 
 	.section .fixup,"ax"
-12:	cmp $0x12,%eax		/* check if X86_TRAP_MC */
-	je 13f
-	movl %ecx,%edx		/* ecx is zerorest also */
+12:	movl %ecx,%edx		/* ecx is zerorest also */
 	jmp .Lcopy_user_handle_tail
-13:	movl %ecx,%eax		/* return uncopied bytes */
-	ASM_CLAC
-	ret
 	.previous
 
 	_ASM_EXTABLE_CPY_UA(1b, 12b)
@@ -243,6 +221,7 @@ EXPORT_SYMBOL(copy_user_enhanced_fast_string)
  * Try to copy last bytes and clear the rest if needed.
  * Since protection fault in copy_from/to_user is not a normal situation,
  * it is not necessary to optimize tail handling.
+ * Don't try to copy the tail if machine check happened
  *
  * Input:
  * rdi destination
@@ -255,8 +234,13 @@ EXPORT_SYMBOL(copy_user_enhanced_fast_string)
 ALIGN;
 .Lcopy_user_handle_tail:
 	movl %edx,%ecx
+	cmp $0x12,%eax		/* check if X86_TRAP_MC */
+	je 3f
 1:	rep movsb
 2:	mov %ecx,%eax
+	ASM_CLAC
+	ret
+3:	xorl %eax,%eax	/* pretend we succeeded? */
 	ASM_CLAC
 	ret
 
