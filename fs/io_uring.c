@@ -3050,6 +3050,7 @@ static int io_async_buf_func(struct wait_queue_entry *wait, unsigned mode,
 	if (ret != 1)
 		return ret;
 
+	req->rw.kiocb.ki_flags &= ~IOCB_WAITQ;
 	list_del_init(&wait->entry);
 
 	init_task_work(&req->task_work, io_req_task_submit);
@@ -3107,6 +3108,7 @@ static bool io_rw_should_retry(struct io_kiocb *req)
 	wait->wait.flags = 0;
 	INIT_LIST_HEAD(&wait->wait.entry);
 	kiocb->ki_flags |= IOCB_WAITQ;
+	kiocb->ki_flags &= ~IOCB_NOWAIT;
 	kiocb->ki_waitq = wait;
 
 	io_get_req_task(req);
