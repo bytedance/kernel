@@ -3157,7 +3157,7 @@ static int io_read_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 		return -EBADF;
 
 	/* either don't need iovec imported or already have it */
-	if (!req->async_data || req->flags & REQ_F_NEED_CLEANUP)
+	if (!req->async_data)
 		return 0;
 	return io_rw_prep_async(req, READ, force_nonblock);
 }
@@ -3382,7 +3382,7 @@ static int io_write_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe,
 		return -EBADF;
 
 	/* either don't need iovec imported or already have it */
-	if (!req->async_data || req->flags & REQ_F_NEED_CLEANUP)
+	if (!req->async_data)
 		return 0;
 	return io_rw_prep_async(req, WRITE, force_nonblock);
 }
@@ -3483,8 +3483,6 @@ static int __io_splice_prep(struct io_kiocb *req,
 	unsigned int valid_flags = SPLICE_F_FD_IN_FIXED | SPLICE_F_ALL;
 	int ret;
 
-	if (req->flags & REQ_F_NEED_CLEANUP)
-		return 0;
 	if (unlikely(req->ctx->flags & IORING_SETUP_IOPOLL))
 		return -EINVAL;
 
@@ -3694,8 +3692,6 @@ static int io_openat_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 
 	if (unlikely(req->ctx->flags & (IORING_SETUP_IOPOLL|IORING_SETUP_SQPOLL)))
 		return -EINVAL;
-	if (req->flags & REQ_F_NEED_CLEANUP)
-		return 0;
 	mode = READ_ONCE(sqe->len);
 	flags = READ_ONCE(sqe->open_flags);
 	req->open.how = build_open_how(flags, mode);
@@ -3710,8 +3706,6 @@ static int io_openat2_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 
 	if (unlikely(req->ctx->flags & (IORING_SETUP_IOPOLL|IORING_SETUP_SQPOLL)))
 		return -EINVAL;
-	if (req->flags & REQ_F_NEED_CLEANUP)
-		return 0;
 	how = u64_to_user_ptr(READ_ONCE(sqe->addr2));
 	len = READ_ONCE(sqe->len);
 	if (len < OPEN_HOW_SIZE_VER0)
@@ -4219,10 +4213,6 @@ static int io_sendmsg_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 
 	if (!async_msg || !io_op_defs[req->opcode].needs_async_data)
 		return 0;
-	/* iovec is already imported */
-	if (req->flags & REQ_F_NEED_CLEANUP)
-		return 0;
-
 	ret = io_sendmsg_copy_hdr(req, async_msg);
 	if (!ret)
 		req->flags |= REQ_F_NEED_CLEANUP;
@@ -4449,10 +4439,6 @@ static int io_recvmsg_prep(struct io_kiocb *req,
 
 	if (!async_msg || !io_op_defs[req->opcode].needs_async_data)
 		return 0;
-	/* iovec is already imported */
-	if (req->flags & REQ_F_NEED_CLEANUP)
-		return 0;
-
 	ret = io_recvmsg_copy_hdr(req, async_msg);
 	if (!ret)
 		req->flags |= REQ_F_NEED_CLEANUP;
