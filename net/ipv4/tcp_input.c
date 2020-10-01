@@ -6271,6 +6271,7 @@ int tcp_rcv_state_process(struct sock *sk, struct sk_buff *skb)
 
 	case TCP_SYN_SENT:
 		tp->rx_opt.saw_tstamp = 0;
+		tp->tcpi_crcv_synack_stamp = tcp_jiffies32;
 		tcp_mstamp_refresh(tp);
 		queued = tcp_rcv_synsent_state_process(sk, skb, th);
 		if (queued >= 0)
@@ -6691,6 +6692,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 	tcp_rsk(req)->af_specific = af_ops;
 	tcp_rsk(req)->ts_off = 0;
 	tcp_rsk(req)->tfo_info = 0;
+	tcp_rsk(req)->tcpi_srcv_syn_stamp = tcp_jiffies32;
 
 	tcp_clear_options(&tmp_opt);
 	tmp_opt.mss_clamp = af_ops->mss_clamp;
@@ -6774,6 +6776,7 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 			goto drop_and_free;
 		}
 		tsk->tfo_info = treq->tfo_info;
+		tsk->tcpi_srcv_syn_stamp = treq->tcpi_srcv_syn_stamp;
 		sk->sk_data_ready(sk);
 		bh_unlock_sock(fastopen_sk);
 		sock_put(fastopen_sk);

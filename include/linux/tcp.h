@@ -125,6 +125,10 @@ struct tcp_request_sock {
 	u32				ts_off;
 	u32				last_oow_ack_time; /* last SYNACK */
 	u32				tfo_info;
+	u32				tcpi_csent_syn_stamp;
+	u32				tcpi_srcv_syn_stamp;
+	u32				tcpi_crcv_synack_stamp;
+	u32				tcpi_srcv_ack_stamp;
 	u32				rcv_nxt; /* the ack # by SYNACK. For
 						  * FastOpen it's the seq#
 						  * after data-in-SYN.
@@ -244,6 +248,10 @@ struct tcp_sock {
 		is_cwnd_limited:1,/* forward progress limited by snd_cwnd? */
 		syn_smc:1;	/* SYN includes SMC */
 	u32	tfo_info;
+	u32	tcpi_csent_syn_stamp;
+	u32	tcpi_srcv_syn_stamp;
+	u32	tcpi_crcv_synack_stamp;
+	u32	tcpi_srcv_ack_stamp;
 	u32	tlp_high_seq;	/* snd_nxt at the time of TLP */
 
 	u32	tcp_tx_delay;	/* delay (in usec) added to TX packets */
