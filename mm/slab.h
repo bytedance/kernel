@@ -243,9 +243,6 @@ static inline bool memcg_slab_pre_alloc_hook(struct kmem_cache *s,
 	if (!memcg_kmem_enabled())
 		return true;
 
-	if (memcg_kmem_bypass())
-		return true;
-
 	if (!(flags & __GFP_ACCOUNT) && !(s->flags & SLAB_ACCOUNT))
 		return true;
 
