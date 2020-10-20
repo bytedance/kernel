@@ -2875,7 +2875,8 @@ union bpf_attr {
 	FN(sk_storage_delete),		\
 	FN(send_signal),		\
 	FN(tcp_gen_syncookie),  \
-	FN(biggest_bits),
+	FN(biggest_bits),		\
+	FN(unsafe_helper),
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
  * function eBPF program intends to call
@@ -3166,6 +3167,15 @@ enum xdp_action {
 	XDP_PASS,
 	XDP_TX,
 	XDP_REDIRECT,
+};
+
+struct bpf_unsafe_ctx {
+	void *ctx;
+	__u16 mod;
+	__u16 cmd;
+	__u16 flags;
+	__u16 data_len;
+	char data[0];
 };
 
 /* user accessible metadata for XDP packet hook
