@@ -1261,6 +1261,15 @@ static struct ctl_table kern_table[] = {
 		.extra2		= SYSCTL_ONE,
 	},
 	{
+		.procname	= "bpf_unsafe_helper_enable",
+		.data		= &sysctl_bpf_unsafe_helper_enable,
+		.maxlen		= sizeof(sysctl_bpf_unsafe_helper_enable),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE,
+	},
+	{
 		.procname	= "bpf_stats_enabled",
 		.data		= &bpf_stats_enabled_key.key,
 		.maxlen		= sizeof(bpf_stats_enabled_key),
