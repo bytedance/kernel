@@ -73,6 +73,7 @@
 #include <net/lwtunnel.h>
 #include <net/ipv6_stubs.h>
 #include <net/bpf_sk_storage.h>
+#include <linux/proc_fs.h>
 
 /**
  *	sk_filter_trim_cap - run a packet through a socket filter
@@ -130,6 +131,79 @@ BPF_CALL_1(bpf_skb_get_pay_offset, struct sk_buff *, skb)
 {
 	return skb_get_poff(skb);
 }
+
+#define BPF_UNSAFE_ARRAY_MAX_LENGTH 64
+static bpf_unsafe_handler_t bpf_unsafe_mod_array[BPF_UNSAFE_ARRAY_MAX_LENGTH];
+
+static inline bool valid_unsafe_index(int mod)
+{
+	return (mod >= 0 && mod < BPF_UNSAFE_ARRAY_MAX_LENGTH);
+}
+
+static int bpf_unsafe_fs_show(struct seq_file *m, void *v)
+{
+	int i;
+
+	for (i = 0; i < BPF_UNSAFE_ARRAY_MAX_LENGTH; i++)
+		if (bpf_unsafe_mod_array[i])
+			seq_printf(m, "%d \t-->\t %pS\n", i,
+				bpf_unsafe_mod_array[i]);
+
+	return 0;
+}
+DEFINE_SHOW_ATTRIBUTE(bpf_unsafe_fs);
+
+static int __init bpf_unsafe_init(void)
+{
+	proc_create("bpf_unsafe_gh", 0, NULL, &bpf_unsafe_fs_fops);
+
+	return 0;
+}
+
+module_init(bpf_unsafe_init);
+
+int bpf_unsafe_mod_register(int mod, bpf_unsafe_handler_t fp)
+{
+	if (!valid_unsafe_index(mod))
+		return -EINVAL;
+	return !bpf_unsafe_mod_array[mod] &&
+		!cmpxchg(&bpf_unsafe_mod_array[mod], NULL, fp) ? 0 : -ENODEV;
+}
+EXPORT_SYMBOL(bpf_unsafe_mod_register);
+
+void bpf_unsafe_mod_unregister(int mod)
+{
+	if (!valid_unsafe_index(mod))
+		return;
+	bpf_unsafe_mod_array[mod] = NULL;
+	synchronize_rcu();
+}
+EXPORT_SYMBOL(bpf_unsafe_mod_unregister);
+
+BPF_CALL_1(bpf_unsafe_helper, struct bpf_unsafe_ctx *, ctx)
+{
+	int mod = ctx->mod;
+	int ret = 0;
+	bpf_unsafe_handler_t handler;
+
+	if (!valid_unsafe_index(mod))
+		return -EINVAL;
+
+	rcu_read_lock();
+	handler = rcu_dereference(bpf_unsafe_mod_array[mod]);
+	if (handler)
+		ret = handler(ctx);
+	rcu_read_unlock();
+
+	return ret;
+}
+
+static const struct bpf_func_proto bpf_unsafe_helper_proto = {
+	.func           = bpf_unsafe_helper,
+	.gpl_only       = false,
+	.ret_type       = RET_INTEGER,
+	.arg1_type      = ARG_ANYTHING,
+};
 
 BPF_CALL_3(bpf_skb_get_nlattr, struct sk_buff *, skb, u32, a, u32, x)
 {
@@ -6128,6 +6202,11 @@ static const struct bpf_func_proto *
 tc_cls_act_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable ||
+			!capable(CAP_SYS_ADMIN))
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_skb_store_bytes:
 		return &bpf_skb_store_bytes_proto;
 	case BPF_FUNC_skb_load_bytes:
@@ -6267,6 +6346,11 @@ static const struct bpf_func_proto *
 xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable ||
+			!capable(CAP_SYS_ADMIN))
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_biggest_bits:
 		return &bpf_biggest_bits_proto;
 	case BPF_FUNC_perf_event_output:
@@ -6425,6 +6509,11 @@ static const struct bpf_func_proto *
 lwt_out_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable ||
+			!capable(CAP_SYS_ADMIN))
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_skb_load_bytes:
 		return &bpf_skb_load_bytes_proto;
 	case BPF_FUNC_skb_pull_data:
@@ -6452,6 +6541,11 @@ static const struct bpf_func_proto *
 lwt_in_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable ||
+			!capable(CAP_SYS_ADMIN))
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_lwt_push_encap:
 		return &bpf_lwt_in_push_encap_proto;
 	default:
@@ -6463,6 +6557,11 @@ static const struct bpf_func_proto *
 lwt_xmit_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable ||
+			!capable(CAP_SYS_ADMIN))
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_skb_get_tunnel_key:
 		return &bpf_skb_get_tunnel_key_proto;
 	case BPF_FUNC_skb_set_tunnel_key:

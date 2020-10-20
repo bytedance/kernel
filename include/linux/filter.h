@@ -826,6 +826,10 @@ static inline void bpf_prog_unlock_free(struct bpf_prog *fp)
 typedef int (*bpf_aux_classic_check_t)(struct sock_filter *filter,
 				       unsigned int flen);
 
+typedef int (*bpf_unsafe_handler_t)(struct bpf_unsafe_ctx *);
+int bpf_unsafe_mod_register(int mod, bpf_unsafe_handler_t fp);
+void bpf_unsafe_mod_unregister(int mod);
+
 int bpf_prog_create(struct bpf_prog **pfp, struct sock_fprog_kern *fprog);
 int bpf_prog_create_from_user(struct bpf_prog **pfp, struct sock_fprog *fprog,
 			      bpf_aux_classic_check_t trans, bool save_orig);
