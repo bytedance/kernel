@@ -3349,7 +3349,8 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 		jiffies_to_msecs(tp->tcpi_crcv_synack_stamp);
 	info->tcpi_srcv_ack_stamp = 
 		jiffies_to_msecs(tp->tcpi_srcv_ack_stamp);
-
+	info->tcpi_firstdata_stamp =
+		jiffies_to_msecs(tp->tcpi_firstdata_stamp);
 	unlock_sock_fast(sk, slow);
 }
 EXPORT_SYMBOL_GPL(tcp_get_info);

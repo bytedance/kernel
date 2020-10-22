@@ -252,6 +252,7 @@ struct tcp_sock {
 	u32	tcpi_srcv_syn_stamp;
 	u32	tcpi_crcv_synack_stamp;
 	u32	tcpi_srcv_ack_stamp;
+	u32	tcpi_firstdata_stamp;
 	u32	tlp_high_seq;	/* snd_nxt at the time of TLP */
 
 	u32	tcp_tx_delay;	/* delay (in usec) added to TX packets */

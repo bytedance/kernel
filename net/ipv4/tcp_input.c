@@ -3428,6 +3428,9 @@ static void tcp_rcv_nxt_update(struct tcp_sock *tp, u32 seq)
 	u32 delta = seq - tp->rcv_nxt;
 
 	sock_owned_by_me((struct sock *)tp);
+	if (tp->bytes_received == 0)
+		tp->tcpi_firstdata_stamp = tcp_jiffies32;
+
 	tp->bytes_received += delta;
 	WRITE_ONCE(tp->rcv_nxt, seq);
 }
