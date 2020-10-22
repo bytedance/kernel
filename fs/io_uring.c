@@ -6194,7 +6194,6 @@ again:
 	 */
 	if (ret == -EAGAIN && !(req->flags & REQ_F_NOWAIT)) {
 		if (!io_arm_poll_handler(req)) {
-punt:
 			/*
 			 * Queued up for async execution, worker will release
 			 * submit reference when the iocb is actually submitted.
@@ -6223,12 +6222,9 @@ punt:
 
 	if (nxt) {
 		req = nxt;
-
-		if (req->flags & REQ_F_FORCE_ASYNC) {
-			linked_timeout = NULL;
-			goto punt;
-		}
-		goto again;
+		if (!(req->flags & REQ_F_FORCE_ASYNC))
+			goto again;
+		io_queue_async_work(req);
 	}
 exit:
 	if (old_creds)
