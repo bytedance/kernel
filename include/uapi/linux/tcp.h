@@ -296,6 +296,7 @@ struct tcp_info {
 	__u32	tcpi_crcv_synack_stamp;
 	__u32	tcpi_srcv_ack_stamp;
 	__u32	tcpi_firstdata_stamp;
+	__u32	tcpi_probe0_times;
 
 };
 

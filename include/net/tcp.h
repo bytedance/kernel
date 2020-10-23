@@ -1579,10 +1579,14 @@ static inline unsigned long tcp_probe0_when(const struct sock *sk,
 
 static inline void tcp_check_probe_timer(struct sock *sk)
 {
-	if (!tcp_sk(sk)->packets_out && !inet_csk(sk)->icsk_pending)
+	struct tcp_sock *tp = tcp_sk(sk);
+
+	if (!tcp_sk(sk)->packets_out && !inet_csk(sk)->icsk_pending) {
+		tp->tcpi_probe0_times++;
 		tcp_reset_xmit_timer(sk, ICSK_TIME_PROBE0,
 				     tcp_probe0_base(sk), TCP_RTO_MAX,
 				     NULL);
+	}
 }
 
 static inline void tcp_init_wl(struct tcp_sock *tp, u32 seq)
