@@ -825,6 +825,8 @@ static void tcp_rtt_estimator(struct sock *sk, long mrtt_us)
 		tcp_bpf_rtt(sk);
 	}
 	tp->srtt_us = max(1U, srtt);
+	if (tp->max_srtt_us < tp->srtt_us)
+		tp->max_srtt_us = tp->srtt_us;
 }
 
 static void tcp_update_pacing_rate(struct sock *sk)

@@ -2710,6 +2710,7 @@ int tcp_disconnect(struct sock *sk, int flags)
 	sk->sk_shutdown = 0;
 	sock_reset_flag(sk, SOCK_DONE);
 	tp->srtt_us = 0;
+	tp->max_srtt_us = 0;
 	tp->mdev_us = jiffies_to_usecs(TCP_TIMEOUT_INIT);
 	tp->rcv_rtt_last_tsecr = 0;
 
@@ -3440,6 +3441,7 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 	info->tcpi_pmtu = icsk->icsk_pmtu_cookie;
 	info->tcpi_rcv_ssthresh = tp->rcv_ssthresh;
 	info->tcpi_rtt = tp->srtt_us >> 3;
+	info->tcpi_max_rtt = tp->max_srtt_us >> 3;
 	info->tcpi_rttvar = tp->mdev_us >> 2;
 	info->tcpi_snd_ssthresh = tp->snd_ssthresh;
 	info->tcpi_advmss = tp->advmss;
