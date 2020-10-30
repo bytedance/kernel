@@ -2364,6 +2364,40 @@ static void high_work_func(struct work_struct *work)
 }
 
 #ifdef CONFIG_MEMCG_BGD_RECLAIM
+static struct workqueue_struct *memcg_reclaim_wq;
+
+static inline bool memcg_watermark_ok(struct mem_cgroup *memcg)
+{
+	unsigned long free;
+
+	free = memcg->memory.max - page_counter_read(&memcg->memory);
+
+	return free >= memcg_low_wmark_pages(memcg);
+}
+
+static void memcg_reclaim_work(struct work_struct *work)
+{
+	struct mem_cgroup *memcg = container_of(work, struct mem_cgroup,
+						mem_reclaim_work);
+	unsigned long low, high, free;
+
+	memcg_wmark_lock(memcg);
+	low = memcg_low_wmark_pages(memcg);
+	high = memcg_high_wmark_pages(memcg);
+	free = memcg->memory.max - page_counter_read(&memcg->memory);
+	memcg_wmark_unlock(memcg);
+
+	if (free >= low)
+		return;
+
+	try_to_free_mem_cgroup_pages(memcg, high - free, GFP_KERNEL, true);
+}
+
+static inline void queue_reclaim_work(struct mem_cgroup *memcg)
+{
+	queue_work(memcg_reclaim_wq, &memcg->mem_reclaim_work);
+}
+
 static inline void __set_memcg_watermark(struct mem_cgroup *memcg)
 {
 	unsigned long factor = memcg->watermark_scale_factor;
@@ -2386,6 +2420,15 @@ static void memcg_watermark_init(struct mem_cgroup *memcg, unsigned int factor)
 	__set_memcg_watermark(memcg);
 }
 #else
+static inline bool memcg_watermark_ok(struct mem_cgroup *memcg)
+{
+	return true;
+}
+
+static inline void queue_reclaim_work(struct mem_cgroup *memcg)
+{
+}
+
 static inline void __set_memcg_watermark(struct mem_cgroup *memcg)
 {
 }
@@ -2712,6 +2755,9 @@ done_restock:
 	css_get_many(&memcg->css, batch);
 	if (batch > nr_pages)
 		refill_stock(memcg, batch - nr_pages);
+
+	if (!memcg_watermark_ok(memcg))
+		queue_reclaim_work(memcg);
 
 	/*
 	 * If the hierarchy is above the normal consumption range, schedule
@@ -5215,6 +5261,9 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 		goto fail;
 
 	INIT_WORK(&memcg->high_work, high_work_func);
+#ifdef CONFIG_MEMCG_BGD_RECLAIM
+	INIT_WORK(&memcg->mem_reclaim_work, memcg_reclaim_work);
+#endif
 	memcg->last_scanned_node = MAX_NUMNODES;
 	INIT_LIST_HEAD(&memcg->oom_notify);
 	mutex_init(&memcg->thresholds_lock);
@@ -5381,6 +5430,9 @@ static void mem_cgroup_css_free(struct cgroup_subsys_state *css)
 
 	vmpressure_cleanup(&memcg->vmpressure);
 	cancel_work_sync(&memcg->high_work);
+#ifdef CONFIG_MEMCG_BGD_RECLAIM
+	cancel_work_sync(&memcg->mem_reclaim_work);
+#endif
 	mem_cgroup_remove_from_trees(memcg);
 	memcg_free_shrinker_maps(memcg);
 	memcg_free_kmem(memcg);
@@ -7106,6 +7158,12 @@ __setup("cgroup.memory=", cgroup_memory);
 static int __init mem_cgroup_init(void)
 {
 	int cpu, node;
+
+
+#ifdef CONFIG_MEMCG_BGD_RECLAIM
+	memcg_reclaim_wq = alloc_workqueue("memcg_reclaim_wq", WQ_UNBOUND, 1);
+	BUG_ON(!memcg_reclaim_wq);
+#endif
 
 #ifdef CONFIG_MEMCG_KMEM
 	/*
