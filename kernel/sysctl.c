@@ -1543,6 +1543,15 @@ static struct ctl_table vm_table[] = {
 		.extra1		= &zero_ul,
 		.extra2		= &one_thousand,
 	},
+	{
+		.procname	= "memcg_mem_reclaim_wq_max_active",
+		.data		= &memcg_mem_reclaim_wq_max_active,
+		.maxlen		= sizeof(memcg_mem_reclaim_wq_max_active),
+		.mode		= 0644,
+		.proc_handler	= memcg_wq_max_active_sysctl_handler,
+		.extra1		= &one_ul,
+		.extra2		= &one_hundred,
+	},
 #endif
 	{
 		.procname	= "percpu_pagelist_fraction",
