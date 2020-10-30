@@ -199,6 +199,31 @@ struct memcg_cgwb_frn {
 	struct wb_completion done;	/* tracks in-flight foreign writebacks */
 };
 
+#ifdef CONFIG_MEMCG_BGD_RECLAIM
+enum memcg_watermarks {
+	MEMCG_WMARK_LOW,
+	MEMCG_WMARK_HIGH,
+	NR_MEMCG_WMARK
+};
+
+#define memcg_low_wmark_pages(memcg) ((memcg)->watermark[MEMCG_WMARK_LOW])
+#define memcg_high_wmark_pages(memcg) ((memcg)->watermark[MEMCG_WMARK_HIGH])
+
+#define memcg_set_low_wmark_pages(memcg, val)	\
+	memcg_low_wmark_pages(memcg) = (val)
+#define memcg_set_high_wmark_pages(memcg, val)	\
+	memcg_high_wmark_pages(memcg) = (val)
+
+#define memcg_wmark_lock_init(memcg)	spin_lock_init(&(memcg)->wmark_lock)
+#define memcg_wmark_lock(memcg)		spin_lock(&(memcg)->wmark_lock)
+#define memcg_wmark_unlock(memcg)	spin_unlock(&(memcg)->wmark_lock)
+#else
+#define memcg_wmark_lock_init(memcg)
+#define memcg_wmark_lock(memcg)
+#define memcg_wmark_unlock(memcg)
+#endif
+
+
 /*
  * The memory controller data structure. The memory controller controls both
  * page cache and RSS per cgroup. We would eventually like to provide
@@ -334,6 +359,11 @@ struct mem_cgroup {
 	struct deferred_split deferred_split_queue;
 #endif
 
+#ifdef CONFIG_MEMCG_BGD_RECLAIM
+	unsigned int watermark_scale_factor;
+	unsigned long watermark[NR_MEMCG_WMARK];
+	spinlock_t wmark_lock;
+#endif
 	struct mem_cgroup_per_node *nodeinfo[0];
 	/* WARNING: nodeinfo must be the last member here */
 };
