@@ -2367,7 +2367,7 @@ static void high_work_func(struct work_struct *work)
 #define MEMCG_RECLAIM_RETRY	2
 
 static struct workqueue_struct *memcg_reclaim_wq;
-static int memcg_watermark_scale_factor;
+int memcg_watermark_scale_factor;
 
 static int __init memcg_watermark_scale_factor_parm(char *str)
 {
