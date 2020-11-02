@@ -36,6 +36,9 @@ enum memcg_stat_item {
 	MEMCG_SOCK,
 	/* XXX: why are these zone and not node counters? */
 	MEMCG_KERNEL_STACK_KB,
+#ifdef CONFIG_MEMCG_BGD_RECLAIM
+	MEMCG_BGD_RECLAIM,
+#endif
 	MEMCG_NR_STAT,
 };
 
