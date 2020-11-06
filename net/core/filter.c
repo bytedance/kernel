@@ -132,7 +132,6 @@ BPF_CALL_1(bpf_skb_get_pay_offset, struct sk_buff *, skb)
 	return skb_get_poff(skb);
 }
 
-#define BPF_UNSAFE_ARRAY_MAX_LENGTH 64
 static bpf_unsafe_handler_t bpf_unsafe_mod_array[BPF_UNSAFE_ARRAY_MAX_LENGTH];
 
 static inline bool valid_unsafe_index(int mod)
@@ -198,7 +197,7 @@ BPF_CALL_1(bpf_unsafe_helper, struct bpf_unsafe_ctx *, ctx)
 	return ret;
 }
 
-static const struct bpf_func_proto bpf_unsafe_helper_proto = {
+const struct bpf_func_proto bpf_unsafe_helper_proto = {
 	.func           = bpf_unsafe_helper,
 	.gpl_only       = false,
 	.ret_type       = RET_INTEGER,
