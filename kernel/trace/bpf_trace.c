@@ -685,6 +685,11 @@ static const struct bpf_func_proto *
 tracing_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable ||
+			!capable(CAP_SYS_ADMIN))
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_map_lookup_elem:
 		return &bpf_map_lookup_elem_proto;
 	case BPF_FUNC_map_update_elem:
