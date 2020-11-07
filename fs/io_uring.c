@@ -3469,7 +3469,6 @@ static int io_read(struct io_kiocb *req, bool force_nonblock,
 	struct iov_iter __iter, *iter = &__iter;
 	struct io_async_rw *rw = req->async_data;
 	ssize_t io_size, ret, ret2;
-	size_t iov_count;
 	bool no_async;
 
 	if (rw)
@@ -3478,8 +3477,7 @@ static int io_read(struct io_kiocb *req, bool force_nonblock,
 	ret = io_import_iovec(READ, req, &iovec, iter, !force_nonblock);
 	if (ret < 0)
 		return ret;
-	iov_count = iov_iter_count(iter);
-	io_size = iov_count;
+	io_size = iov_iter_count(iter);
 	req->result = io_size;
 	ret = 0;
 
@@ -3495,7 +3493,7 @@ static int io_read(struct io_kiocb *req, bool force_nonblock,
 	if (no_async)
 		goto copy_iov;
 
-	ret = rw_verify_area(READ, req->file, io_kiocb_ppos(kiocb), iov_count);
+	ret = rw_verify_area(READ, req->file, io_kiocb_ppos(kiocb), io_size);
 	if (unlikely(ret))
 		goto out_free;
 
@@ -3514,7 +3512,7 @@ static int io_read(struct io_kiocb *req, bool force_nonblock,
 		if (req->file->f_flags & O_NONBLOCK)
 			goto done;
 		/* some cases will consume bytes even on error returns */
-		iov_iter_revert(iter, iov_count - iov_iter_count(iter));
+		iov_iter_revert(iter, io_size - iov_iter_count(iter));
 		ret = 0;
 		goto copy_iov;
 	} else if (ret < 0) {
@@ -3597,7 +3595,6 @@ static int io_write(struct io_kiocb *req, bool force_nonblock,
 	struct kiocb *kiocb = &req->rw.kiocb;
 	struct iov_iter __iter, *iter = &__iter;
 	struct io_async_rw *rw = req->async_data;
-	size_t iov_count;
 	ssize_t ret, ret2, io_size;
 
 	if (rw)
@@ -3606,8 +3603,7 @@ static int io_write(struct io_kiocb *req, bool force_nonblock,
 	ret = io_import_iovec(WRITE, req, &iovec, iter, !force_nonblock);
 	if (ret < 0)
 		return ret;
-	iov_count = iov_iter_count(iter);
-	io_size = iov_count;
+	io_size = iov_iter_count(iter);
 	req->result = io_size;
 
 	/* Ensure we clear previously set non-block flag */
@@ -3625,7 +3621,7 @@ static int io_write(struct io_kiocb *req, bool force_nonblock,
 	    (req->flags & REQ_F_ISREG))
 		goto copy_iov;
 
-	ret = rw_verify_area(WRITE, req->file, io_kiocb_ppos(kiocb), iov_count);
+	ret = rw_verify_area(WRITE, req->file, io_kiocb_ppos(kiocb), io_size);
 	if (unlikely(ret))
 		goto out_free;
 
@@ -3668,7 +3664,7 @@ done:
 	} else {
 copy_iov:
 		/* some cases will consume bytes even on error returns */
-		iov_iter_revert(iter, iov_count - iov_iter_count(iter));
+		iov_iter_revert(iter, io_size - iov_iter_count(iter));
 		ret = io_setup_async_rw(req, iovec, inline_vecs, iter, false);
 		if (!ret)
 			return -EAGAIN;
