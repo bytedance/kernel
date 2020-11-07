@@ -5,7 +5,7 @@
 #include <linux/mm.h>
 
 /*
- * Types for free bootmem stored in page->lru.next. These have to be in
+ * Types for free bootmem stored in page->freelist. These have to be in
  * some random range in unsigned long space for debugging purposes.
  */
 enum {
@@ -15,6 +15,20 @@ enum {
 	NODE_INFO,
 	MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE = NODE_INFO,
 };
+
+#define BOOTMEM_TYPE_BITS	(ilog2(MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE) + 1)
+#define BOOTMEM_TYPE_MAX	((1UL << BOOTMEM_TYPE_BITS) - 1)
+#define BOOTMEM_INFO_MAX	(ULONG_MAX >> BOOTMEM_TYPE_BITS)
+
+static inline unsigned long page_bootmem_type(struct page *page)
+{
+	return (unsigned long)page->freelist & BOOTMEM_TYPE_MAX;
+}
+
+static inline unsigned long page_bootmem_info(struct page *page)
+{
+	return (unsigned long)page->freelist >> BOOTMEM_TYPE_BITS;
+}
 
 #ifdef CONFIG_HAVE_BOOTMEM_INFO_NODE
 void __init register_page_bootmem_info(void);
@@ -30,7 +44,7 @@ void put_page_bootmem(struct page *page);
  */
 static inline void free_bootmem_page(struct page *page)
 {
-	unsigned long magic = (unsigned long)page->freelist;
+	unsigned long magic = page_bootmem_type(page);
 
 	/*
 	 * The reserve_bootmem_region sets the reserved flag on bootmem
