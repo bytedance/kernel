@@ -4,8 +4,7 @@
 #include <linux/linkage.h>
 #include <asm/cpufeatures.h>
 #include <asm/alternative-asm.h>
-
-.weak memset
+#include <asm/export.h>
 
 /*
  * ISO C memset - set a memory block to a byte value. This function uses fast
@@ -18,7 +17,7 @@
  *
  * rax   original destination
  */
-SYM_FUNC_START_ALIAS(memset)
+SYM_FUNC_START_WEAK(memset)
 ENTRY(__memset)
 	/*
 	 * Some CPUs support enhanced REP MOVSB/STOSB feature. It is recommended
@@ -44,6 +43,8 @@ ENTRY(__memset)
 	ret
 ENDPROC(memset)
 ENDPROC(__memset)
+EXPORT_SYMBOL(memset)
+EXPORT_SYMBOL(__memset)
 
 /*
  * ISO C memset - set a memory block to a byte value. This function uses
