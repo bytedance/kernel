@@ -171,23 +171,75 @@ enum pageflags {
 
 struct page;	/* forward declaration */
 
+#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
+extern bool hugetlb_free_vmemmap_enabled;
+
+/*
+ * If we enable the feature of freeing unused vmemmap pages associated with
+ * each HugeTLB page, the head page of vmemmap is not to be freed to buddy
+ * allocator, the other tail pages of vmemmap are map to the head page. So
+ * we can see some struct page structs has beed set PG_head flag for the
+ * compound page. However, compound_head() should return the real head struct
+ * page struct when the parameter is the tail struct page struct but with
+ * PG_head flag set (We call those struct page structs fake head struct page
+ * structs).
+ *
+ * The page_may_head() returns true for the fake head struct page struct and
+ * the real head struct page struct. The caller of it should use following
+ * approach to distinguish whether it is fake head struct page struct.
+ *
+ * if (@page[1].compound_head) is equal to ((unsigned long)@page + 1), it is
+ * real head struct page struct. Otherwise, fake head struct page struct.
+ *
+ * Because the PG_head is set in the page->flags, we can access the fields of
+ * the page[1].
+ */
+static __always_inline bool page_may_head(struct page *page)
+{
+	/*
+	 * Only PAGE_SIZE aligned addresses of struct page may be fake head
+	 * struct page. The alignment check aims to avoid access the fields
+	 * of the @page[1]. It can avoid touch a (possibly) cold cacheline
+	 * in most cases.
+	 */
+	return is_power_of_2(sizeof(struct page)) &&
+	       hugetlb_free_vmemmap_enabled &&
+	       test_bit(PG_head, &page->flags) &&
+	       IS_ALIGNED((unsigned long)page, PAGE_SIZE);
+}
+#else
+static __always_inline bool page_may_head(struct page *page)
+{
+	return false;
+}
+#endif
+
 static inline struct page *compound_head(struct page *page)
 {
 	unsigned long head = READ_ONCE(page->compound_head);
 
 	if (unlikely(head & 1))
 		return (struct page *) (head - 1);
+	else if (page_may_head(page)) {
+		head = READ_ONCE(page[1].compound_head);
+		if (likely(head & 1))
+			return (struct page *) (head - 1);
+	}
+
 	return page;
 }
 
 static __always_inline int PageTail(struct page *page)
 {
-	return READ_ONCE(page->compound_head) & 1;
+	return READ_ONCE(page->compound_head) & 1 ||
+	       (page_may_head(page) &&
+		READ_ONCE(page[1].compound_head) != (unsigned long)page + 1);
 }
 
 static __always_inline int PageCompound(struct page *page)
 {
-	return test_bit(PG_head, &page->flags) || PageTail(page);
+	return test_bit(PG_head, &page->flags) ||
+	       READ_ONCE(page->compound_head) & 1;
 }
 
 #define	PAGE_POISON_PATTERN	-1l
@@ -549,7 +601,17 @@ static inline void set_page_writeback_keepwrite(struct page *page)
 	test_set_page_writeback_keepwrite(page);
 }
 
-__PAGEFLAG(Head, head, PF_ANY) CLEARPAGEFLAG(Head, head, PF_ANY)
+static __always_inline int PageHead(struct page *page)
+{
+	if (page_may_head(page))
+		return READ_ONCE(page[1].compound_head) == (unsigned long)page + 1;
+	else
+		return test_bit(PG_head, &page->flags);
+}
+
+__SETPAGEFLAG(Head, head, PF_ANY)
+__CLEARPAGEFLAG(Head, head, PF_ANY)
+CLEARPAGEFLAG(Head, head, PF_ANY)
 
 static __always_inline void set_compound_head(struct page *page, struct page *head)
 {
