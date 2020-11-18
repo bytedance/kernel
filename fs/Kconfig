@@ -221,8 +221,8 @@ config HUGETLB_PAGE_FREE_VMEMMAP
 	help
 	  The option HUGETLB_PAGE_FREE_VMEMMAP allows for the freeing of
 	  some vmemmap pages associated with pre-allocated HugeTLB pages.
-	  For example, on X86_64 6 vmemmap pages of size 4KB each can be
-	  saved for each 2MB HugeTLB page.  4094 vmemmap pages of size 4KB
+	  For example, on X86_64 7 vmemmap pages of size 4KB each can be
+	  saved for each 2MB HugeTLB page.  4095 vmemmap pages of size 4KB
 	  each can be saved for each 1GB HugeTLB page.
 
 	  When a HugeTLB page is allocated or freed, the vmemmap array
