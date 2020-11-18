@@ -1037,6 +1037,16 @@ static inline void io_clean_op(struct io_kiocb *req)
 		__io_clean_op(req);
 }
 
+static inline void io_set_resource_node(struct io_kiocb *req)
+{
+	struct io_ring_ctx *ctx = req->ctx;
+
+	if (!req->fixed_file_refs) {
+		req->fixed_file_refs = &ctx->file_data->node->refs;
+		percpu_ref_get(req->fixed_file_refs);
+	}
+}
+
 static bool io_match_task(struct io_kiocb *head,
 			  struct task_struct *task,
 			  struct files_struct *files)
@@ -1918,9 +1928,7 @@ fallback:
 static inline void io_put_file(struct io_kiocb *req, struct file *file,
 			  bool fixed)
 {
-	if (fixed)
-		percpu_ref_put(req->fixed_file_refs);
-	else
+	if (!fixed)
 		fput(file);
 }
 
@@ -1932,7 +1940,8 @@ static void io_dismantle_req(struct io_kiocb *req)
 		kfree(req->async_data);
 	if (req->file)
 		io_put_file(req, req->file, (req->flags & REQ_F_FIXED_FILE));
-
+	if (req->fixed_file_refs)
+		percpu_ref_put(req->fixed_file_refs);
 	io_req_clean_work(req);
 }
 
@@ -6306,10 +6315,7 @@ static struct file *io_file_get(struct io_submit_state *state,
 			return NULL;
 		fd = array_index_nospec(fd, ctx->nr_user_files);
 		file = io_file_from_index(ctx, fd);
-		if (file) {
-			req->fixed_file_refs = &ctx->file_data->node->refs;
-			percpu_ref_get(req->fixed_file_refs);
-		}
+		io_set_resource_node(req);
 	} else {
 		trace_io_uring_file_get(ctx, fd);
 		file = __io_file_get(state, fd);
@@ -6687,6 +6693,7 @@ static int io_init_req(struct io_ring_ctx *ctx, struct io_kiocb *req,
 	req->ctx = ctx;
 	req->flags = 0;
 	req->link = NULL;
+	req->fixed_file_refs = NULL;
 	/* one is dropped after submission, the other at completion */
 	refcount_set(&req->refs, 2);
 	req->task = current;
