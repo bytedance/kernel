@@ -9,6 +9,7 @@
 #include <linux/memblock.h>
 #include <linux/bootmem_info.h>
 #include <linux/memory_hotplug.h>
+#include <linux/pagewalk.h>
 
 void get_page_bootmem(unsigned long info, struct page *page, unsigned long type)
 {
@@ -71,6 +72,91 @@ static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 
 }
 #else /* CONFIG_SPARSEMEM_VMEMMAP */
+static int __init bootmem_pte_entry(pte_t *pte, unsigned long addr,
+				    unsigned long next, struct mm_walk *walk)
+{
+	struct page *page = pte_page(*pte);
+	unsigned long *section_nr = walk->private;
+
+	get_page_bootmem(*section_nr, page, SECTION_INFO);
+
+	return 0;
+}
+
+static int __init bootmem_pmd_entry(pmd_t *pmd, unsigned long addr,
+				    unsigned long next, struct mm_walk *walk)
+{
+	struct page *page = pmd_page(*pmd);
+	unsigned long *section_nr = walk->private;
+
+	if (pmd_leaf(*pmd)) {
+		unsigned int nr_pages = 1 << (PMD_SHIFT - PAGE_SHIFT);
+
+		while (nr_pages--)
+			get_page_bootmem(*section_nr, page++, SECTION_INFO);
+	} else {
+		get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
+	}
+
+	return 0;
+}
+
+static int __init bootmem_pud_entry(pud_t *pud, unsigned long addr,
+				    unsigned long next, struct mm_walk *walk)
+{
+	struct page *page = pud_page(*pud);
+	unsigned long *section_nr = walk->private;
+
+	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
+
+	return 0;
+}
+
+static int __init bootmem_p4d_entry(p4d_t *p4d, unsigned long addr,
+				    unsigned long next, struct mm_walk *walk)
+{
+	struct page *page = p4d_page(*p4d);
+	unsigned long *section_nr = walk->private;
+
+	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
+
+	return 0;
+}
+
+static int __init bootmem_pgd_entry(pgd_t *pgd, unsigned long addr,
+				    unsigned long next, struct mm_walk *walk)
+{
+	struct page *page = pgd_page(*pgd);
+	unsigned long *section_nr = walk->private;
+
+	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
+
+	return 0;
+}
+
+static int __init register_page_bootmem_memmap(unsigned long section_nr,
+					       struct page *memmap)
+{
+	struct mm_struct *mm = &init_mm;
+	struct page *memmap_end = memmap + PAGES_PER_SECTION;
+
+	static const struct mm_walk_ops ops __initconst = {
+		.pgd_entry = bootmem_pgd_entry,
+		.p4d_entry = bootmem_p4d_entry,
+		.pud_entry = bootmem_pud_entry,
+		.pmd_entry = bootmem_pmd_entry,
+		.pte_entry = bootmem_pte_entry,
+	};
+
+	down_read(&mm->mmap_sem);
+	BUG_ON(walk_page_range_novma(mm, (unsigned long)memmap,
+				     (unsigned long)memmap_end,
+				     &ops, &section_nr));
+	up_read(&mm->mmap_sem);
+
+	return 0;
+}
+
 static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 {
 	unsigned long mapsize, section_nr, i;
@@ -83,7 +169,7 @@ static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 
 	memmap = sparse_decode_mem_map(ms->section_mem_map, section_nr);
 
-	register_page_bootmem_memmap(section_nr, memmap, PAGES_PER_SECTION);
+	register_page_bootmem_memmap(section_nr, memmap);
 
 	usage = ms->usage;
 	page = virt_to_page(usage);
