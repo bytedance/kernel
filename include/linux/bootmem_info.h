@@ -17,7 +17,7 @@ enum {
 };
 
 #ifdef CONFIG_HAVE_BOOTMEM_INFO_NODE
-void __init register_page_bootmem_info_node(struct pglist_data *pgdat);
+void __init register_page_bootmem_info(void);
 
 void get_page_bootmem(unsigned long info, struct page *page,
 		      unsigned long type);
@@ -44,7 +44,7 @@ static inline void free_bootmem_page(struct page *page)
 		VM_WARN_ON_PAGE(1, page);
 }
 #else
-static inline void register_page_bootmem_info_node(struct pglist_data *pgdat)
+static inline void register_page_bootmem_info(void)
 {
 }
 

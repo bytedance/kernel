@@ -181,7 +181,7 @@ static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 }
 #endif /* !CONFIG_SPARSEMEM_VMEMMAP */
 
-void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
+static void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
 {
 	unsigned long i, pfn, end_pfn, nr_pages;
 	int node = pgdat->node_id;
@@ -207,4 +207,12 @@ void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
 		if (pfn_valid(pfn) && (early_pfn_to_nid(pfn) == node))
 			register_page_bootmem_info_section(pfn);
 	}
+}
+
+void __init register_page_bootmem_info(void)
+{
+	int i;
+
+	for_each_online_node(i)
+		register_page_bootmem_info_node(NODE_DATA(i));
 }
