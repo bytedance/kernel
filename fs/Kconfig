@@ -215,9 +215,10 @@ config HUGETLB_PAGE
 
 config HUGETLB_PAGE_FREE_VMEMMAP
 	def_bool HUGETLB_PAGE
-	depends on X86_64
+	select HAVE_BOOTMEM_INFO_NODE
+	select REGISTER_BOOTMEM_INFO_NODE if ARM64
+	depends on X86_64 || ARM64
 	depends on SPARSEMEM_VMEMMAP
-	depends on HAVE_BOOTMEM_INFO_NODE
 	help
 	  The option HUGETLB_PAGE_FREE_VMEMMAP allows for the freeing of
 	  some vmemmap pages associated with pre-allocated HugeTLB pages.
