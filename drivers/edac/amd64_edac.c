@@ -24,6 +24,9 @@ static struct ecc_settings **ecc_stngs;
 /* Device for the PCI component */
 static struct device *pci_ctl_dev;
 
+/* Device for the PCI component */
+static struct device *pci_ctl_dev;
+
 /*
  * Valid scrub rates for the K8 hardware memory scrubber. We map the scrubbing
  * bandwidth to a valid bit pattern. The 'set' operation finds the 'matching-
