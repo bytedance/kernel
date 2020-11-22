@@ -1222,16 +1222,6 @@ void __ref arch_remove_memory(int nid, u64 start, u64 size,
 
 static struct kcore_list kcore_vsyscall;
 
-static void __init register_page_bootmem_info(void)
-{
-#if defined(CONFIG_NUMA) || defined(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP)
-	int i;
-
-	for_each_online_node(i)
-		register_page_bootmem_info_node(NODE_DATA(i));
-#endif
-}
-
 void __init mem_init(void)
 {
 	pci_iommu_alloc();
@@ -1243,6 +1233,7 @@ void __init mem_init(void)
 	after_bootmem = 1;
 	x86_init.hyper.init_after_bootmem();
 
+#if defined(CONFIG_NUMA) || defined(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP)
 	/*
 	 * Must be done after boot memory is put on freelist, because here we
 	 * might set fields in deferred struct pages that have not yet been
@@ -1250,6 +1241,7 @@ void __init mem_init(void)
 	 * deferred pages for us.
 	 */
 	register_page_bootmem_info();
+#endif
 
 	/* Register memory areas for /proc/kcore */
 	if (get_gate_vma(&init_mm))
