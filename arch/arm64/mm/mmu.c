@@ -21,6 +21,7 @@
 #include <linux/io.h>
 #include <linux/mm.h>
 #include <linux/vmalloc.h>
+#include <linux/hugetlb.h>
 
 #include <asm/barrier.h>
 #include <asm/cputype.h>
@@ -741,6 +742,9 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 	pgd_t *pgdp;
 	pud_t *pudp;
 	pmd_t *pmdp;
+
+	if (is_hugetlb_free_vmemmap_enabled())
+		return vmemmap_populate_basepages(start, end, node, altmap);
 
 	do {
 		next = pmd_addr_end(addr, end);
