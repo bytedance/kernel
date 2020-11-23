@@ -29,6 +29,9 @@ void put_page_bootmem(struct page *page)
 
 	if (page_ref_dec_return(page) == 1) {
 		page->freelist = NULL;
+		if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP) &&
+		    PageTable(page))
+			pgtable_pmd_page_dtor(page);
 		INIT_LIST_HEAD(&page->lru);
 		free_reserved_page(page);
 	}
@@ -106,6 +109,18 @@ static int __init bootmem_pud_entry(pud_t *pud, unsigned long addr,
 	unsigned long *section_nr = walk->private;
 
 	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
+
+	if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP)) {
+		/*
+		 * The page->private shares storage with page->ptl. So
+		 * make sure that the PG_private is not set and initialize
+		 * page->private to zero.
+		 */
+		VM_BUG_ON_PAGE(PagePrivate(page), page);
+		set_page_private(page, 0);
+
+		BUG_ON(!pgtable_pmd_page_ctor(page));
+	}
 
 	return 0;
 }
@@ -209,20 +224,13 @@ static void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
 	}
 }
 
-void __init register_page_bootmem_info(void)
+static int __init register_page_bootmem_info(void)
 {
 	int i;
 
 	for_each_online_node(i)
 		register_page_bootmem_info_node(NODE_DATA(i));
-}
-
-#ifdef CONFIG_REGISTER_BOOTMEM_INFO_NODE
-static int __init register_bootmem_info(void)
-{
-	register_page_bootmem_info();
 
 	return 0;
 }
-pure_initcall(register_bootmem_info);
-#endif
+pure_initcall(register_page_bootmem_info);
