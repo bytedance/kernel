@@ -168,6 +168,9 @@
  */
 #define pr_fmt(fmt)	"HugeTLB: " fmt
 
+#include <linux/list.h>
+#include <asm/pgalloc.h>
+
 #include "hugetlb_vmemmap.h"
 
 /*
@@ -206,6 +209,59 @@ early_param("hugetlb_free_vmemmap", early_hugetlb_free_vmemmap_param);
 static inline unsigned long free_vmemmap_pages_size_per_hpage(struct hstate *h)
 {
 	return (unsigned long)free_vmemmap_pages_per_hpage(h) << PAGE_SHIFT;
+}
+
+static inline unsigned int vmemmap_pages_per_hpage(struct hstate *h)
+{
+	return free_vmemmap_pages_per_hpage(h) + RESERVE_VMEMMAP_NR;
+}
+
+static inline unsigned long vmemmap_pages_size_per_hpage(struct hstate *h)
+{
+	return (unsigned long)vmemmap_pages_per_hpage(h) << PAGE_SHIFT;
+}
+
+static inline unsigned int pgtable_pages_to_prealloc_per_hpage(struct hstate *h)
+{
+	unsigned long vmemmap_size = vmemmap_pages_size_per_hpage(h);
+
+	/*
+	 * No need pre-allocate page tables when there is no vmemmap pages
+	 * to free.
+	 */
+	if (!free_vmemmap_pages_per_hpage(h))
+		return 0;
+
+	return ALIGN(vmemmap_size, PMD_SIZE) >> PMD_SHIFT;
+}
+
+void vmemmap_pgtable_free(struct list_head *pgtables)
+{
+	struct page *pte_page, *t_page;
+
+	list_for_each_entry_safe(pte_page, t_page, pgtables, lru) {
+		list_del(&pte_page->lru);
+		pte_free_kernel(&init_mm, page_to_virt(pte_page));
+	}
+}
+
+int vmemmap_pgtable_prealloc(struct hstate *h, struct list_head *pgtables)
+{
+	unsigned int nr = pgtable_pages_to_prealloc_per_hpage(h);
+
+	while (nr--) {
+		pte_t *pte_p;
+
+		pte_p = pte_alloc_one_kernel(&init_mm);
+		if (!pte_p)
+			goto out;
+		list_add(&virt_to_page(pte_p)->lru, pgtables);
+	}
+
+	return 0;
+out:
+	vmemmap_pgtable_free(pgtables);
+	return -ENOMEM;
 }
 
 void alloc_huge_page_vmemmap(struct hstate *h, struct page *head)
