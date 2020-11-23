@@ -743,9 +743,6 @@ int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
 	pud_t *pudp;
 	pmd_t *pmdp;
 
-	if (is_hugetlb_free_vmemmap_enabled())
-		return vmemmap_populate_basepages(start, end, node, altmap);
-
 	do {
 		next = pmd_addr_end(addr, end);
 
