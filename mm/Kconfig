@@ -149,10 +149,6 @@ config MEMORY_ISOLATION
 config HAVE_BOOTMEM_INFO_NODE
 	def_bool n
 
-# Register bootmem info automatically.
-config REGISTER_BOOTMEM_INFO_NODE
-	def_bool n
-
 # eventually, we can have this option just 'select SPARSEMEM'
 config MEMORY_HOTPLUG
 	bool "Allow for memory hot-add"

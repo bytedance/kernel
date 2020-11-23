@@ -31,8 +31,6 @@ static inline unsigned long page_bootmem_info(struct page *page)
 }
 
 #ifdef CONFIG_HAVE_BOOTMEM_INFO_NODE
-void __init register_page_bootmem_info(void);
-
 void get_page_bootmem(unsigned long info, struct page *page,
 		      unsigned long type);
 void put_page_bootmem(struct page *page);
@@ -58,10 +56,6 @@ static inline void free_bootmem_page(struct page *page)
 		VM_WARN_ON_PAGE(1, page);
 }
 #else
-static inline void register_page_bootmem_info(void)
-{
-}
-
 static inline void put_page_bootmem(struct page *page)
 {
 }
