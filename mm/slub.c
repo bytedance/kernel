@@ -1515,9 +1515,6 @@ static inline struct page *alloc_slab_page(struct kmem_cache *s,
 	else
 		page = __alloc_pages_node(node, flags, order);
 
-	if (page)
-		charge_slab_page(page, flags, order, s);
-
 	return page;
 }
 
@@ -1669,6 +1666,8 @@ static struct page *allocate_slab(struct kmem_cache *s, gfp_t flags, int node)
 	}
 
 	page->objects = oo_objects(oo);
+
+	charge_slab_page(page, flags, oo_order(oo), s);
 
 	page->slab_cache = s;
 	__SetPageSlab(page);
