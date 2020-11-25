@@ -34,6 +34,7 @@
 struct fl_flow_key {
 	struct flow_dissector_key_meta meta;
 	u8	ct_state;
+	u8      padding;//unuse
 	u16	ct_zone;
 	u32	ct_mark;
 	u32	ct_labels[4];
