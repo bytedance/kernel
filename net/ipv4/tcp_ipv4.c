@@ -2742,6 +2742,7 @@ static int __net_init tcp_sk_init(struct net *net)
 	net->ipv4.sysctl_tcp_pacing_ca_ratio = 120;
 	net->ipv4.sysctl_tcp_init_cwnd = TCP_INIT_CWND;
 	net->ipv4.sysctl_tcp_loss_init_cwnd = TCP_INIT_CWND;
+	net->ipv4.sysctl_tcp_tw_timeout = TCP_TIMEWAIT_LEN;
 	if (net != &init_net) {
 		memcpy(net->ipv4.sysctl_tcp_rmem,
 		       init_net.ipv4.sysctl_tcp_rmem,

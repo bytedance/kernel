@@ -55,6 +55,8 @@ static int one_day_secs = 24 * 3600;
 #ifdef CONFIG_TCP_SKB_TRACE
 static int tcp_trace_opt_min;
 #endif
+static int tcp_tw_timeout_min = 1 * HZ;
+static int tcp_tw_timeout_max = 60 * HZ;
 
 /* obsolete */
 static int sysctl_tcp_low_latency __read_mostly;
@@ -690,6 +692,15 @@ static struct ctl_table ipv4_table[] = {
 };
 
 static struct ctl_table ipv4_net_table[] = {
+	{
+		.procname	= "tcp_tw_timeout",
+		.data		= &init_net.ipv4.sysctl_tcp_tw_timeout,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_jiffies_minmax,
+		.extra1		= &tcp_tw_timeout_min,
+		.extra2		= &tcp_tw_timeout_max
+	},
 	{
 		.procname	= "icmp_echo_ignore_all",
 		.data		= &init_net.ipv4.sysctl_icmp_echo_ignore_all,
