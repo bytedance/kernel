@@ -918,7 +918,17 @@ ip_local_reserved_ports - list of comma separated ranges
 	list of ranges (e.g. "1,2-4,10-10" for ports 1, 2, 3, 4 and
 	10). Writing to the file will clear all previously reserved
 	ports and update the current list with the one given in the
-	input.
+	input unless one of the keywords "add", "release" or "check" is
+	used in front of the ports in which case the given ports are added
+	to, released from the currently existing port list, or check
+	against existing port list.
+	Example:
+	$ echo "1000-2000" > /proc/sys/net/ipv4/ip_local_reserved_ports
+	$ echo "add 3000-4000,5000" > /proc/sys/net/ipv4/ip_local_reserved_ports
+	$ echo "release 1500-3500" > /proc/sys/net/ipv4/ip_local_reserved_ports
+	$ echo "check 1500-3500" > /proc/sys/net/ipv4/ip_local_reserved_ports
+	$ cat /proc/sys/net/ipv4/ip_local_reserved_ports
+	1000-1499,3501-4000,5000
 
 	Note that ip_local_port_range and ip_local_reserved_ports
 	settings are independent and both are considered by the kernel
