@@ -3189,6 +3189,12 @@ static int proc_do_cad_pid(struct ctl_table *table, int write,
  * We use a range comma separated format (e.g. 1,3-4,10-10) so that
  * large bitmaps may be represented in a compact manner. Writing into
  * the file will clear the bitmap then update it with the given input.
+ * If "add" or "release" is written in front of numbers or number ranges,
+ * the given bits will be added to or released from the existing bitmap.
+ *
+ * If "check" is written in front of numbers or number ranges,
+ * the given bits will be checked against the existing bitmap,
+ * return 0 if set and error otherwise.
  *
  * Returns 0 on success.
  */
@@ -3198,10 +3204,12 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 	int err = 0;
 	bool first = 1;
 	size_t left = *lenp;
+	bool add_or_release = 0, xrelease = 0, xcheck = 0;
 	unsigned long bitmap_len = table->maxlen;
 	unsigned long *bitmap = *(unsigned long **) table->data;
-	unsigned long *tmp_bitmap = NULL;
-	char tr_a[] = { '-', ',', '\n' }, tr_b[] = { ',', '\n', 0 }, c;
+	unsigned long *tmp_bitmap = NULL, *release_bitmap = NULL;
+	char tr_a[] = { '-', ',', ' ', '\n' };
+	char tr_b[] = { ',', ' ', '\n', 0 }, c;
 
 	if (!bitmap || !bitmap_len || !left || (*ppos && !write)) {
 		*lenp = 0;
@@ -3212,8 +3220,8 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 		char *kbuf, *p;
 		size_t skipped = 0;
 
-		if (left > PAGE_SIZE - 1) {
-			left = PAGE_SIZE - 1;
+		if (left > 4 * PAGE_SIZE - 1) {
+			left = 4 * PAGE_SIZE - 1;
 			/* How much of the buffer we'll skip this pass */
 			skipped = *lenp - left;
 		}
@@ -3222,11 +3230,13 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 		if (IS_ERR(kbuf))
 			return PTR_ERR(kbuf);
 
-		tmp_bitmap = bitmap_zalloc(bitmap_len, GFP_KERNEL);
+		tmp_bitmap = bitmap_zalloc(bitmap_len * 2, GFP_KERNEL);
 		if (!tmp_bitmap) {
 			kfree(kbuf);
 			return -ENOMEM;
 		}
+		release_bitmap = &tmp_bitmap[BITS_TO_LONGS(bitmap_len)];
+
 		proc_skip_char(&p, &left, '\n');
 		while (!err && left) {
 			unsigned long val_a, val_b;
@@ -3235,6 +3245,37 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 
 			/* In case we stop parsing mid-number, we can reset */
 			saved_left = left;
+			left -= proc_skip_spaces(&p);
+			if (!left)
+				continue;
+
+			if (first || add_or_release) {
+				if (!strncasecmp(p, "add ", 4)) {
+					xrelease = 0;
+					xcheck = 0;
+					add_or_release = 1;
+					p += 4;
+					left -= 4;
+				} else if (!strncasecmp(p, "release ", 8)) {
+					xrelease = 1;
+					xcheck = 0;
+					add_or_release = 1;
+					p += 8;
+					left -= 8;
+				} else if (!strncasecmp(p, "check ", 6)) {
+					xrelease = 0;
+					xcheck = 1;
+					add_or_release = 0;
+					p += 6;
+					left -= 6;
+				} else {
+					left -= proc_skip_spaces(&p);
+				}
+
+				if (!left)
+					continue;
+			}
+
 			err = proc_get_long(&p, &left, &val_a, &neg, tr_a,
 					     sizeof(tr_a), &c);
 			/*
@@ -3286,12 +3327,27 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 				}
 			}
 
-			bitmap_set(tmp_bitmap, val_a, val_b - val_a + 1);
+			while (val_a <= val_b) {
+				if (xcheck) {
+					if (!test_bit(val_a++, bitmap)) {
+						err = -EINVAL;
+						break;
+					}
+				} else if (xrelease) {
+					set_bit(val_a++, release_bitmap);
+				} else {
+					set_bit(val_a++, tmp_bitmap);
+				}
+			}
 			first = 0;
 			proc_skip_char(&p, &left, '\n');
 		}
 		kfree(kbuf);
 		left += skipped;
+		/* Do not allow adding and releasing same bits in one step. */
+		if (!err && add_or_release &&
+		    bitmap_intersects(tmp_bitmap, release_bitmap, bitmap_len))
+			err = -EINVAL;
 	} else {
 		unsigned long bit_a, bit_b = 0;
 
@@ -3326,11 +3382,14 @@ int proc_do_large_bitmap(struct ctl_table *table, int write,
 	}
 
 	if (!err) {
-		if (write) {
-			if (*ppos)
+		if (write && !xcheck) {
+			if (*ppos || add_or_release) {
 				bitmap_or(bitmap, bitmap, tmp_bitmap, bitmap_len);
-			else
+				bitmap_andnot(bitmap, bitmap, release_bitmap,
+						bitmap_len);
+			} else {
 				bitmap_copy(bitmap, tmp_bitmap, bitmap_len);
+			}
 		}
 		*lenp -= left;
 		*ppos += *lenp;
