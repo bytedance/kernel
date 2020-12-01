@@ -3065,7 +3065,7 @@ int memcg_alloc_page_obj_cgroups(struct page *page, struct kmem_cache *s,
 	if (!vec)
 		return -ENOMEM;
 
-	memcg_data = (unsigned long)vec | 0x1UL;
+	memcg_data = (unsigned long)vec | MEMCG_DATA_OBJCGS;
 	if (new_page) {
 		/*
 		 * If the slab page is brand new and nobody can yet access
