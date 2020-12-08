@@ -473,7 +473,6 @@ void tcp_init_buffer_space(struct sock *sk)
 	if (sysctl_tcp_init_rwnd && !(sk->sk_userlocks & SOCK_RCVBUF_LOCK))
 		tcp_fixup_rcvbuf(sk);
 
-	tp->rcvq_space.space = min_t(u32, tp->rcv_wnd, TCP_INIT_CWND * tp->advmss);
 	tcp_mstamp_refresh(tp);
 	tp->rcvq_space.time = tp->tcp_mstamp;
 	tp->rcvq_space.seq = tp->copied_seq;
@@ -497,6 +496,8 @@ void tcp_init_buffer_space(struct sock *sk)
 
 	tp->rcv_ssthresh = min(tp->rcv_ssthresh, tp->window_clamp);
 	tp->snd_cwnd_stamp = tcp_jiffies32;
+	tp->rcvq_space.space = min3(tp->rcv_ssthresh, tp->rcv_wnd,
+				    (u32)TCP_INIT_CWND * tp->advmss);
 }
 
 /* 4. Recalculate window clamp after socket hit its memory bounds. */
