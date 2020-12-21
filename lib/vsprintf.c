@@ -1861,7 +1861,7 @@ char *flags_string(char *buf, char *end, void *flags_ptr,
 	case 'p':
 		flags = *(unsigned long *)flags_ptr;
 		/* Remove zone id */
-		flags &= (1UL << NR_PAGEFLAGS) - 1;
+		flags &= ~PAGEFLAGS_MASK;
 		names = pageflag_names;
 		break;
 	case 'v':
