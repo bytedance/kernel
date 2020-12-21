@@ -165,6 +165,8 @@ enum pageflags {
 	PG_isolated = PG_reclaim,
 };
 
+#define PAGEFLAGS_MASK		(~((1UL << NR_PAGEFLAGS) - 1))
+
 #ifndef __GENERATING_BOUNDS_H
 
 struct page;	/* forward declaration */
@@ -838,7 +840,7 @@ static inline void ClearPageSlabPfmemalloc(struct page *page)
  * alloc-free cycle to prevent from reusing the page.
  */
 #define PAGE_FLAGS_CHECK_AT_PREP	\
-	(((1UL << NR_PAGEFLAGS) - 1) & ~__PG_HWPOISON)
+	(~(PAGEFLAGS_MASK | __PG_HWPOISON))
 
 #define PAGE_FLAGS_PRIVATE				\
 	(1UL << PG_private | 1UL << PG_private_2)
