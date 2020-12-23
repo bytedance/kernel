@@ -216,3 +216,13 @@ void __init register_page_bootmem_info(void)
 	for_each_online_node(i)
 		register_page_bootmem_info_node(NODE_DATA(i));
 }
+
+#ifdef CONFIG_REGISTER_BOOTMEM_INFO_NODE
+static int __init register_bootmem_info(void)
+{
+	register_page_bootmem_info();
+
+	return 0;
+}
+pure_initcall(register_bootmem_info);
+#endif
