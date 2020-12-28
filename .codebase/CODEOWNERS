@@ -1,8 +1,8 @@
 / @songmuchun @duanxiongchun
-/fs/ @pandong @xieyongji
-/kernel/ @songmuchun @dingzhipeng @zhouchengming
-/kernel/bpf/ @wangdongdong @duanxiongchun @liuxiaozhou
+/fs/ @pandong.peter @xieyongji
+/kernel/ @songmuchun @dingzhipeng.bruce @zhouchengming
+/kernel/bpf/ @wangdongdong.6 @duanxiongchun @liuxiaozhou
 /mm/ @liuxian.1 @duanxiongchun @liuqi.16 @songmuchun
-/net/ @duanxiongchun @wangdongdong @shekairui
+/net/ @duanxiongchun @wangdongdong.6 @shekairui
 /virt/ @xieyongji @liuqi.16 @dengliang.1214
 config.* @duanxiongchun @liuxian.1 @songmuchun
