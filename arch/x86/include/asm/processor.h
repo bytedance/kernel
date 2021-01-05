@@ -934,10 +934,8 @@ static inline int mpx_disable_management(void)
 #endif /* CONFIG_X86_INTEL_MPX */
 
 #ifdef CONFIG_CPU_SUP_AMD
-extern u16 amd_get_nb_id(int cpu);
 extern u32 amd_get_nodes_per_socket(void);
 #else
-static inline u16 amd_get_nb_id(int cpu)		{ return 0; }
 static inline u32 amd_get_nodes_per_socket(void)	{ return 0; }
 #endif
 
