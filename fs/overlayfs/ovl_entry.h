@@ -74,6 +74,8 @@ struct ovl_fs {
 	struct inode *indexdir_trap;
 	/* Inode numbers in all layers do not use the high xino_bits */
 	unsigned int xino_bits;
+	/* r/o snapshot of upperdir sb's only taken on volatile mounts */
+	errseq_t errseq;
 };
 
 static inline bool ovl_should_sync(struct ovl_fs *ofs)

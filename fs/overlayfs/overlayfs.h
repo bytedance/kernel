@@ -277,6 +277,7 @@ bool ovl_is_metacopy_dentry(struct dentry *dentry);
 char *ovl_get_redirect_xattr(struct dentry *dentry, int padding);
 ssize_t ovl_getxattr(struct dentry *dentry, char *name, char **value,
 		     size_t padding);
+int ovl_sync_status(struct ovl_fs *ofs);
 
 static inline bool ovl_is_impuredir(struct dentry *dentry)
 {

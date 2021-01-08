@@ -826,13 +826,15 @@ static int ovl_dir_fsync(struct file *file, loff_t start, loff_t end,
 	struct ovl_dir_file *od = file->private_data;
 	struct dentry *dentry = file->f_path.dentry;
 	struct file *realfile = od->realfile;
+	int err;
 
 	/* Nothing to sync for lower */
 	if (!OVL_TYPE_UPPER(ovl_path_type(dentry)))
 		return 0;
 
-	if (!ovl_should_sync(dentry->d_sb->s_fs_info))
-		return 0;
+	err = ovl_sync_status(dentry->d_sb->s_fs_info);
+	if (err <= 0)
+		return err;
 
 	/*
 	 * Need to check if we started out being a lower dir, but got copied up
