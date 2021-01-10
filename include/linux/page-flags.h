@@ -601,12 +601,17 @@ static inline void set_page_writeback_keepwrite(struct page *page)
 	test_set_page_writeback_keepwrite(page);
 }
 
+static __always_inline int PageHeadRaw(struct page *page)
+{
+	return test_bit(PG_head, &page->flags);
+}
+
 static __always_inline int PageHead(struct page *page)
 {
 	if (page_may_head(page))
 		return READ_ONCE(page[1].compound_head) == (unsigned long)page + 1;
 	else
-		return test_bit(PG_head, &page->flags);
+		return PageHeadRaw(page);
 }
 
 __SETPAGEFLAG(Head, head, PF_ANY)
@@ -626,7 +631,7 @@ static __always_inline void clear_compound_head(struct page *page)
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 static inline void ClearPageCompound(struct page *page)
 {
-	BUG_ON(!PageHead(page));
+	BUG_ON(!PageHeadRaw(page));
 	ClearPageHead(page);
 }
 #endif
