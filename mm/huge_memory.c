@@ -1379,7 +1379,7 @@ alloc:
 		count_vm_event(THP_FAULT_FALLBACK);
 		goto out;
 	}
-	cgroup_throttle_swaprate(page, huge_gfp);
+	cgroup_throttle_swaprate(new_page, huge_gfp);
 
 	count_vm_event(THP_FAULT_ALLOC);
 	count_memcg_event_mm(vma->vm_mm, THP_FAULT_ALLOC);
