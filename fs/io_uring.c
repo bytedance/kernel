@@ -8925,8 +8925,6 @@ static void __io_uring_cancel_task_requests(struct io_ring_ctx *ctx,
 
 static void io_disable_sqo_submit(struct io_ring_ctx *ctx)
 {
-	WARN_ON_ONCE(ctx->sqo_task != current);
-
 	mutex_lock(&ctx->uring_lock);
 	ctx->sqo_dead = 1;
 	mutex_unlock(&ctx->uring_lock);
@@ -8948,6 +8946,7 @@ static void io_uring_cancel_task_requests(struct io_ring_ctx *ctx,
 
 	if ((ctx->flags & IORING_SETUP_SQPOLL) && ctx->sq_data) {
 		/* for SQPOLL only sqo_task has task notes */
+		WARN_ON_ONCE(ctx->sqo_task != current);
 		io_disable_sqo_submit(ctx);
 		task = ctx->sq_data->thread;
 		atomic_inc(&task->io_uring->in_idle);
