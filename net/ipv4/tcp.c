@@ -466,6 +466,7 @@ void tcp_init_sock(struct sock *sk)
 	tp->tcp_toa_ip = 0;
 	tp->tcp_toa_port = 0;
 	tp->tcpi_probe0_times = 0;
+	tp->tfo_info = 0;
 }
 EXPORT_SYMBOL(tcp_init_sock);
 
