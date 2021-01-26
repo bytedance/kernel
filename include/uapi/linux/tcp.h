@@ -248,7 +248,6 @@ struct tcp_info {
 	__u32	tcpi_pmtu;
 	__u32	tcpi_rcv_ssthresh;
 	__u32	tcpi_rtt;
-	__u32	tcpi_max_rtt;
 	__u32	tcpi_rttvar;
 	__u32	tcpi_snd_ssthresh;
 	__u32	tcpi_snd_cwnd;
@@ -298,6 +297,7 @@ struct tcp_info {
 	__u32	tcpi_srcv_ack_stamp;
 	__u32	tcpi_firstdata_stamp;
 	__u32	tcpi_probe0_times;
+	__u32   tcpi_max_rtt;
 
 };
 
