@@ -50,6 +50,36 @@ static int __init cpu_idle_nopoll_setup(char *__unused)
 	return 1;
 }
 __setup("hlt", cpu_idle_nopoll_setup);
+
+static cpumask_var_t cpu_nohlt_cpumask __cpumask_var_read_mostly;
+static int __init cpu_idle_poll_list_setup(char *str)
+{
+	alloc_bootmem_cpumask_var(&cpu_nohlt_cpumask);
+	if (cpulist_parse(str, cpu_nohlt_cpumask)) {
+		pr_warn("idle: nlhlt_list= incorrect CPU range\n");
+		cpumask_clear(cpu_nohlt_cpumask);
+	} else
+		pr_info("idle: nohlt_list=%s\n", str);
+
+	return 1;
+}
+__setup("nohlt_list=", cpu_idle_poll_list_setup);
+
+static inline bool cpu_idle_should_poll(void)
+{
+	int cpu;
+	if (cpu_idle_force_poll)
+		return !!cpu_idle_force_poll;
+
+	cpu = smp_processor_id();
+	return (cpumask_available(cpu_nohlt_cpumask) &&
+		!!cpumask_test_cpu(cpu, cpu_nohlt_cpumask));
+}
+#else
+static inline bool cpu_idle_should_poll(void)
+{
+	return !!cpu_idle_force_poll;
+}
 #endif
 
 static noinline int __cpuidle cpu_idle_poll(void)
@@ -60,7 +90,7 @@ static noinline int __cpuidle cpu_idle_poll(void)
 	stop_critical_timings();
 
 	while (!tif_need_resched() &&
-		(cpu_idle_force_poll || tick_check_broadcast_expired()))
+		(cpu_idle_should_poll() || tick_check_broadcast_expired()))
 		cpu_relax();
 	start_critical_timings();
 	trace_cpu_idle_rcuidle(PWR_EVENT_EXIT, smp_processor_id());
@@ -256,7 +286,7 @@ static void do_idle(void)
 		 * broadcast device expired for us, we don't want to go deep
 		 * idle as we know that the IPI is going to arrive right away.
 		 */
-		if (cpu_idle_force_poll || tick_check_broadcast_expired()) {
+		if (cpu_idle_should_poll() || tick_check_broadcast_expired()) {
 			tick_nohz_idle_restart_tick();
 			cpu_idle_poll();
 		} else {
