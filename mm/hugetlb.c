@@ -1265,6 +1265,8 @@ static void __update_and_free_page(struct hstate *h, struct page *page)
 {
 	int i;
 
+	VM_BUG_ON_PAGE(HPageVmemmapOptimized(page), page);
+
 	if (hstate_is_gigantic(h) && !gigantic_page_runtime_supported())
 		return;
 
@@ -1285,6 +1287,19 @@ static void __update_and_free_page(struct hstate *h, struct page *page)
 	} else {
 		__free_pages(page, huge_page_order(h));
 	}
+}
+
+static void add_hugetlb_page(struct hstate *h, struct page *page)
+{
+	VM_BUG_ON_PAGE(!HPageVmemmapOptimized(page), page);
+
+	lockdep_assert_held(&hugetlb_lock);
+
+	INIT_LIST_HEAD(&page->lru);
+	h->surplus_huge_pages++;
+	h->surplus_huge_pages_node[page_to_nid(page)]++;
+	arch_clear_hugepage_flags(page);
+	enqueue_huge_page(h, page);
 }
 
 /*
@@ -1322,6 +1337,13 @@ static void hpage_free_vmemmap_workfn(struct work_struct *work)
 		 */
 		h = size_to_hstate(page_size(page));
 
+		if (alloc_huge_page_vmemmap(h, page)) {
+			spin_lock(&hugetlb_lock);
+			add_hugetlb_page(h, page);
+			spin_unlock(&hugetlb_lock);
+			continue;
+		}
+
 		spin_lock(&hugetlb_lock);
 		__update_and_free_page(h, page);
 		spin_unlock(&hugetlb_lock);
@@ -1339,7 +1361,7 @@ static inline void flush_free_hpage_work(struct hstate *h)
 
 static void update_and_free_page(struct hstate *h, struct page *page)
 {
-	if (!free_vmemmap_pages_per_hpage(h)) {
+	if (!HPageVmemmapOptimized(page)) {
 		__update_and_free_page(h, page);
 		return;
 	}
@@ -1466,9 +1488,9 @@ static void __free_huge_page(struct page *page)
 	} else if (h->surplus_huge_pages_node[nid]) {
 		/* remove the page from active list */
 		list_del(&page->lru);
-		update_and_free_page(h, page);
 		h->surplus_huge_pages--;
 		h->surplus_huge_pages_node[nid]--;
+		update_and_free_page(h, page);
 	} else {
 		arch_clear_hugepage_flags(page);
 		enqueue_huge_page(h, page);
@@ -1526,6 +1548,7 @@ void free_huge_page(struct page *page)
 
 static void prep_new_huge_page(struct hstate *h, struct page *page, int nid)
 {
+	ClearHPageVmemmapOptimized(page);
 	free_huge_page_vmemmap(h, page);
 	INIT_LIST_HEAD(&page->lru);
 	set_compound_page_dtor(page, HUGETLB_PAGE_DTOR);
@@ -1748,6 +1771,7 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 				h->surplus_huge_pages--;
 				h->surplus_huge_pages_node[node]--;
 			}
+			ClearPageHugeFreed(page);
 			update_and_free_page(h, page);
 			ret = 1;
 			break;
@@ -1762,10 +1786,14 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
  * nothing for in-use hugepages and non-hugepages.
  * This function returns values like below:
  *
- *  -EBUSY: failed to dissolved free hugepages or the hugepage is in-use
- *          (allocated or reserved.)
- *       0: successfully dissolved free hugepages or the page is not a
- *          hugepage (considered as already dissolved)
+ *  -ENOMEM: failed to allocate vmemmap pages to free the freed hugepages
+ *           when the system is under memory pressure and the feature of
+ *           freeing unused vmemmap pages associated with each hugetlb page
+ *           is enabled.
+ *  -EBUSY:  failed to dissolved free hugepages or the hugepage is in-use
+ *           (allocated or reserved.)
+ *       0:  successfully dissolved free hugepages or the page is not a
+ *           hugepage (considered as already dissolved)
  */
 int dissolve_free_huge_page(struct page *page)
 {
@@ -1808,20 +1836,39 @@ retry:
 			goto retry;
 		}
 
-		/*
-		 * Move PageHWPoison flag from head page to the raw error page,
-		 * which makes any subpages rather than the error page reusable.
-		 */
-		if (PageHWPoison(head) && page != head) {
-			SetPageHWPoison(page);
-			ClearPageHWPoison(head);
-		}
 		list_del(&head->lru);
 		h->free_huge_pages--;
 		h->free_huge_pages_node[nid]--;
 		h->max_huge_pages--;
-		update_and_free_page(h, head);
-		rc = 0;
+		ClearPageHugeFreed(page);
+		spin_unlock(&hugetlb_lock);
+
+		/*
+		 * Normally update_and_free_page will allocate required vmemmmap
+		 * before freeing the page.  update_and_free_page will fail to
+		 * free the page if it can not allocate required vmemmap.  We
+		 * need to adjust max_huge_pages if the page is not freed.
+		 * Attempt to allocate vmemmmap here so that we can take
+		 * appropriate action on failure.
+		 */
+		rc = alloc_huge_page_vmemmap(h, head);
+		spin_lock(&hugetlb_lock);
+		if (!rc) {
+			/*
+			 * Move PageHWPoison flag from head page to the raw
+			 * error page, which makes any subpages rather than
+			 * the error page reusable.
+			 */
+			if (PageHWPoison(head) && page != head) {
+				SetPageHWPoison(page);
+				ClearPageHWPoison(head);
+			}
+			update_and_free_page(h, head);
+		} else {
+			INIT_LIST_HEAD(&head->lru);
+			enqueue_huge_page(h, head);
+			h->max_huge_pages++;
+		}
 	}
 out:
 	spin_unlock(&hugetlb_lock);

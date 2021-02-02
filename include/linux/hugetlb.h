@@ -42,8 +42,24 @@ enum {
 	__MAX_CGROUP_SUBPAGE_INDEX = SUBPAGE_INDEX_CGROUP,
 #endif
 	SUBPAGE_INDEX_FREED,		/* reuse page->private */
+	SUBPAGE_INDEX_VMEMMAP_OPTIMIZED,/* reuse page->private */
 	__NR_USED_SUBPAGE,
 };
+
+static inline bool HPageVmemmapOptimized(struct page *head)
+{
+	return page_private(head + SUBPAGE_INDEX_VMEMMAP_OPTIMIZED) == -1UL;
+}
+
+static inline void SetHPageVmemmapOptimized(struct page *head)
+{
+	set_page_private(head + SUBPAGE_INDEX_VMEMMAP_OPTIMIZED, -1UL);
+}
+
+static inline void ClearHPageVmemmapOptimized(struct page *head)
+{
+	set_page_private(head + SUBPAGE_INDEX_VMEMMAP_OPTIMIZED, 0);
+}
 
 struct hugepage_subpool {
 	spinlock_t lock;
