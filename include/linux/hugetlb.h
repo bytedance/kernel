@@ -33,6 +33,7 @@ enum {
 #ifdef CONFIG_CGROUP_HUGETLB
 	SUBPAGE_INDEX_CGROUP = SUBPAGE_INDEX_TEMPORARY,/* reuse page->private */
 #endif
+	SUBPAGE_INDEX_FREED,
 #ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
 	SUBPAGE_INDEX_HWPOISON,		/* reuse page->private */
 	SUBPAGE_INDEX_INFLIGHT,		/* reuse page->private */
