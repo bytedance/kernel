@@ -5359,7 +5359,7 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 		return 1;
 	}
 
-	pn->lruvec_stat_cpu = alloc_percpu(struct lruvec_stat);
+	pn->lruvec_stat_cpu = alloc_percpu(struct batched_lruvec_stat);
 	if (!pn->lruvec_stat_cpu) {
 		free_percpu(pn->lruvec_stat_local);
 		kfree(pn);
@@ -7275,6 +7275,13 @@ static int __init mem_cgroup_init(void)
 	memcg_reclaim_wq = alloc_workqueue("memcg_reclaim_wq", WQ_UNBOUND, 1);
 	BUG_ON(!memcg_reclaim_wq);
 #endif
+	/*
+	 * Currently s32 type (can refer to struct batched_lruvec_stat) is
+	 * used for per-memcg-per-cpu caching of per-node statistics. In order
+	 * to work fine, we should make sure that the overfill threshold can't
+	 * exceed S32_MAX / PAGE_SIZE.
+	 */
+	BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S32_MAX / PAGE_SIZE);
 
 	cpuhp_setup_state_nocalls(CPUHP_MM_MEMCQ_DEAD, "mm/memctrl:dead", NULL,
 				  memcg_hotplug_cpu_dead);
