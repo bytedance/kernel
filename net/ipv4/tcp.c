@@ -467,6 +467,7 @@ void tcp_init_sock(struct sock *sk)
 	tp->tcp_toa_port = 0;
 	tp->tcpi_probe0_times = 0;
 	tp->tfo_info = 0;
+	tcp_sock_ts_init(tp);
 }
 EXPORT_SYMBOL(tcp_init_sock);
 
@@ -3477,18 +3478,14 @@ void tcp_get_info(struct sock *sk, struct tcp_info *info)
 	info->tcpi_rcv_ooopack = tp->rcv_ooopack;
 	info->tcpi_snd_wnd = tp->snd_wnd;
 	info->tfo_info = tp->tfo_info;
-	info->tcpi_csent_syn_stamp = 
-		jiffies_to_msecs(tp->tcpi_csent_syn_stamp);
-	info->tcpi_srcv_syn_stamp = 
-		jiffies_to_msecs(tp->tcpi_srcv_syn_stamp);
-	info->tcpi_crcv_synack_stamp = 
-		jiffies_to_msecs(tp->tcpi_crcv_synack_stamp);
-	info->tcpi_srcv_ack_stamp = 
-		jiffies_to_msecs(tp->tcpi_srcv_ack_stamp);
-	info->tcpi_firstdata_stamp =
-		jiffies_to_msecs(tp->tcpi_firstdata_stamp);
-	info->tcpi_probe0_times =
-		tp->tcpi_probe0_times;
+
+	info->tcpi_csent_syn_stamp = tp->tcpi_csent_syn_stamp;
+	info->tcpi_srcv_syn_stamp = tp->tcpi_srcv_syn_stamp;
+	info->tcpi_crcv_synack_stamp = tp->tcpi_crcv_synack_stamp;
+	info->tcpi_srcv_ack_stamp = tp->tcpi_srcv_ack_stamp;	
+	info->tcpi_firstdata_stamp = tp->tcpi_firstdata_stamp;
+	info->tcpi_probe0_times = tp->tcpi_probe0_times;
+
 	unlock_sock_fast(sk, slow);
 }
 EXPORT_SYMBOL_GPL(tcp_get_info);
