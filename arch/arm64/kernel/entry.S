@@ -656,7 +656,7 @@ ENDPROC(el1_sync)
 el1_irq:
 	kernel_entry 1
 	gic_prio_irq_setup pmr=x20, tmp=x1
-	enable_da_f
+	enable_da
 
 #ifdef CONFIG_ARM64_PSEUDO_NMI
 	test_irqs_unmasked	res=x0, pmr=x20
@@ -675,8 +675,10 @@ el1_irq:
 	ldr	x24, [tsk, #TSK_TI_PREEMPT]	// get preempt count
 alternative_if ARM64_HAS_IRQ_PRIO_MASKING
 	/*
-	 * DA_F were cleared at start of handling. If anything is set in DAIF,
-	 * we come back from an NMI, so skip preemption
+	 * DA were cleared at start of handling, and IF are cleared by
+	 * the GIC irqchip driver using gic_arch_enable_irqs() for
+	 * normal IRQs. If anything is set, it means we come back from
+	 * an NMI instead of a normal IRQ, so skip preemption
 	 */
 	mrs	x0, daif
 	orr	x24, x24, x0
@@ -822,7 +824,7 @@ el0_ia:
 	mrs	x26, far_el1
 	gic_prio_kentry_setup tmp=x0
 	ct_user_exit_irqoff
-	enable_da_f
+	enable_da
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_off
 #endif
@@ -872,7 +874,7 @@ el0_sp_pc:
 	 */
 	gic_prio_kentry_setup tmp=x0
 	ct_user_exit_irqoff
-	enable_da_f
+	enable_da
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_off
 #endif
@@ -912,7 +914,7 @@ el0_dbg:
 	mov	x1, x25
 	mov	x2, sp
 	bl	do_debug_exception
-	enable_da_f
+	enable_da
 	b	ret_to_user
 el0_inv:
 	ct_user_exit_irqoff
@@ -930,7 +932,7 @@ el0_irq:
 el0_irq_naked:
 	gic_prio_irq_setup pmr=x20, tmp=x0
 	ct_user_exit_irqoff
-	enable_da_f
+	enable_da
 
 #ifdef CONFIG_TRACE_IRQFLAGS
 	bl	trace_hardirqs_off
@@ -969,7 +971,7 @@ el0_error_naked:
 	mov	x0, sp
 	mov	x1, x25
 	bl	do_serror
-	enable_da_f
+	enable_da
 	b	ret_to_user
 ENDPROC(el0_error)
 
