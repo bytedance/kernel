@@ -44,6 +44,7 @@ struct vduse_virtqueue {
 	struct eventfd_ctx *kickfd;
 	struct vdpa_callback cb;
 	struct work_struct inject;
+	int irq_affinity;
 };
 
 struct vduse_dev;
@@ -107,6 +108,7 @@ static DEFINE_IDA(vduse_ida);
 static dev_t vduse_major;
 static struct class *vduse_class;
 static struct workqueue_struct *vduse_irq_wq;
+static struct workqueue_struct *vduse_irq_bound_wq;
 
 static inline struct vduse_dev *vdpa_to_vduse(struct vdpa_device *vdpa)
 {
@@ -901,6 +903,7 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 	}
 	case VDUSE_INJECT_VQ_IRQ: {
 		u32 vq_index;
+		struct vduse_virtqueue *vq;
 
 		ret = -EFAULT;
 		if (copy_from_user(&vq_index, argp, sizeof(u32)))
@@ -910,9 +913,14 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 		if (vq_index >= dev->vq_num)
 			break;
 
-		ret = 0;
 		vq_index = array_index_nospec(vq_index, dev->vq_num);
-		queue_work(vduse_irq_wq, &dev->vqs[vq_index]->inject);
+		vq = dev->vqs[vq_index];
+		ret = 0;
+		if (vq->irq_affinity == -1)
+			queue_work(vduse_irq_wq, &vq->inject);
+		else
+			queue_work_on(vq->irq_affinity,
+				      vduse_irq_bound_wq, &vq->inject);
 		break;
 	}
 	case VDUSE_INJECT_CONFIG_IRQ:
@@ -1016,6 +1024,7 @@ static int vduse_dev_init_vqs(struct vduse_dev *dev, u32 vq_align,
 			goto err;
 		}
 		dev->vqs[i]->index = i;
+		dev->vqs[i]->irq_affinity = -1;
 		INIT_WORK(&dev->vqs[i]->inject, vduse_vq_irq_inject);
 		spin_lock_init(&dev->vqs[i]->kick_lock);
 		spin_lock_init(&dev->vqs[i]->irq_lock);
@@ -1402,6 +1411,10 @@ static int vduse_init(void)
 	if (!vduse_irq_wq)
 		goto err_wq;
 
+	vduse_irq_bound_wq = alloc_workqueue("vduse-irq-bound", WQ_HIGHPRI, 0);
+	if (!vduse_irq_bound_wq)
+		goto err_bound_wq;
+
 	ret = vduse_domain_init();
 	if (ret)
 		goto err_domain;
@@ -1414,6 +1427,8 @@ static int vduse_init(void)
 err_mgmtdev:
 	vduse_domain_exit();
 err_domain:
+	destroy_workqueue(vduse_irq_bound_wq);
+err_bound_wq:
 	destroy_workqueue(vduse_irq_wq);
 err_wq:
 	unregister_chrdev_region(vduse_major, VDUSE_DEV_MAX);
@@ -1431,6 +1446,7 @@ static void vduse_exit(void)
 	class_destroy(vduse_class);
 	unregister_chrdev_region(vduse_major, VDUSE_DEV_MAX);
 	destroy_workqueue(vduse_irq_wq);
+	destroy_workqueue(vduse_irq_bound_wq);
 	vduse_domain_exit();
 	vduse_mgmtdev_exit();
 }
