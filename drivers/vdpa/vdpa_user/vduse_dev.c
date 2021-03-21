@@ -44,6 +44,7 @@ struct vduse_virtqueue {
 	struct eventfd_ctx *kickfd;
 	struct vdpa_callback cb;
 	struct work_struct inject;
+	struct kobject kobj;
 	int irq_affinity;
 };
 
@@ -993,6 +994,86 @@ static const struct file_operations vduse_dev_fops = {
 	.llseek		= noop_llseek,
 };
 
+static ssize_t irq_affinity_show(struct vduse_virtqueue *vq, char *buf)
+{
+	return sprintf(buf, "%d\n", vq->irq_affinity);
+}
+
+static ssize_t irq_affinity_store(struct vduse_virtqueue *vq,
+				     const char *buf, size_t count)
+{
+	int val;
+
+	if (kstrtoint(buf, 0, &val) < 0)
+		return -EINVAL;
+
+	if (!(val == -1 || (val <= nr_cpu_ids && val >= 0 && cpu_online(val))))
+		return -EINVAL;
+
+	vq->irq_affinity = val;
+
+	return count;
+}
+
+struct vq_sysfs_entry {
+	struct attribute attr;
+	ssize_t (*show)(struct vduse_virtqueue *, char *);
+	ssize_t (*store)(struct vduse_virtqueue *, const char *, size_t);
+};
+
+static struct vq_sysfs_entry irq_affinity_attr = __ATTR_RW(irq_affinity);
+
+static struct attribute *vq_attrs[] = {
+	&irq_affinity_attr.attr,
+	NULL,
+};
+
+static ssize_t vq_attr_show(struct kobject *kobj, struct attribute *attr,
+			    char *buf)
+{
+	struct vduse_virtqueue *vq = container_of(kobj,
+					struct vduse_virtqueue, kobj);
+	struct vq_sysfs_entry *entry = container_of(attr,
+					struct vq_sysfs_entry, attr);
+
+	if (!entry->show)
+		return -EIO;
+
+	return entry->show(vq, buf);
+}
+
+static ssize_t vq_attr_store(struct kobject *kobj, struct attribute *attr,
+                            const char *buf, size_t count)
+{
+	struct vduse_virtqueue *vq = container_of(kobj,
+					struct vduse_virtqueue, kobj);
+	struct vq_sysfs_entry *entry = container_of(attr,
+					struct vq_sysfs_entry, attr);
+
+	if (!entry->store)
+		return -EIO;
+
+	return entry->store(vq, buf, count);
+}
+
+static const struct sysfs_ops vq_sysfs_ops = {
+	.show = vq_attr_show,
+	.store = vq_attr_store,
+};
+
+static void vq_release(struct kobject *kobj)
+{
+	struct vduse_virtqueue *vq = container_of(kobj,
+					struct vduse_virtqueue, kobj);
+	kfree(vq);
+}
+
+static struct kobj_type vq_attr_type = {
+	.release	= vq_release,
+	.sysfs_ops	= &vq_sysfs_ops,
+	.default_attrs	= vq_attrs,
+};
+
 static void vduse_dev_deinit_vqs(struct vduse_dev *dev)
 {
 	int i;
@@ -1001,14 +1082,14 @@ static void vduse_dev_deinit_vqs(struct vduse_dev *dev)
 		return;
 
 	for (i = 0; i < dev->vq_num; i++)
-		kfree(dev->vqs[i]);
+		kobject_put(&dev->vqs[i]->kobj);
 	kfree(dev->vqs);
 }
 
 static int vduse_dev_init_vqs(struct vduse_dev *dev, u32 vq_align,
 			      u16 vq_size_max, u32 vq_num)
 {
-	int i;
+	int ret, i;
 
 	dev->vq_align = vq_align;
 	dev->vq_size_max = vq_size_max;
@@ -1021,6 +1102,7 @@ static int vduse_dev_init_vqs(struct vduse_dev *dev, u32 vq_align,
 		dev->vqs[i] = kzalloc(sizeof(*dev->vqs[i]), GFP_KERNEL);
 		if (!dev->vqs[i]) {
 			i--;
+			ret = -ENOMEM;
 			goto err;
 		}
 		dev->vqs[i]->index = i;
@@ -1028,15 +1110,20 @@ static int vduse_dev_init_vqs(struct vduse_dev *dev, u32 vq_align,
 		INIT_WORK(&dev->vqs[i]->inject, vduse_vq_irq_inject);
 		spin_lock_init(&dev->vqs[i]->kick_lock);
 		spin_lock_init(&dev->vqs[i]->irq_lock);
+		kobject_init(&dev->vqs[i]->kobj, &vq_attr_type);
+		ret = kobject_add(&dev->vqs[i]->kobj,
+				  &dev->dev.kobj, "vq%d", i);
+		if (ret)
+			goto err;
 	}
 
 	return 0;
 err:
 	for (; i >= 0; i--)
-		kfree(dev->vqs[i]);
+		kobject_put(&dev->vqs[i]->kobj);
 	kfree(dev->vqs);
 	dev->vqs = NULL;
-	return -ENOMEM;
+	return ret;
 }
 
 static struct vduse_dev *vduse_dev_create(void)
@@ -1140,11 +1227,6 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	if (!dev->domain)
 		goto err_domain;
 
-	ret = vduse_dev_init_vqs(dev, config->vq_align,
-				 config->vq_size_max, config->vq_num);
-	if (ret)
-		goto err_vqs;
-
 	ret = ida_simple_get(&vduse_ida, 0, VDUSE_DEV_MAX, GFP_KERNEL);
 	if (ret < 0)
 		goto err_ida;
@@ -1165,19 +1247,24 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	if (ret)
 		goto err;
 
+	ret = vduse_dev_init_vqs(dev, config->vq_align,
+				 config->vq_size_max, config->vq_num);
+	if (ret)
+		goto err_vqs;
+
 	list_add(&dev->list, &vduse_devs);
 	__module_get(THIS_MODULE);
 
 	return 0;
 err_ida:
-	vduse_dev_deinit_vqs(dev);
-err_vqs:
 	vduse_domain_destroy(dev->domain);
 err_domain:
 	kfree(dev->name);
 err_str:
 	vduse_dev_destroy(dev);
 	return ret;
+err_vqs:
+	cdev_device_del(&dev->cdev, &dev->dev);
 err:
 	put_device(&dev->dev);
 	return ret;
