@@ -4,7 +4,7 @@
 
 #include <linux/types.h>
 
-#define VDUSE_API_VERSION	0
+#define VDUSE_API_VERSION	0xff
 
 #define VDUSE_MAX_TRANSFER_LEN	256
 #define VDUSE_NAME_MAX	256
