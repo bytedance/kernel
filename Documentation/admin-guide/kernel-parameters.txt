@@ -1431,6 +1431,15 @@
 
 			Built with CONFIG_HUGETLB_FREE_VMEMMAP_DEFAULT_ON=y,
 			the default is on.
+	hugetlb_clear_hpage_background=
+			[KNL] When hugetlb_clear_hpage_background is set,
+			Free huge page will trigger a worker to pre-clear
+			the page.
+
+			This option can accelerate huge page allocating.
+
+			Format: { on | off }
+			Default: off
 
 	hung_task_panic=
 			[KNL] Should the hung task detector generate panics.

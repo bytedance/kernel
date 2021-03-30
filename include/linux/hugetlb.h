@@ -356,6 +356,7 @@ struct hstate {
 	unsigned long nr_overcommit_huge_pages;
 	struct list_head hugepage_activelist;
 	struct list_head hugepage_freelists[MAX_NUMNODES];
+	struct list_head hugepage_wait_for_clean[MAX_NUMNODES];
 	unsigned int nr_huge_pages_node[MAX_NUMNODES];
 	unsigned int free_huge_pages_node[MAX_NUMNODES];
 	unsigned int surplus_huge_pages_node[MAX_NUMNODES];
@@ -367,6 +368,7 @@ struct hstate {
 	struct cftype cgroup_files[5];
 #endif
 	char name[HSTATE_NAME_LEN];
+	struct delayed_work clear_work;
 };
 
 struct huge_bootmem_page {
