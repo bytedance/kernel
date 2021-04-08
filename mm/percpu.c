@@ -1822,30 +1822,20 @@ void __percpu *__alloc_reserved_percpu(size_t size, size_t align)
 }
 
 /**
- * pcpu_balance_workfn - manage the amount of free chunks and populated pages
- * @work: unused
+ * pcpu_balance_free - manage the amount of free chunks
  *
- * Reclaim all fully free chunks except for the first one.  This is also
- * responsible for maintaining the pool of empty populated pages.  However,
- * it is possible that this is called when physical memory is scarce causing
- * OOM killer to be triggered.  We should avoid doing so until an actual
- * allocation causes the failure as it is possible that requests can be
- * serviced from already backed regions.
+ * Reclaim all fully free chunks except for the first one.
  */
-static void pcpu_balance_workfn(struct work_struct *work)
+static void pcpu_balance_free(void)
 {
-	/* gfp flags passed to underlying allocators */
-	const gfp_t gfp = GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN;
 	LIST_HEAD(to_free);
 	struct list_head *free_head = &pcpu_slot[pcpu_nr_slots - 1];
 	struct pcpu_chunk *chunk, *next;
-	int slot, nr_to_pop, ret;
 
 	/*
 	 * There's no reason to keep around multiple unused chunks and VM
 	 * areas can be scarce.  Destroy all free chunks except for one.
 	 */
-	mutex_lock(&pcpu_alloc_mutex);
 	spin_lock_irq(&pcpu_lock);
 
 	list_for_each_entry_safe(chunk, next, free_head, list) {
@@ -1873,6 +1863,23 @@ static void pcpu_balance_workfn(struct work_struct *work)
 		pcpu_destroy_chunk(chunk);
 		cond_resched();
 	}
+}
+
+/**
+ * pcpu_balance_populated - manage the amount of populated pages
+ *
+ * Maintain a certain amount of populated pages to satisfy atomic allocations.
+ * It is possible that this is called when physical memory is scarce causing
+ * OOM killer to be triggered.  We should avoid doing so until an actual
+ * allocation causes the failure as it is possible that requests can be
+ * serviced from already backed regions.
+ */
+static void pcpu_balance_populated(void)
+{
+	/* gfp flags passed to underlying allocators */
+	const gfp_t gfp = GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN;
+	struct pcpu_chunk *chunk;
+	int slot, nr_to_pop, ret;
 
 	/*
 	 * Ensure there are certain number of free populated pages for
@@ -1942,7 +1949,19 @@ retry_pop:
 			goto retry_pop;
 		}
 	}
+}
 
+/**
+ * pcpu_balance_workfn - manage the amount of free chunks and populated pages
+ * @work: unused
+ *
+ * Call pcpu_balance_free() and pcpu_balance_populated() for each chunk type.
+ */
+static void pcpu_balance_workfn(struct work_struct *work)
+{
+	mutex_lock(&pcpu_alloc_mutex);
+	pcpu_balance_free();
+	pcpu_balance_populated();
 	mutex_unlock(&pcpu_alloc_mutex);
 }
 
