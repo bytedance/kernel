@@ -127,6 +127,7 @@ static int pcpu_unit_size __ro_after_init;
 static int pcpu_nr_units __ro_after_init;
 static int pcpu_atom_size __ro_after_init;
 int pcpu_nr_slots __ro_after_init;
+int pcpu_free_slot __ro_after_init;
 static size_t pcpu_chunk_struct_size __ro_after_init;
 
 /* cpus with the lowest and highest unit addresses */
@@ -229,7 +230,7 @@ static int __pcpu_size_to_slot(int size)
 static int pcpu_size_to_slot(int size)
 {
 	if (size == pcpu_unit_size)
-		return pcpu_nr_slots - 1;
+		return pcpu_free_slot;
 	return __pcpu_size_to_slot(size);
 }
 
@@ -1700,7 +1701,7 @@ restart:
 		goto fail;
 	}
 
-	if (list_empty(&pcpu_slot[pcpu_nr_slots - 1])) {
+	if (list_empty(&pcpu_slot[pcpu_free_slot])) {
 		chunk = pcpu_create_chunk(pcpu_gfp);
 		if (!chunk) {
 			err = "failed to allocate new chunk";
@@ -1845,7 +1846,7 @@ void __percpu *__alloc_reserved_percpu(size_t size, size_t align)
 static void pcpu_balance_free(void)
 {
 	LIST_HEAD(to_free);
-	struct list_head *free_head = &pcpu_slot[pcpu_nr_slots - 1];
+	struct list_head *free_head = &pcpu_slot[pcpu_free_slot];
 	struct pcpu_chunk *chunk, *next;
 
 	/*
@@ -1918,7 +1919,7 @@ retry_pop:
 				  0, PCPU_EMPTY_POP_PAGES_HIGH);
 	}
 
-	for (slot = pcpu_size_to_slot(PAGE_SIZE); slot < pcpu_nr_slots; slot++) {
+	for (slot = pcpu_size_to_slot(PAGE_SIZE); slot <= pcpu_free_slot; slot++) {
 		int nr_unpop = 0, rs, re;
 
 		if (!nr_to_pop)
@@ -2016,7 +2017,7 @@ void free_percpu(void __percpu *ptr)
 	if (chunk->free_bytes == pcpu_unit_size) {
 		struct pcpu_chunk *pos;
 
-		list_for_each_entry(pos, &pcpu_slot[pcpu_nr_slots - 1], list)
+		list_for_each_entry(pos, &pcpu_slot[pcpu_free_slot], list)
 			if (pos != chunk) {
 				need_balance = true;
 				break;
@@ -2437,7 +2438,8 @@ void __init pcpu_setup_first_chunk(const struct pcpu_alloc_info *ai,
 	 * Allocate chunk slots.  The additional last slot is for
 	 * empty chunks.
 	 */
-	pcpu_nr_slots = __pcpu_size_to_slot(pcpu_unit_size) + 2;
+	pcpu_free_slot = __pcpu_size_to_slot(pcpu_unit_size) + 1;
+	pcpu_nr_slots = pcpu_free_slot + 1;
 	pcpu_slot = memblock_alloc(pcpu_nr_slots * sizeof(pcpu_slot[0]),
 				   SMP_CACHE_BYTES);
 	if (!pcpu_slot)
