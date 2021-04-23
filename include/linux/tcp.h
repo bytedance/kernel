@@ -517,9 +517,12 @@ int tcp_skb_shift(struct sk_buff *to, struct sk_buff *from, int pcount,
 
 
 
-static inline u64 time_abs_ms(void)
+static inline u64 time_abs_ms(struct net *ns)
 {
 	struct timespec64 ts;
+
+	if (likely(ns->ipv4.sysctl_tcp_handshake_ts == 0))
+		return 0;
 
 	ktime_get_real_ts64(&ts);
 
