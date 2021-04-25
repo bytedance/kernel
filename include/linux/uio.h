@@ -11,7 +11,6 @@
 #include <uapi/linux/uio.h>
 
 struct page;
-struct address_space;
 struct pipe_inode_info;
 
 struct kvec {

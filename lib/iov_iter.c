@@ -783,6 +783,8 @@ size_t _copy_to_iter_mcsafe(const void *addr, size_t bytes, struct iov_iter *i)
 			curr_addr = (unsigned long) from;
 			bytes = curr_addr - s_addr - rem;
 			rcu_read_unlock();
+			i->iov_offset += bytes;
+			i->count -= bytes;
 			return bytes;
 		}
 		})
@@ -1131,6 +1133,7 @@ void iov_iter_advance(struct iov_iter *i, size_t size)
 		return;
 	}
 	if (unlikely(iov_iter_is_xarray(i))) {
+		size = min(size, i->count);
 		i->iov_offset += size;
 		i->count -= size;
 		return;
@@ -1326,6 +1329,8 @@ unsigned long iov_iter_alignment(const struct iov_iter *i)
 			return size | i->iov_offset;
 		return size;
 	}
+	if (unlikely(iov_iter_is_xarray(i)))
+		return (i->xarray_start + i->iov_offset) | i->count;
 	iterate_all_kinds(i, size, v,
 		(res |= (unsigned long)v.iov_base | v.iov_len, 0),
 		res |= v.bv_offset | v.bv_len,
