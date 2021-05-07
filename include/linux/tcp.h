@@ -125,10 +125,10 @@ struct tcp_request_sock {
 	u32				ts_off;
 	u32				last_oow_ack_time; /* last SYNACK */
 	u32				tfo_info;
-	u32				tcpi_csent_syn_stamp;
-	u32				tcpi_srcv_syn_stamp;
-	u32				tcpi_crcv_synack_stamp;
-	u32				tcpi_srcv_ack_stamp;
+	u64				tcpi_csent_syn_stamp;
+	u64				tcpi_srcv_syn_stamp;
+	u64				tcpi_crcv_synack_stamp;
+	u64				tcpi_srcv_ack_stamp;
 	u32				rcv_nxt; /* the ack # by SYNACK. For
 						  * FastOpen it's the seq#
 						  * after data-in-SYN.
@@ -249,11 +249,11 @@ struct tcp_sock {
 		is_cwnd_limited:1,/* forward progress limited by snd_cwnd? */
 		syn_smc:1;	/* SYN includes SMC */
 	u32	tfo_info;
-	u32	tcpi_csent_syn_stamp;
-	u32	tcpi_srcv_syn_stamp;
-	u32	tcpi_crcv_synack_stamp;
-	u32	tcpi_srcv_ack_stamp;
-	u32	tcpi_firstdata_stamp;
+	u64	tcpi_csent_syn_stamp;
+	u64	tcpi_srcv_syn_stamp;
+	u64	tcpi_crcv_synack_stamp;
+	u64	tcpi_srcv_ack_stamp;
+	u64	tcpi_firstdata_stamp;
 	u32	tcpi_probe0_times;
 	u32	tlp_high_seq;	/* snd_nxt at the time of TLP */
 
@@ -514,5 +514,41 @@ static inline u16 tcp_mss_clamp(const struct tcp_sock *tp, u16 mss)
 
 int tcp_skb_shift(struct sk_buff *to, struct sk_buff *from, int pcount,
 		  int shiftlen);
+
+
+
+static inline u64 time_abs_ms(void)
+{
+	struct timespec64 ts;
+
+	ktime_get_real_ts64(&ts);
+
+	return (u64)(ts.tv_sec * 1000 + ts.tv_nsec / (1000 * 1000));
+}
+
+static inline void tcp_sock_ts_init(struct tcp_sock *tsk)
+{
+	tsk->tcpi_csent_syn_stamp = 0;
+	tsk->tcpi_srcv_syn_stamp = 0;
+	tsk->tcpi_crcv_synack_stamp = 0;
+	tsk->tcpi_srcv_ack_stamp = 0;
+	tsk->tcpi_firstdata_stamp = 0;
+}
+
+static inline void tcp_reqsock_ts_init(struct tcp_request_sock *req)
+{
+	req->tcpi_csent_syn_stamp = 0;
+	req->tcpi_srcv_syn_stamp = 0;
+	req->tcpi_crcv_synack_stamp = 0;
+	req->tcpi_srcv_ack_stamp = 0;
+}
+
+static inline void tcp_ts_copy_from_req(struct tcp_sock *tsk, struct tcp_request_sock *req)
+{
+	tsk->tcpi_csent_syn_stamp = req->tcpi_csent_syn_stamp;
+	tsk->tcpi_srcv_syn_stamp = req->tcpi_srcv_syn_stamp;
+	tsk->tcpi_crcv_synack_stamp = req->tcpi_crcv_synack_stamp;
+	tsk->tcpi_srcv_ack_stamp = req->tcpi_srcv_ack_stamp;
+}
 
 #endif	/* _LINUX_TCP_H */
