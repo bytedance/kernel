@@ -87,6 +87,24 @@ static inline void ClearPageHugeFreed(struct page *head)
 	set_page_private(head + SUBPAGE_INDEX_FREED, 0);
 }
 
+static bool hugetlb_clear_hpage_background __read_mostly;
+static int __init early_hugetlb_clear_hpage_background_param(char *buf)
+{
+	if (!buf)
+		return -EINVAL;
+
+	if (!strcmp(buf, "on"))
+		hugetlb_clear_hpage_background = true;
+	else if (!strcmp(buf, "off"))
+		hugetlb_clear_hpage_background = false;
+	else
+		return -EINVAL;
+
+	return 0;
+}
+early_param("hugetlb_clear_hpage_background",
+	    early_hugetlb_clear_hpage_background_param);
+
 /* Forward declaration */
 static int hugetlb_acct_memory(struct hstate *h, long delta);
 
@@ -879,10 +897,51 @@ static bool vma_has_reserves(struct vm_area_struct *vma, long chg)
 	return false;
 }
 
+static void kthread_clear_huge_pages(struct work_struct *work)
+{
+	struct hstate *h = container_of(work, struct hstate, clear_work.work);
+	unsigned int order = huge_page_order(h);
+	unsigned long i, nr_pages = 1 << order;
+	struct page *page, *iter;
+	int nid;
+
+	spin_lock(&hugetlb_lock);
+	for (nid = 0; nid < MAX_NUMNODES; nid++) {
+		while (!list_empty(&h->hugepage_wait_for_clean[nid])) {
+			page = list_entry(
+				h->hugepage_wait_for_clean[nid].next,
+				struct page,
+				lru);
+			list_del(&page->lru);
+			spin_unlock(&hugetlb_lock);
+
+			for (i = 0, iter = page;
+			     i < nr_pages;
+			     i++, iter = mem_map_next(iter, page, i)) {
+				clear_highpage(iter);
+				cond_resched();
+			}
+
+			spin_lock(&hugetlb_lock);
+			list_add(&page->lru, &h->hugepage_freelists[nid]);
+
+			cond_resched_lock(&hugetlb_lock);
+		}
+	}
+	spin_unlock(&hugetlb_lock);
+}
+
 static void enqueue_huge_page(struct hstate *h, struct page *page)
 {
 	int nid = page_to_nid(page);
-	list_move(&page->lru, &h->hugepage_freelists[nid]);
+	if (hugetlb_clear_hpage_background) {
+		list_move(&page->lru, &h->hugepage_wait_for_clean[nid]);
+		schedule_delayed_work_on(raw_smp_processor_id(),
+					 &h->clear_work,
+					 msecs_to_jiffies(5));
+	} else {
+		list_move(&page->lru, &h->hugepage_freelists[nid]);
+	}
 	h->free_huge_pages++;
 	h->free_huge_pages_node[nid]++;
 	SetPageHugeFreed(page);
@@ -895,6 +954,18 @@ static struct page *dequeue_huge_page_node_exact(struct hstate *h, int nid)
 	list_for_each_entry(page, &h->hugepage_freelists[nid], lru)
 		if (!PageHWPoison(page))
 			break;
+
+	if (hugetlb_clear_hpage_background &&
+	    &h->hugepage_freelists[nid] == &page->lru) {
+		spin_unlock(&hugetlb_lock);
+		flush_delayed_work(&h->clear_work);
+		spin_lock(&hugetlb_lock);
+
+		list_for_each_entry(page, &h->hugepage_freelists[nid], lru)
+			if (!PageHWPoison(page))
+				break;
+	}
+
 	/*
 	 * if 'non-isolated free hugepage' not found on the list,
 	 * the allocation fails.
@@ -1771,6 +1842,7 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 							 bool acct_surplus)
 {
 	int nr_nodes, node;
+	struct page *page;
 	int ret = 0;
 
 	for_each_node_mask_to_free(h, nr_nodes, node, nodes_allowed) {
@@ -1778,11 +1850,20 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 		 * If we're returning unused surplus pages, only examine
 		 * nodes with surplus pages.
 		 */
-		if ((!acct_surplus || h->surplus_huge_pages_node[node]) &&
-		    !list_empty(&h->hugepage_freelists[node])) {
-			struct page *page =
-				list_entry(h->hugepage_freelists[node].next,
-					  struct page, lru);
+		if (!acct_surplus || h->surplus_huge_pages_node[node]) {
+			if (!list_empty(&h->hugepage_wait_for_clean[node]))
+				page = list_entry(
+					h->hugepage_wait_for_clean[node].next,
+					struct page,
+					lru);
+			else if (!list_empty(&h->hugepage_freelists[node]))
+				page = list_entry(
+					h->hugepage_freelists[node].next,
+					struct page,
+					lru);
+			else
+				continue;
+
 			list_del(&page->lru);
 			h->free_huge_pages--;
 			h->free_huge_pages_node[node]--;
@@ -2603,17 +2684,18 @@ static void __init report_hugepages(void)
 }
 
 #ifdef CONFIG_HIGHMEM
-static void try_to_free_low(struct hstate *h, unsigned long count,
-						nodemask_t *nodes_allowed)
+
+static void try_to_free_low_from_list(struct hstate *h,
+				      unsigned long count,
+				      nodemask_t *nodes_allowed,
+				      struct list_head *free_list)
 {
+	struct page *page, *next;
+	struct list_head *freel;
 	int i;
 
-	if (hstate_is_gigantic(h))
-		return;
-
 	for_each_node_mask(i, *nodes_allowed) {
-		struct page *page, *next;
-		struct list_head *freel = &h->hugepage_freelists[i];
+		freel = free_list + i;
 		list_for_each_entry_safe(page, next, freel, lru) {
 			if (count >= h->nr_huge_pages)
 				return;
@@ -2625,6 +2707,24 @@ static void try_to_free_low(struct hstate *h, unsigned long count,
 			h->free_huge_pages_node[page_to_nid(page)]--;
 		}
 	}
+}
+
+static void try_to_free_low(struct hstate *h, unsigned long count,
+						nodemask_t *nodes_allowed)
+{
+	if (hstate_is_gigantic(h))
+		return;
+
+	/*
+	 * try to free hugepage_wait_for_clean first so
+	 * that kthread_clear_huge_pages can clear fewer
+	 * pages.
+	 */
+	if (hugetlb_clear_hpage_background)
+		try_to_free_low_from_list(h, count, nodes_allowed,
+					  h->hugepage_wait_for_clean);
+	try_to_free_low_from_list(h, count, nodes_allowed,
+				  h->hugepage_freelists);
 }
 #else
 static inline void try_to_free_low(struct hstate *h, unsigned long count,
@@ -3255,8 +3355,11 @@ void __init hugetlb_add_hstate(unsigned int order)
 	h->mask = ~((1ULL << (order + PAGE_SHIFT)) - 1);
 	h->nr_huge_pages = 0;
 	h->free_huge_pages = 0;
-	for (i = 0; i < MAX_NUMNODES; ++i)
+	INIT_DELAYED_WORK(&h->clear_work, kthread_clear_huge_pages);
+	for (i = 0; i < MAX_NUMNODES; ++i) {
 		INIT_LIST_HEAD(&h->hugepage_freelists[i]);
+		INIT_LIST_HEAD(&h->hugepage_wait_for_clean[i]);
+	}
 	INIT_LIST_HEAD(&h->hugepage_activelist);
 	h->next_nid_to_alloc = first_memory_node;
 	h->next_nid_to_free = first_memory_node;
@@ -4255,7 +4358,9 @@ retry:
 			ret = vmf_error(PTR_ERR(page));
 			goto out;
 		}
-		clear_huge_page(page, address, pages_per_huge_page(h));
+		if (!hugetlb_clear_hpage_background)
+			clear_huge_page(page, address, pages_per_huge_page(h));
+
 		__SetPageUptodate(page);
 		new_page = true;
 
