@@ -842,7 +842,7 @@ int tcp_child_process(struct sock *parent, struct sock *child,
 	int state = child->sk_state;
 	struct tcp_sock *tp = tcp_sk(child);
 
-	tp->tcpi_srcv_ack_stamp = time_abs_ms();
+	tp->tcpi_srcv_ack_stamp = time_abs_ms(sock_net(parent));
 	/* record NAPI ID of child */
 	sk_mark_napi_id(child, skb);
 

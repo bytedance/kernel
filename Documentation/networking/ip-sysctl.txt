@@ -826,6 +826,11 @@ tcp_rx_skb_cache - BOOLEAN
 
 	Default: 0 (disabled)
 
+tcp_handshake_ts - BOOLEAN
+	Controls whether to record timestamps in tcp handshake.
+
+	Default: 0 (disabled)
+
 UDP variables:
 
 udp_l3mdev_accept - BOOLEAN
