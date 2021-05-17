@@ -88,6 +88,7 @@ struct vduse_dev {
 	u16 vq_size_max;
 	u32 vq_num;
 	u32 vq_align;
+	u32 config_size;
 	u32 device_id;
 	u32 vendor_id;
 	u64 features;
@@ -696,6 +697,13 @@ static void vduse_vdpa_set_status(struct vdpa_device *vdpa, u8 status)
 		vduse_dev_reset(dev);
 }
 
+static size_t vduse_vdpa_get_config_size(struct vdpa_device *vdpa)
+{
+	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
+
+	return dev->config_size;
+}
+
 static void vduse_vdpa_get_config(struct vdpa_device *vdpa, unsigned int offset,
 			     void *buf, unsigned int len)
 {
@@ -754,6 +762,7 @@ static const struct vdpa_config_ops vduse_vdpa_config_ops = {
 	.get_vendor_id		= vduse_vdpa_get_vendor_id,
 	.get_status		= vduse_vdpa_get_status,
 	.set_status		= vduse_vdpa_set_status,
+	.get_config_size	= vduse_vdpa_get_config_size,
 	.get_config		= vduse_vdpa_get_config,
 	.set_config		= vduse_vdpa_set_config,
 	.set_map		= vduse_vdpa_set_map,
@@ -1482,6 +1491,7 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	dev->dead_timeout = config->dead_timeout;
 	dev->device_id = config->device_id;
 	dev->vendor_id = config->vendor_id;
+	dev->config_size = config->config_size;
 	dev->name = kstrdup(config->name, GFP_KERNEL);
 	if (!dev->name)
 		goto err_str;
