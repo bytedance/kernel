@@ -127,7 +127,8 @@ struct vduse_dev_config {
 	__u16 padding; /* padding */
 	__u32 vq_num; /* the number of virtqueues */
 	__u32 vq_align; /* the allocation alignment of virtqueue's metadata */
-	__u32 reserved[7]; /* for future use */
+	__u32 config_size; /* the size of the configuration space */
+	__u32 reserved[6]; /* for future use */
 	__u16 reserved2; /* for future use */
 	__u16 dead_timeout; /* dead timeout */
 };
