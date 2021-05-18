@@ -444,7 +444,15 @@ static int array_map_check_btf(const struct bpf_map *map,
 	return 0;
 }
 
+static bool array_map_meta_equal(const struct bpf_map *meta0,
+				 const struct bpf_map *meta1)
+{
+	return meta0->max_entries == meta1->max_entries &&
+		bpf_map_meta_equal(meta0, meta1);
+}
+
 const struct bpf_map_ops array_map_ops = {
+	.map_meta_equal = array_map_meta_equal,
 	.map_alloc_check = array_map_alloc_check,
 	.map_alloc = array_map_alloc,
 	.map_free = array_map_free,
@@ -460,6 +468,7 @@ const struct bpf_map_ops array_map_ops = {
 };
 
 const struct bpf_map_ops percpu_array_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc_check = array_map_alloc_check,
 	.map_alloc = array_map_alloc,
 	.map_free = array_map_free,
@@ -716,6 +725,7 @@ static void perf_event_fd_array_release(struct bpf_map *map,
 }
 
 const struct bpf_map_ops perf_event_array_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc_check = fd_array_map_alloc_check,
 	.map_alloc = array_map_alloc,
 	.map_free = fd_array_map_free,
@@ -749,6 +759,7 @@ static void cgroup_fd_array_free(struct bpf_map *map)
 }
 
 const struct bpf_map_ops cgroup_array_map_ops = {
+	.map_meta_equal = bpf_map_meta_equal,
 	.map_alloc_check = fd_array_map_alloc_check,
 	.map_alloc = array_map_alloc,
 	.map_free = cgroup_fd_array_free,
