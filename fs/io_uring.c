@@ -2272,11 +2272,13 @@ restart:
 					break;
 				cond_resched();
 			} while (1);
-		}
 end_req:
-		spin_lock_irq(&ctx->task_lock);
-		list_del_init(&req->task_list);
-		spin_unlock_irq(&ctx->task_lock);
+			if (!list_empty(&req->task_list)) {
+				spin_lock_irq(&ctx->task_lock);
+				list_del_init(&req->task_list);
+				spin_unlock_irq(&ctx->task_lock);
+			}
+		}
 
 		/* drop submission reference */
 		io_put_req(req);
@@ -3720,16 +3722,15 @@ static int io_uring_fasync(int fd, struct file *file, int on)
 static void io_cancel_async_work(struct io_ring_ctx *ctx,
 				 struct files_struct *files)
 {
-	struct io_kiocb *req;
-
 	if (list_empty(&ctx->task_list))
 		return;
 
 	spin_lock_irq(&ctx->task_lock);
+	while (!list_empty(&ctx->task_list)) {
+		struct io_kiocb *req;
 
-	list_for_each_entry(req, &ctx->task_list, task_list) {
-		if (files && req->files != files)
-			continue;
+		req = list_first_entry(&ctx->task_list, struct io_kiocb, task_list);
+		list_del_init(&req->task_list);
 
 		/*
 		 * The below executes an smp_mb(), which matches with the
@@ -3739,7 +3740,7 @@ static void io_cancel_async_work(struct io_ring_ctx *ctx,
 		 */
 		smp_store_mb(req->flags, req->flags | REQ_F_CANCEL); /* B */
 
-		if (req->work_task)
+		if (req->work_task && (!files || req->files == files))
 			send_sig(SIGINT, req->work_task, 1);
 	}
 	spin_unlock_irq(&ctx->task_lock);
