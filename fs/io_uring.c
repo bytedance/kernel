@@ -1230,7 +1230,7 @@ static int io_import_fixed(struct io_ring_ctx *ctx, int rw,
 		}
 	}
 
-	return len;
+	return 0;
 }
 
 static ssize_t io_import_iovec(struct io_ring_ctx *ctx, int rw,
