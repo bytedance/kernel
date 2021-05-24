@@ -239,7 +239,7 @@ struct io_ring_ctx {
 
 	struct user_struct	*user;
 
-	const struct cred	*creds;
+	struct cred		*creds;
 
 	struct completion	ctx_done;
 
@@ -3876,7 +3876,7 @@ static int io_uring_create(unsigned entries, struct io_uring_params *p)
 	ctx->account_mem = account_mem;
 	ctx->user = user;
 
-	ctx->creds = get_current_cred();
+	ctx->creds = prepare_creds();
 	if (!ctx->creds) {
 		ret = -ENOMEM;
 		goto err;
