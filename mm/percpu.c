@@ -1874,6 +1874,9 @@ void __percpu *__alloc_reserved_percpu(size_t size, size_t align)
  * If empty_only is %false, reclaim all fully free chunks regardless of the
  * number of populated pages.  Otherwise, only reclaim chunks that have no
  * populated pages.
+ *
+ * CONTEXT:
+ * pcpu_lock (can be dropped temporarily)
  */
 static void pcpu_balance_free(bool empty_only)
 {
@@ -1881,12 +1884,12 @@ static void pcpu_balance_free(bool empty_only)
 	struct list_head *free_head = &pcpu_slot[pcpu_free_slot];
 	struct pcpu_chunk *chunk, *next;
 
+	lockdep_assert_held(&pcpu_lock);
+
 	/*
 	 * There's no reason to keep around multiple unused chunks and VM
 	 * areas can be scarce.  Destroy all free chunks except for one.
 	 */
-	spin_lock_irq(&pcpu_lock);
-
 	list_for_each_entry_safe(chunk, next, free_head, list) {
 		WARN_ON(chunk->immutable);
 
@@ -1898,8 +1901,10 @@ static void pcpu_balance_free(bool empty_only)
 			list_move(&chunk->list, &to_free);
 	}
 
-	spin_unlock_irq(&pcpu_lock);
+	if (list_empty(&to_free))
+		return;
 
+	spin_unlock_irq(&pcpu_lock);
 	list_for_each_entry_safe(chunk, next, &to_free, list) {
 		int rs, re;
 
@@ -1913,6 +1918,7 @@ static void pcpu_balance_free(bool empty_only)
 		pcpu_destroy_chunk(chunk);
 		cond_resched();
 	}
+	spin_lock_irq(&pcpu_lock);
 }
 
 /**
@@ -1923,6 +1929,9 @@ static void pcpu_balance_free(bool empty_only)
  * OOM killer to be triggered.  We should avoid doing so until an actual
  * allocation causes the failure as it is possible that requests can be
  * serviced from already backed regions.
+ *
+ * CONTEXT:
+ * pcpu_lock (can be dropped temporarily)
  */
 static void pcpu_balance_populated(void)
 {
@@ -1930,6 +1939,8 @@ static void pcpu_balance_populated(void)
 	const gfp_t gfp = GFP_KERNEL | __GFP_NORETRY | __GFP_NOWARN;
 	struct pcpu_chunk *chunk;
 	int slot, nr_to_pop, ret;
+
+	lockdep_assert_held(&pcpu_lock);
 
 	/*
 	 * Ensure there are certain number of free populated pages for
@@ -1958,13 +1969,11 @@ retry_pop:
 		if (!nr_to_pop)
 			break;
 
-		spin_lock_irq(&pcpu_lock);
 		list_for_each_entry(chunk, &pcpu_slot[slot], list) {
 			nr_unpop = chunk->nr_pages - chunk->nr_populated;
 			if (nr_unpop)
 				break;
 		}
-		spin_unlock_irq(&pcpu_lock);
 
 		if (!nr_unpop)
 			continue;
@@ -1974,12 +1983,13 @@ retry_pop:
 					   chunk->nr_pages) {
 			int nr = min(re - rs, nr_to_pop);
 
+			spin_unlock_irq(&pcpu_lock);
 			ret = pcpu_populate_chunk(chunk, rs, rs + nr, gfp);
+			cond_resched();
+			spin_lock_irq(&pcpu_lock);
 			if (!ret) {
 				nr_to_pop -= nr;
-				spin_lock_irq(&pcpu_lock);
 				pcpu_chunk_populated(chunk, rs, rs + nr);
-				spin_unlock_irq(&pcpu_lock);
 			} else {
 				nr_to_pop = 0;
 			}
@@ -1991,11 +2001,12 @@ retry_pop:
 
 	if (nr_to_pop) {
 		/* ran out of chunks to populate, create a new one and retry */
+		spin_unlock_irq(&pcpu_lock);
 		chunk = pcpu_create_chunk(gfp);
+		cond_resched();
+		spin_lock_irq(&pcpu_lock);
 		if (chunk) {
-			spin_lock_irq(&pcpu_lock);
 			pcpu_chunk_relocate(chunk, -1);
-			spin_unlock_irq(&pcpu_lock);
 			goto retry_pop;
 		}
 	}
@@ -2011,6 +2022,10 @@ retry_pop:
  * populated pages threshold, reintegrate the chunk if it has empty free pages.
  * Each chunk is scanned in the reverse order to keep populated pages close to
  * the beginning of the chunk.
+ *
+ * CONTEXT:
+ * pcpu_lock (can be dropped temporarily)
+ *
  */
 static void pcpu_reclaim_populated(void)
 {
@@ -2018,7 +2033,7 @@ static void pcpu_reclaim_populated(void)
 	struct pcpu_block_md *block;
 	int i, end;
 
-	spin_lock_irq(&pcpu_lock);
+	lockdep_assert_held(&pcpu_lock);
 
 restart:
 	/*
@@ -2084,8 +2099,6 @@ restart:
 			list_move(&chunk->list,
 				  &pcpu_slot[pcpu_sidelined_slot]);
 	}
-
-	spin_unlock_irq(&pcpu_lock);
 }
 
 /**
@@ -2106,10 +2119,14 @@ static void pcpu_balance_workfn(struct work_struct *work)
 	 * appropriate.
 	 */
 	mutex_lock(&pcpu_alloc_mutex);
+	spin_lock_irq(&pcpu_lock);
+
 	pcpu_balance_free(false);
 	pcpu_reclaim_populated();
 	pcpu_balance_populated();
 	pcpu_balance_free(true);
+
+	spin_unlock_irq(&pcpu_lock);
 	mutex_unlock(&pcpu_alloc_mutex);
 }
 
