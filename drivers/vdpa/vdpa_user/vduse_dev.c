@@ -38,6 +38,7 @@
 #define DRV_LICENSE  "GPL v2"
 
 #define VDUSE_DEV_MAX (1U << MINORBITS)
+#define VDUSE_REQUEST_TIMEOUT 30
 
 struct vduse_virtqueue {
 	u16 index;
@@ -186,7 +187,8 @@ static int vduse_dev_msg_sync(struct vduse_dev *dev,
 	vduse_enqueue_msg(&dev->send_list, msg);
 	wake_up(&dev->waitq);
 	spin_unlock(&dev->msg_lock);
-	wait_event_killable(msg->waitq, msg->completed);
+	wait_event_killable_timeout(msg->waitq, msg->completed,
+				    VDUSE_REQUEST_TIMEOUT * HZ);
 	spin_lock(&dev->msg_lock);
 	if (!msg->completed) {
 		list_del(&msg->list);
