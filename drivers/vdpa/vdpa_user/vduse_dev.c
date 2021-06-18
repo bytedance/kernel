@@ -85,6 +85,7 @@ struct vduse_dev {
 	spinlock_t irq_lock;
 	unsigned long api_version;
 	bool connected;
+	bool aborted;
 	int minor;
 	u16 vq_size_max;
 	u32 vq_num;
@@ -1356,7 +1357,7 @@ static void vduse_dev_timeout_work(struct work_struct *work)
 					struct vduse_dev, timeout_work);
 
 	mutex_lock(&dev->lock);
-	if (dev->connected)
+	if (dev->connected && !dev->aborted)
 		goto unlock;
 
 	if (!dev->dead) {
@@ -1395,6 +1396,31 @@ static void vduse_dev_timeout_work(struct work_struct *work)
 unlock:
 	mutex_unlock(&dev->lock);
 }
+
+static ssize_t abort_conn_store(struct device *device,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct vduse_dev *dev = container_of(device, struct vduse_dev, dev);
+
+	if (dev->device_id != VIRTIO_ID_BLOCK &&
+	    dev->device_id != VIRTIO_ID_FS)
+		return -EINVAL;
+
+	dev->aborted = true;
+	mod_delayed_work(system_wq, &dev->timeout_work, 0);
+
+	return count;
+}
+
+static DEVICE_ATTR_WO(abort_conn);
+
+static struct attribute *vduse_dev_attrs[] = {
+	&dev_attr_abort_conn.attr,
+	NULL
+};
+
+ATTRIBUTE_GROUPS(vduse_dev);
 
 static struct vduse_dev *vduse_dev_create(void)
 {
@@ -1508,6 +1534,7 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	dev->minor = ret;
 	device_initialize(&dev->dev);
 	dev->dev.release = vduse_release_dev;
+	dev->dev.groups = vduse_dev_groups;
 	dev->dev.class = vduse_class;
 	dev->dev.devt = MKDEV(MAJOR(vduse_major), dev->minor);
 	ret = dev_set_name(&dev->dev, "%s", config->name);
