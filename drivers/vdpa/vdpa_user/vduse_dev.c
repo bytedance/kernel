@@ -38,6 +38,7 @@
 #define DRV_LICENSE  "GPL v2"
 
 #define VDUSE_DEV_MAX (1U << MINORBITS)
+#define VDUSE_REQUEST_TIMEOUT 30
 
 struct vduse_virtqueue {
 	u16 index;
@@ -84,10 +85,12 @@ struct vduse_dev {
 	spinlock_t irq_lock;
 	unsigned long api_version;
 	bool connected;
+	bool aborted;
 	int minor;
 	u16 vq_size_max;
 	u32 vq_num;
 	u32 vq_align;
+	u32 config_size;
 	u32 device_id;
 	u32 vendor_id;
 	u64 features;
@@ -185,7 +188,8 @@ static int vduse_dev_msg_sync(struct vduse_dev *dev,
 	vduse_enqueue_msg(&dev->send_list, msg);
 	wake_up(&dev->waitq);
 	spin_unlock(&dev->msg_lock);
-	wait_event_killable(msg->waitq, msg->completed);
+	wait_event_killable_timeout(msg->waitq, msg->completed,
+				    VDUSE_REQUEST_TIMEOUT * HZ);
 	spin_lock(&dev->msg_lock);
 	if (!msg->completed) {
 		list_del(&msg->list);
@@ -696,6 +700,13 @@ static void vduse_vdpa_set_status(struct vdpa_device *vdpa, u8 status)
 		vduse_dev_reset(dev);
 }
 
+static size_t vduse_vdpa_get_config_size(struct vdpa_device *vdpa)
+{
+	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
+
+	return dev->config_size;
+}
+
 static void vduse_vdpa_get_config(struct vdpa_device *vdpa, unsigned int offset,
 			     void *buf, unsigned int len)
 {
@@ -754,6 +765,7 @@ static const struct vdpa_config_ops vduse_vdpa_config_ops = {
 	.get_vendor_id		= vduse_vdpa_get_vendor_id,
 	.get_status		= vduse_vdpa_get_status,
 	.set_status		= vduse_vdpa_set_status,
+	.get_config_size	= vduse_vdpa_get_config_size,
 	.get_config		= vduse_vdpa_get_config,
 	.set_config		= vduse_vdpa_set_config,
 	.set_map		= vduse_vdpa_set_map,
@@ -970,6 +982,15 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 		vq_index = array_index_nospec(vq_index, dev->vq_num);
 		vq = dev->vqs[vq_index];
 		ret = 0;
+
+		/* virtio-fs driver already uses workqueue in irq handler */
+		if (dev->device_id == VIRTIO_ID_FS) {
+			spin_lock_irq(&vq->irq_lock);
+			if (vq->ready && vq->cb.callback)
+				vq->cb.callback(vq->cb.private);
+			spin_unlock_irq(&vq->irq_lock);
+			break;
+		}
 		if (vq->irq_affinity == -1)
 			queue_work(vduse_irq_wq, &vq->inject);
 		else
@@ -992,7 +1013,6 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 static int vduse_dev_release(struct inode *inode, struct file *file)
 {
 	struct vduse_dev *dev = file->private_data;
-	struct vduse_dev_msg *msg;
 	int i;
 
 	for (i = 0; i < dev->vq_num; i++) {
@@ -1007,8 +1027,7 @@ static int vduse_dev_release(struct inode *inode, struct file *file)
 
 	spin_lock(&dev->msg_lock);
 	/* Make sure the inflight messages can processed after reconncection */
-	while ((msg = vduse_dequeue_msg(&dev->recv_list)))
-		vduse_enqueue_msg(&dev->send_list, msg);
+	list_splice_init(&dev->recv_list, &dev->send_list);
 	spin_unlock(&dev->msg_lock);
 
 	dev->connected = false;
@@ -1347,7 +1366,7 @@ static void vduse_dev_timeout_work(struct work_struct *work)
 					struct vduse_dev, timeout_work);
 
 	mutex_lock(&dev->lock);
-	if (dev->connected)
+	if (dev->connected && !dev->aborted)
 		goto unlock;
 
 	if (!dev->dead) {
@@ -1386,6 +1405,31 @@ static void vduse_dev_timeout_work(struct work_struct *work)
 unlock:
 	mutex_unlock(&dev->lock);
 }
+
+static ssize_t abort_conn_store(struct device *device,
+				struct device_attribute *attr,
+				const char *buf, size_t count)
+{
+	struct vduse_dev *dev = container_of(device, struct vduse_dev, dev);
+
+	if (dev->device_id != VIRTIO_ID_BLOCK &&
+	    dev->device_id != VIRTIO_ID_FS)
+		return -EINVAL;
+
+	dev->aborted = true;
+	mod_delayed_work(system_wq, &dev->timeout_work, 0);
+
+	return count;
+}
+
+static DEVICE_ATTR_WO(abort_conn);
+
+static struct attribute *vduse_dev_attrs[] = {
+	&dev_attr_abort_conn.attr,
+	NULL
+};
+
+ATTRIBUTE_GROUPS(vduse_dev);
 
 static struct vduse_dev *vduse_dev_create(void)
 {
@@ -1482,6 +1526,7 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	dev->dead_timeout = config->dead_timeout;
 	dev->device_id = config->device_id;
 	dev->vendor_id = config->vendor_id;
+	dev->config_size = config->config_size;
 	dev->name = kstrdup(config->name, GFP_KERNEL);
 	if (!dev->name)
 		goto err_str;
@@ -1498,6 +1543,7 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	dev->minor = ret;
 	device_initialize(&dev->dev);
 	dev->dev.release = vduse_release_dev;
+	dev->dev.groups = vduse_dev_groups;
 	dev->dev.class = vduse_class;
 	dev->dev.devt = MKDEV(MAJOR(vduse_major), dev->minor);
 	ret = dev_set_name(&dev->dev, "%s", config->name);
