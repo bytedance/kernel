@@ -101,10 +101,7 @@ static inline unsigned long __owner_flags(unsigned long owner)
 	return owner & MUTEX_FLAGS;
 }
 
-/*
- * Trylock variant that retuns the owning task on failure.
- */
-static inline struct task_struct *__mutex_trylock_or_owner(struct mutex *lock)
+static inline struct task_struct *__mutex_trylock_common(struct mutex *lock, bool handoff)
 {
 	unsigned long owner, curr = (unsigned long)current;
 
@@ -114,31 +111,40 @@ static inline struct task_struct *__mutex_trylock_or_owner(struct mutex *lock)
 		unsigned long task = owner & ~MUTEX_FLAGS;
 
 		if (task) {
-			if (likely(task != curr))
+			if (flags & MUTEX_FLAG_PICKUP) {
+				if (task != curr)
+					break;
+				flags &= ~MUTEX_FLAG_PICKUP;
+			} else if (handoff) {
+				if (flags & MUTEX_FLAG_HANDOFF)
+					break;
+				flags |= MUTEX_FLAG_HANDOFF;
+			} else {
 				break;
-
-			if (likely(!(flags & MUTEX_FLAG_PICKUP)))
-				break;
-
-			flags &= ~MUTEX_FLAG_PICKUP;
+			}
 		} else {
 #ifdef CONFIG_DEBUG_MUTEXES
-			DEBUG_LOCKS_WARN_ON(flags & MUTEX_FLAG_PICKUP);
+			DEBUG_LOCKS_WARN_ON(flags & (MUTEX_FLAG_HANDOFF | MUTEX_FLAG_PICKUP));
 #endif
+			task = curr;
 		}
 
-		/*
-		 * We set the HANDOFF bit, we must make sure it doesn't live
-		 * past the point where we acquire it. This would be possible
-		 * if we (accidentally) set the bit on an unlocked mutex.
-		 */
-		flags &= ~MUTEX_FLAG_HANDOFF;
-
-		if (atomic_long_try_cmpxchg_acquire(&lock->owner, &owner, curr | flags))
-			return NULL;
+		if (atomic_long_try_cmpxchg_acquire(&lock->owner, &owner, task | flags)) {
+			if (task == curr)
+				return NULL;
+			break;
+		}
 	}
 
 	return __owner_task(owner);
+}
+
+/*
+ * Trylock or set HANDOFF
+ */
+static inline bool __mutex_trylock_or_handoff(struct mutex *lock, bool handoff)
+{
+	return !__mutex_trylock_common(lock, handoff);
 }
 
 /*
@@ -146,7 +152,7 @@ static inline struct task_struct *__mutex_trylock_or_owner(struct mutex *lock)
  */
 static inline bool __mutex_trylock(struct mutex *lock)
 {
-	return !__mutex_trylock_or_owner(lock);
+	return !__mutex_trylock_common(lock, false);
 }
 
 #ifndef CONFIG_DEBUG_LOCK_ALLOC
@@ -498,6 +504,14 @@ ww_mutex_set_context_fastpath(struct ww_mutex *lock, struct ww_acquire_ctx *ctx)
 }
 
 #ifdef CONFIG_MUTEX_SPIN_ON_OWNER
+
+/*
+ * Trylock variant that returns the owning task on failure.
+ */
+static inline struct task_struct *__mutex_trylock_or_owner(struct mutex *lock)
+{
+	return __mutex_trylock_common(lock, false);
+}
 
 static inline
 bool ww_mutex_spin_on_owner(struct mutex *lock, struct ww_acquire_ctx *ww_ctx,
@@ -1038,8 +1052,6 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 		schedule_preempt_disabled();
 
 		first = __mutex_waiter_is_first(lock, &waiter);
-		if (first)
-			__mutex_set_flag(lock, MUTEX_FLAG_HANDOFF);
 
 		set_current_state(state);
 		/*
@@ -1047,7 +1059,7 @@ __mutex_lock_common(struct mutex *lock, long state, unsigned int subclass,
 		 * state back to RUNNING and fall through the next schedule(),
 		 * or we must see its unlock and acquire.
 		 */
-		if (__mutex_trylock(lock) ||
+		if (__mutex_trylock_or_handoff(lock, first) ||
 		    (first && mutex_optimistic_spin(lock, ww_ctx, &waiter)))
 			break;
 
