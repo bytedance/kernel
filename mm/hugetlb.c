@@ -91,17 +91,17 @@ early_param("hugetlb_clear_hpage_background",
 
 static inline bool PageHugeFreed(struct page *head)
 {
-	return page_private(head + 3) == -1UL;
+	return page_private(head + SUBPAGE_INDEX_FREED) == -1UL;
 }
 
 static inline void SetPageHugeFreed(struct page *head)
 {
-	set_page_private(head + 3, -1UL);
+	set_page_private(head + SUBPAGE_INDEX_FREED, -1UL);
 }
 
 static inline void ClearPageHugeFreed(struct page *head)
 {
-	set_page_private(head + 3, 0);
+	set_page_private(head + SUBPAGE_INDEX_FREED, 0);
 }
 
 /* Forward declaration */
@@ -1305,20 +1305,20 @@ struct hstate *size_to_hstate(unsigned long size)
  */
 bool page_huge_active(struct page *page)
 {
-	return PageHeadHuge(page) && PagePrivate(&page[1]);
+	return PageHeadHuge(page) && PagePrivate(&page[SUBPAGE_INDEX_ACTIVE]);
 }
 
 /* never called for tail page */
 void set_page_huge_active(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageHeadHuge(page), page);
-	SetPagePrivate(&page[1]);
+	SetPagePrivate(&page[SUBPAGE_INDEX_ACTIVE]);
 }
 
 static void clear_page_huge_active(struct page *page)
 {
 	VM_BUG_ON_PAGE(!PageHeadHuge(page), page);
-	ClearPagePrivate(&page[1]);
+	ClearPagePrivate(&page[SUBPAGE_INDEX_ACTIVE]);
 }
 
 /*
@@ -1330,17 +1330,17 @@ static inline bool PageHugeTemporary(struct page *page)
 	if (!PageHuge(page))
 		return false;
 
-	return (unsigned long)page[2].mapping == -1U;
+	return (unsigned long)page[SUBPAGE_INDEX_TEMPORARY].mapping == -1U;
 }
 
 static inline void SetPageHugeTemporary(struct page *page)
 {
-	page[2].mapping = (void *)-1U;
+	page[SUBPAGE_INDEX_TEMPORARY].mapping = (void *)-1U;
 }
 
 static inline void ClearPageHugeTemporary(struct page *page)
 {
-	page[2].mapping = NULL;
+	page[SUBPAGE_INDEX_TEMPORARY].mapping = NULL;
 }
 
 static void __free_huge_page(struct page *page)
