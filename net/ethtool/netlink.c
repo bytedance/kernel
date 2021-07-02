@@ -1,0 +1,570 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+#include <net/sock.h>
+#include <linux/ethtool_netlink.h>
+#include "netlink.h"
+
+static struct genl_family ethtool_genl_family;
+
+static u32 ethnl_bcast_seq;
+
+const struct nla_policy ethnl_header_policy[] = {
+	[ETHTOOL_A_HEADER_DEV_INDEX]	= { .type = NLA_U32 },
+	[ETHTOOL_A_HEADER_DEV_NAME]	= { .type = NLA_NUL_STRING,
+					    .len = ALTIFNAMSIZ - 1 },
+	[ETHTOOL_A_HEADER_FLAGS]	= { .type = NLA_ENSURE_UINT_TYPE(NLA_U32) },
+};
+
+/**
+ * ethnl_parse_header_dev_get() - parse request header
+ * @req_info:    structure to put results into
+ * @header:      nest attribute with request header
+ * @net:         request netns
+ * @extack:      netlink extack for error reporting
+ * @require_dev: fail if no device identified in header
+ *
+ * Parse request header in nested attribute @nest and puts results into
+ * the structure pointed to by @req_info. Extack from @info is used for error
+ * reporting. If req_info->dev is not null on return, reference to it has
+ * been taken. If error is returned, *req_info is null initialized and no
+ * reference is held.
+ *
+ * Return: 0 on success or negative error code
+ */
+int ethnl_parse_header_dev_get(struct ethnl_req_info *req_info,
+			       const struct nlattr *header, struct net *net,
+			       struct netlink_ext_ack *extack, bool require_dev)
+{
+	struct nlattr *tb[ARRAY_SIZE(ethnl_header_policy)];
+	const struct nlattr *devname_attr;
+	struct net_device *dev = NULL;
+	u32 flags = 0;
+	int ret;
+
+	if (!header) {
+		NL_SET_ERR_MSG(extack, "request header missing");
+		return -EINVAL;
+	}
+	/* No validation here, command policy should have a nested policy set
+	 * for the header, therefore validation should have already been done.
+	 */
+	ret = nla_parse_nested(tb, ARRAY_SIZE(ethnl_header_policy) - 1, header,
+			       NULL, extack);
+	if (ret < 0)
+		return ret;
+	if (tb[ETHTOOL_A_HEADER_FLAGS])
+		flags = nla_get_u32(tb[ETHTOOL_A_HEADER_FLAGS]);
+
+	devname_attr = tb[ETHTOOL_A_HEADER_DEV_NAME];
+	if (tb[ETHTOOL_A_HEADER_DEV_INDEX]) {
+		u32 ifindex = nla_get_u32(tb[ETHTOOL_A_HEADER_DEV_INDEX]);
+
+		dev = dev_get_by_index(net, ifindex);
+		if (!dev) {
+			NL_SET_ERR_MSG_ATTR(extack,
+					    tb[ETHTOOL_A_HEADER_DEV_INDEX],
+					    "no device matches ifindex");
+			return -ENODEV;
+		}
+		/* if both ifindex and ifname are passed, they must match */
+		if (devname_attr &&
+		    strncmp(dev->name, nla_data(devname_attr), IFNAMSIZ)) {
+			dev_put(dev);
+			NL_SET_ERR_MSG_ATTR(extack, header,
+					    "ifindex and name do not match");
+			return -ENODEV;
+		}
+	} else if (devname_attr) {
+		dev = dev_get_by_name(net, nla_data(devname_attr));
+		if (!dev) {
+			NL_SET_ERR_MSG_ATTR(extack, devname_attr,
+					    "no device matches name");
+			return -ENODEV;
+		}
+	} else if (require_dev) {
+		NL_SET_ERR_MSG_ATTR(extack, header,
+				    "neither ifindex nor name specified");
+		return -EINVAL;
+	}
+
+	if (dev && !netif_device_present(dev)) {
+		dev_put(dev);
+		NL_SET_ERR_MSG(extack, "device not present");
+		return -ENODEV;
+	}
+
+	req_info->dev = dev;
+	req_info->flags = flags;
+	return 0;
+}
+
+/**
+ * ethnl_fill_reply_header() - Put common header into a reply message
+ * @skb:      skb with the message
+ * @dev:      network device to describe in header
+ * @attrtype: attribute type to use for the nest
+ *
+ * Create a nested attribute with attributes describing given network device.
+ *
+ * Return: 0 on success, error value (-EMSGSIZE only) on error
+ */
+int ethnl_fill_reply_header(struct sk_buff *skb, struct net_device *dev,
+			    u16 attrtype)
+{
+	struct nlattr *nest;
+
+	if (!dev)
+		return 0;
+	nest = nla_nest_start(skb, attrtype);
+	if (!nest)
+		return -EMSGSIZE;
+
+	if (nla_put_u32(skb, ETHTOOL_A_HEADER_DEV_INDEX, (u32)dev->ifindex) ||
+	    nla_put_string(skb, ETHTOOL_A_HEADER_DEV_NAME, dev->name))
+		goto nla_put_failure;
+	/* If more attributes are put into reply header, ethnl_header_size()
+	 * must be updated to account for them.
+	 */
+
+	nla_nest_end(skb, nest);
+	return 0;
+
+nla_put_failure:
+	nla_nest_cancel(skb, nest);
+	return -EMSGSIZE;
+}
+
+/**
+ * ethnl_reply_init() - Create skb for a reply and fill device identification
+ * @payload:      payload length (without netlink and genetlink header)
+ * @dev:          device the reply is about (may be null)
+ * @cmd:          ETHTOOL_MSG_* message type for reply
+ * @hdr_attrtype: attribute type for common header
+ * @info:         genetlink info of the received packet we respond to
+ * @ehdrp:        place to store payload pointer returned by genlmsg_new()
+ *
+ * Return: pointer to allocated skb on success, NULL on error
+ */
+struct sk_buff *ethnl_reply_init(size_t payload, struct net_device *dev, u8 cmd,
+				 u16 hdr_attrtype, struct genl_info *info,
+				 void **ehdrp)
+{
+	struct sk_buff *skb;
+
+	skb = genlmsg_new(payload, GFP_KERNEL);
+	if (!skb)
+		goto err;
+	*ehdrp = genlmsg_put_reply(skb, info, &ethtool_genl_family, 0, cmd);
+	if (!*ehdrp)
+		goto err_free;
+
+	if (dev) {
+		int ret;
+
+		ret = ethnl_fill_reply_header(skb, dev, hdr_attrtype);
+		if (ret < 0)
+			goto err_free;
+	}
+	return skb;
+
+err_free:
+	nlmsg_free(skb);
+err:
+	if (info)
+		GENL_SET_ERR_MSG(info, "failed to setup reply message");
+	return NULL;
+}
+
+void *ethnl_dump_put(struct sk_buff *skb, struct netlink_callback *cb, u8 cmd)
+{
+	return genlmsg_put(skb, NETLINK_CB(cb->skb).portid, cb->nlh->nlmsg_seq,
+			   &ethtool_genl_family, 0, cmd);
+}
+
+void *ethnl_bcastmsg_put(struct sk_buff *skb, u8 cmd)
+{
+	return genlmsg_put(skb, 0, ++ethnl_bcast_seq, &ethtool_genl_family, 0,
+			   cmd);
+}
+
+int ethnl_multicast(struct sk_buff *skb, struct net_device *dev)
+{
+	return genlmsg_multicast_netns(&ethtool_genl_family, dev_net(dev), skb,
+				       0, ETHNL_MCGRP_MONITOR, GFP_KERNEL);
+}
+
+/* GET request helpers */
+
+/**
+ * struct ethnl_dump_ctx - context structure for generic dumpit() callback
+ * @ops:        request ops of currently processed message type
+ * @req_info:   parsed request header of processed request
+ * @reply_data: data needed to compose the reply
+ * @pos_hash:   saved iteration position - hashbucket
+ * @pos_idx:    saved iteration position - index
+ *
+ * These parameters are kept in struct netlink_callback as context preserved
+ * between iterations. They are initialized by ethnl_default_start() and used
+ * in ethnl_default_dumpit() and ethnl_default_done().
+ */
+struct ethnl_dump_ctx {
+	const struct ethnl_request_ops	*ops;
+	struct ethnl_req_info		*req_info;
+	struct ethnl_reply_data		*reply_data;
+	int				pos_hash;
+	int				pos_idx;
+};
+
+static const struct ethnl_request_ops *
+ethnl_default_requests[__ETHTOOL_MSG_USER_CNT] = {
+	[ETHTOOL_MSG_MODULE_EEPROM_GET]	= &ethnl_module_eeprom_request_ops,
+};
+
+static struct ethnl_dump_ctx *ethnl_dump_context(struct netlink_callback *cb)
+{
+	return (struct ethnl_dump_ctx *)cb->ctx;
+}
+
+/**
+ * ethnl_default_parse() - Parse request message
+ * @req_info:    pointer to structure to put data into
+ * @tb:		 parsed attributes
+ * @net:         request netns
+ * @request_ops: struct request_ops for request type
+ * @extack:      netlink extack for error reporting
+ * @require_dev: fail if no device identified in header
+ *
+ * Parse universal request header and call request specific ->parse_request()
+ * callback (if defined) to parse the rest of the message.
+ *
+ * Return: 0 on success or negative error code
+ */
+static int ethnl_default_parse(struct ethnl_req_info *req_info,
+			       struct nlattr **tb, struct net *net,
+			       const struct ethnl_request_ops *request_ops,
+			       struct netlink_ext_ack *extack, bool require_dev)
+{
+	int ret;
+
+	ret = ethnl_parse_header_dev_get(req_info, tb[request_ops->hdr_attr],
+					 net, extack, require_dev);
+	if (ret < 0)
+		return ret;
+
+	if (request_ops->parse_request) {
+		ret = request_ops->parse_request(req_info, tb, extack);
+		if (ret < 0)
+			return ret;
+	}
+
+	return 0;
+}
+
+/**
+ * ethnl_init_reply_data() - Initialize reply data for GET request
+ * @reply_data: pointer to embedded struct ethnl_reply_data
+ * @ops:        instance of struct ethnl_request_ops describing the layout
+ * @dev:        network device to initialize the reply for
+ *
+ * Fills the reply data part with zeros and sets the dev member. Must be called
+ * before calling the ->fill_reply() callback (for each iteration when handling
+ * dump requests).
+ */
+static void ethnl_init_reply_data(struct ethnl_reply_data *reply_data,
+				  const struct ethnl_request_ops *ops,
+				  struct net_device *dev)
+{
+	memset(reply_data, 0, ops->reply_data_size);
+	reply_data->dev = dev;
+}
+
+/* default ->doit() handler for GET type requests */
+static int ethnl_default_doit(struct sk_buff *skb, struct genl_info *info)
+{
+	struct ethnl_reply_data *reply_data = NULL;
+	struct ethnl_req_info *req_info = NULL;
+	const u8 cmd = info->genlhdr->cmd;
+	const struct ethnl_request_ops *ops;
+	struct sk_buff *rskb;
+	void *reply_payload;
+	int reply_len;
+	int ret;
+
+	ops = ethnl_default_requests[cmd];
+	if (WARN_ONCE(!ops, "cmd %u has no ethnl_request_ops\n", cmd))
+		return -EOPNOTSUPP;
+	req_info = kzalloc(ops->req_info_size, GFP_KERNEL);
+	if (!req_info)
+		return -ENOMEM;
+	reply_data = kmalloc(ops->reply_data_size, GFP_KERNEL);
+	if (!reply_data) {
+		kfree(req_info);
+		return -ENOMEM;
+	}
+
+	ret = ethnl_default_parse(req_info, info->attrs, genl_info_net(info),
+				  ops, info->extack, !ops->allow_nodev_do);
+	if (ret < 0)
+		goto err_dev;
+	ethnl_init_reply_data(reply_data, ops, req_info->dev);
+
+	rtnl_lock();
+	ret = ops->prepare_data(req_info, reply_data, info);
+	rtnl_unlock();
+	if (ret < 0)
+		goto err_cleanup;
+	ret = ops->reply_size(req_info, reply_data);
+	if (ret < 0)
+		goto err_cleanup;
+	reply_len = ret + ethnl_reply_header_size();
+	ret = -ENOMEM;
+	rskb = ethnl_reply_init(reply_len, req_info->dev, ops->reply_cmd,
+				ops->hdr_attr, info, &reply_payload);
+	if (!rskb)
+		goto err_cleanup;
+	ret = ops->fill_reply(rskb, req_info, reply_data);
+	if (ret < 0)
+		goto err_msg;
+	if (ops->cleanup_data)
+		ops->cleanup_data(reply_data);
+
+	genlmsg_end(rskb, reply_payload);
+	if (req_info->dev)
+		dev_put(req_info->dev);
+	kfree(reply_data);
+	kfree(req_info);
+	return genlmsg_reply(rskb, info);
+
+err_msg:
+	WARN_ONCE(ret == -EMSGSIZE, "calculated message payload length (%d) not sufficient\n", reply_len);
+	nlmsg_free(rskb);
+err_cleanup:
+	if (ops->cleanup_data)
+		ops->cleanup_data(reply_data);
+err_dev:
+	if (req_info->dev)
+		dev_put(req_info->dev);
+	kfree(reply_data);
+	kfree(req_info);
+	return ret;
+}
+
+static int ethnl_default_dump_one(struct sk_buff *skb, struct net_device *dev,
+				  const struct ethnl_dump_ctx *ctx,
+				  struct netlink_callback *cb)
+{
+	void *ehdr;
+	int ret;
+
+	ehdr = genlmsg_put(skb, NETLINK_CB(cb->skb).portid, cb->nlh->nlmsg_seq,
+			   &ethtool_genl_family, NLM_F_MULTI,
+			   ctx->ops->reply_cmd);
+	if (!ehdr)
+		return -EMSGSIZE;
+
+	ethnl_init_reply_data(ctx->reply_data, ctx->ops, dev);
+	rtnl_lock();
+	ret = ctx->ops->prepare_data(ctx->req_info, ctx->reply_data, NULL);
+	rtnl_unlock();
+	if (ret < 0)
+		goto out;
+	ret = ethnl_fill_reply_header(skb, dev, ctx->ops->hdr_attr);
+	if (ret < 0)
+		goto out;
+	ret = ctx->ops->fill_reply(skb, ctx->req_info, ctx->reply_data);
+
+out:
+	if (ctx->ops->cleanup_data)
+		ctx->ops->cleanup_data(ctx->reply_data);
+	ctx->reply_data->dev = NULL;
+	if (ret < 0)
+		genlmsg_cancel(skb, ehdr);
+	else
+		genlmsg_end(skb, ehdr);
+	return ret;
+}
+
+/* Default ->dumpit() handler for GET requests. Device iteration copied from
+ * rtnl_dump_ifinfo(); we have to be more careful about device hashtable
+ * persistence as we cannot guarantee to hold RTNL lock through the whole
+ * function as rtnetnlink does.
+ */
+static int ethnl_default_dumpit(struct sk_buff *skb,
+				struct netlink_callback *cb)
+{
+	struct ethnl_dump_ctx *ctx = ethnl_dump_context(cb);
+	struct net *net = sock_net(skb->sk);
+	int s_idx = ctx->pos_idx;
+	int h, idx = 0;
+	int ret = 0;
+
+	rtnl_lock();
+	for (h = ctx->pos_hash; h < NETDEV_HASHENTRIES; h++, s_idx = 0) {
+		struct hlist_head *head;
+		struct net_device *dev;
+		unsigned int seq;
+
+		head = &net->dev_index_head[h];
+
+restart_chain:
+		seq = net->dev_base_seq;
+		cb->seq = seq;
+		idx = 0;
+		hlist_for_each_entry(dev, head, index_hlist) {
+			if (idx < s_idx)
+				goto cont;
+			dev_hold(dev);
+			rtnl_unlock();
+
+			ret = ethnl_default_dump_one(skb, dev, ctx, cb);
+			dev_put(dev);
+			if (ret < 0) {
+				if (ret == -EOPNOTSUPP)
+					goto lock_and_cont;
+				if (likely(skb->len))
+					ret = skb->len;
+				goto out;
+			}
+lock_and_cont:
+			rtnl_lock();
+			if (net->dev_base_seq != seq) {
+				s_idx = idx + 1;
+				goto restart_chain;
+			}
+cont:
+			idx++;
+		}
+
+	}
+	rtnl_unlock();
+
+out:
+	ctx->pos_hash = h;
+	ctx->pos_idx = idx;
+	nl_dump_check_consistent(cb, nlmsg_hdr(skb));
+
+	return ret;
+}
+
+/**
+ * struct genl_info - info that is available during dumpit op call
+ * @family: generic netlink family - for internal genl code usage
+ * @ops: generic netlink ops - for internal genl code usage
+ * @attrs: netlink attributes
+ */
+struct genl_dumpit_info {
+	const struct genl_family *family;
+	struct genl_ops op;
+	struct nlattr **attrs;
+};
+
+/* generic ->start() handler for GET requests */
+static int ethnl_default_start(struct netlink_callback *cb)
+{
+	const struct genl_dumpit_info *info = cb->data;
+	struct ethnl_dump_ctx *ctx = ethnl_dump_context(cb);
+	struct ethnl_reply_data *reply_data;
+	const struct ethnl_request_ops *ops;
+	struct ethnl_req_info *req_info;
+	struct genlmsghdr *ghdr;
+	int ret;
+
+	BUILD_BUG_ON(sizeof(*ctx) > sizeof(cb->ctx));
+
+	ghdr = nlmsg_data(cb->nlh);
+	ops = ethnl_default_requests[ghdr->cmd];
+	if (WARN_ONCE(!ops, "cmd %u has no ethnl_request_ops\n", ghdr->cmd))
+		return -EOPNOTSUPP;
+	req_info = kzalloc(ops->req_info_size, GFP_KERNEL);
+	if (!req_info)
+		return -ENOMEM;
+	reply_data = kmalloc(ops->reply_data_size, GFP_KERNEL);
+	if (!reply_data) {
+		ret = -ENOMEM;
+		goto free_req_info;
+	}
+
+	ret = ethnl_default_parse(req_info, info->attrs, sock_net(cb->skb->sk),
+				  ops, cb->extack, false);
+	if (req_info->dev) {
+		/* We ignore device specification in dump requests but as the
+		 * same parser as for non-dump (doit) requests is used, it
+		 * would take reference to the device if it finds one
+		 */
+		dev_put(req_info->dev);
+		req_info->dev = NULL;
+	}
+	if (ret < 0)
+		goto free_reply_data;
+
+	ctx->ops = ops;
+	ctx->req_info = req_info;
+	ctx->reply_data = reply_data;
+	ctx->pos_hash = 0;
+	ctx->pos_idx = 0;
+
+	return 0;
+
+free_reply_data:
+	kfree(reply_data);
+free_req_info:
+	kfree(req_info);
+
+	return ret;
+}
+
+/* default ->done() handler for GET requests */
+static int ethnl_default_done(struct netlink_callback *cb)
+{
+	struct ethnl_dump_ctx *ctx = ethnl_dump_context(cb);
+
+	kfree(ctx->reply_data);
+	kfree(ctx->req_info);
+
+	return 0;
+}
+
+/* genetlink setup */
+static const struct genl_ops ethtool_genl_ops[] = {
+	{
+		.cmd	= ETHTOOL_MSG_MODULE_EEPROM_GET,
+		.flags  = GENL_UNS_ADMIN_PERM,
+		.doit	= ethnl_default_doit,
+		.start	= ethnl_default_start,
+		.dumpit	= ethnl_default_dumpit,
+		.done	= ethnl_default_done,
+	},
+};
+
+static const struct genl_multicast_group ethtool_nl_mcgrps[] = {
+	[ETHNL_MCGRP_MONITOR] = { .name = ETHTOOL_MCGRP_MONITOR_NAME },
+};
+
+static struct genl_family ethtool_genl_family __ro_after_init = {
+	.name		= ETHTOOL_GENL_NAME,
+	.version	= ETHTOOL_GENL_VERSION,
+	.policy = ethnl_module_eeprom_get_policy,
+	.maxattr = ARRAY_SIZE(ethnl_module_eeprom_get_policy) - 1,
+	.netnsok	= true,
+	.parallel_ops	= true,
+	.ops		= ethtool_genl_ops,
+	.n_ops		= ARRAY_SIZE(ethtool_genl_ops),
+	.mcgrps		= ethtool_nl_mcgrps,
+	.n_mcgrps	= ARRAY_SIZE(ethtool_nl_mcgrps),
+	.module = THIS_MODULE,
+};
+
+/* module setup */
+
+static int __init ethnl_init(void)
+{
+	int ret;
+
+	ret = genl_register_family(&ethtool_genl_family);
+	if (WARN(ret < 0, "ethtool: genetlink family registration failed"))
+		return ret;
+
+	return ret;
+}
+
+subsys_initcall(ethnl_init);

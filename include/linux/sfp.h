@@ -506,6 +506,9 @@ phy_interface_t sfp_select_interface(struct sfp_bus *bus,
 int sfp_get_module_info(struct sfp_bus *bus, struct ethtool_modinfo *modinfo);
 int sfp_get_module_eeprom(struct sfp_bus *bus, struct ethtool_eeprom *ee,
 			  u8 *data);
+int sfp_get_module_eeprom_by_page(struct sfp_bus *bus,
+                 const struct ethtool_module_eeprom *page,
+                 struct netlink_ext_ack *extack);
 void sfp_upstream_start(struct sfp_bus *bus);
 void sfp_upstream_stop(struct sfp_bus *bus);
 struct sfp_bus *sfp_register_upstream(struct fwnode_handle *fwnode,
@@ -543,6 +546,13 @@ static inline int sfp_get_module_eeprom(struct sfp_bus *bus,
 					struct ethtool_eeprom *ee, u8 *data)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline int sfp_get_module_eeprom_by_page(struct sfp_bus *bus,
+                       const struct ethtool_module_eeprom *page,
+                       struct netlink_ext_ack *extack)
+{
+   return -EOPNOTSUPP;
 }
 
 static inline void sfp_upstream_start(struct sfp_bus *bus)

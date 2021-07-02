@@ -2190,7 +2190,7 @@ static int ethtool_get_ts_info(struct net_device *dev, void __user *useraddr)
 	return err;
 }
 
-static int __ethtool_get_module_info(struct net_device *dev,
+int ethtool_get_module_info_call(struct net_device *dev,
 				     struct ethtool_modinfo *modinfo)
 {
 	const struct ethtool_ops *ops = dev->ethtool_ops;
@@ -2217,7 +2217,7 @@ static int ethtool_get_module_info(struct net_device *dev,
 	if (copy_from_user(&modinfo, useraddr, sizeof(modinfo)))
 		return -EFAULT;
 
-	ret = __ethtool_get_module_info(dev, &modinfo);
+	ret = ethtool_get_module_info_call(dev, &modinfo);
 	if (ret)
 		return ret;
 
@@ -2227,7 +2227,7 @@ static int ethtool_get_module_info(struct net_device *dev,
 	return 0;
 }
 
-static int __ethtool_get_module_eeprom(struct net_device *dev,
+int ethtool_get_module_eeprom_call(struct net_device *dev,
 				       struct ethtool_eeprom *ee, u8 *data)
 {
 	const struct ethtool_ops *ops = dev->ethtool_ops;
@@ -2251,12 +2251,12 @@ static int ethtool_get_module_eeprom(struct net_device *dev,
 	int ret;
 	struct ethtool_modinfo modinfo;
 
-	ret = __ethtool_get_module_info(dev, &modinfo);
+	ret = ethtool_get_module_info_call(dev, &modinfo);
 	if (ret)
 		return ret;
 
 	return ethtool_get_any_eeprom(dev, useraddr,
-				      __ethtool_get_module_eeprom,
+				      ethtool_get_module_eeprom_call,
 				      modinfo.eeprom_len);
 }
 

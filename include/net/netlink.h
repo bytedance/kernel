@@ -375,6 +375,12 @@ struct nla_policy {
 	.len = __VA_ARGS__ + 0,				\
 }
 
+#define __NLA_IS_UINT_TYPE(tp)						\
+	(tp == NLA_U8 || tp == NLA_U16 || tp == NLA_U32 || tp == NLA_U64)
+
+#define NLA_ENSURE_UINT_TYPE(tp)			\
+	(__NLA_ENSURE(__NLA_IS_UINT_TYPE(tp)) + tp)
+
 /**
  * struct nl_info - netlink source information
  * @nlh: Netlink message header of original request
