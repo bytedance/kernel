@@ -1,0 +1,5 @@
+variables:
+  TAG_PATTERN: v5.4.*-*-velinux*
+  BaseBranch: lkk-5.4.71-velinux 
+
+include: 'https://sysrepo.byted.org/kernel-ci/kernel-ci/raw/master/gitlab-ci.yml'
