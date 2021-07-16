@@ -1147,6 +1147,7 @@ static void vq_release(struct kobject *kobj)
 	struct vduse_virtqueue *vq = container_of(kobj,
 					struct vduse_virtqueue, kobj);
 
+	flush_work(&vq->inject);
 	vringh_kiov_cleanup(&vq->out_iov);
 	vringh_kiov_cleanup(&vq->in_iov);
 	kfree(vq);
@@ -1499,6 +1500,7 @@ static void vduse_release_dev(struct device *device)
 	struct vduse_dev *dev =
 		container_of(device, struct vduse_dev, dev);
 
+	flush_work(&dev->inject);
 	ida_simple_remove(&vduse_ida, dev->minor);
 	vduse_dev_deinit_vqs(dev);
 	vduse_domain_destroy(dev->domain);
