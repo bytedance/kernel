@@ -67,10 +67,12 @@ static int virtio_fs_enqueue_req(struct virtio_fs_vq *fsvq,
 
 enum {
 	OPT_DEFAULT_PERMISSIONS,
+	OPT_DELETE_STALE,
 };
 
 static const struct fs_parameter_spec virtio_fs_param_specs[] = {
 	fsparam_flag_no	("default_permissions",	OPT_DEFAULT_PERMISSIONS),
+	fsparam_flag_no	("delete_stale",	OPT_DELETE_STALE),
 	{}
 };
 
@@ -93,6 +95,9 @@ static int virtio_fs_parse_param(struct fs_context *fc,
 	switch (opt) {
 	case OPT_DEFAULT_PERMISSIONS:
 		ctx->default_permissions = !result.negated;
+		break;
+	case OPT_DELETE_STALE:
+		ctx->delete_stale = !result.negated;
 		break;
 	default:
 		return -EINVAL;
@@ -1241,6 +1246,7 @@ static int virtio_fs_get_tree(struct fs_context *fsc)
 	struct super_block *sb;
 	struct fuse_conn *fc;
 	int err;
+	struct fuse_fs_context *ctx = fsc->fs_private;
 
 	/* This gets a reference on virtio_fs object. This ptr gets installed
 	 * in fc->iq->priv. Once fuse_conn is going away, it calls ->put()
@@ -1262,7 +1268,7 @@ static int virtio_fs_get_tree(struct fs_context *fsc)
 
 	fuse_conn_init(fc, fsc->user_ns, &virtio_fs_fiq_ops, fs);
 	fc->release = fuse_free_conn;
-	fc->delete_stale = true;
+	fc->delete_stale = ctx->delete_stale;
 
 	fsc->s_fs_info = fc;
 	sb = sget_fc(fsc, virtio_fs_test_super, virtio_fs_set_super);
@@ -1302,6 +1308,7 @@ static int virtio_fs_init_fs_context(struct fs_context *fsc)
 		return -ENOMEM;
 
 	ctx->default_permissions = true;
+	ctx->delete_stale = true;
 
 	fsc->fs_private = ctx;
 	fsc->ops = &virtio_fs_context_ops;
