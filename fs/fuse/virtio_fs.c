@@ -68,11 +68,13 @@ static int virtio_fs_enqueue_req(struct virtio_fs_vq *fsvq,
 enum {
 	OPT_DEFAULT_PERMISSIONS,
 	OPT_DELETE_STALE,
+	OPT_FORCE_UMOUNT,
 };
 
 static const struct fs_parameter_spec virtio_fs_param_specs[] = {
 	fsparam_flag_no	("default_permissions",	OPT_DEFAULT_PERMISSIONS),
 	fsparam_flag_no	("delete_stale",	OPT_DELETE_STALE),
+	fsparam_flag	("force_umount",	OPT_FORCE_UMOUNT),
 	{}
 };
 
@@ -98,6 +100,9 @@ static int virtio_fs_parse_param(struct fs_context *fc,
 		break;
 	case OPT_DELETE_STALE:
 		ctx->delete_stale = !result.negated;
+		break;
+	case OPT_FORCE_UMOUNT:
+		ctx->no_force_umount = false;
 		break;
 	default:
 		return -EINVAL;
@@ -1127,7 +1132,6 @@ static inline void virtio_fs_ctx_set_defaults(struct fuse_fs_context *ctx)
 	ctx->blksize = 512;
 	ctx->destroy = true;
 	ctx->no_control = true;
-	ctx->no_force_umount = true;
 }
 
 static int virtio_fs_fill_super(struct super_block *sb, struct fs_context *fsc)
@@ -1309,6 +1313,7 @@ static int virtio_fs_init_fs_context(struct fs_context *fsc)
 
 	ctx->default_permissions = true;
 	ctx->delete_stale = true;
+	ctx->no_force_umount = true;
 
 	fsc->fs_private = ctx;
 	fsc->ops = &virtio_fs_context_ops;

@@ -589,6 +589,8 @@ static int fuse_show_options(struct seq_file *m, struct dentry *root)
 		seq_printf(m, ",blksize=%lu", sb->s_blocksize);
 	if (fc->delete_stale)
 		seq_puts(m, ",delete_stale");
+	if (!fc->no_force_umount)
+		seq_puts(m, ",force_umount");
 	return 0;
 }
 
