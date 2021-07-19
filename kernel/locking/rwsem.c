@@ -28,9 +28,6 @@
 #include <linux/rwsem.h>
 #include <linux/atomic.h>
 
-#define CREATE_TRACE_POINTS
-#include <trace/events/rwsem.h>
-
 #include "rwsem.h"
 #include "lock_events.h"
 
@@ -1535,9 +1532,7 @@ void __sched down_write(struct rw_semaphore *sem)
 {
 	might_sleep();
 	rwsem_acquire(&sem->dep_map, 0, 0, _RET_IP_);
-	trace_rwsem_write_acquire(sem, _RET_IP_);
 	LOCK_CONTENDED(sem, __down_write_trylock, __down_write);
-	trace_rwsem_write_acquired(sem, _RET_IP_);
 }
 EXPORT_SYMBOL(down_write);
 
@@ -1548,15 +1543,12 @@ int __sched down_write_killable(struct rw_semaphore *sem)
 {
 	might_sleep();
 	rwsem_acquire(&sem->dep_map, 0, 0, _RET_IP_);
-	trace_rwsem_write_acquire(sem, _RET_IP_);
 
 	if (LOCK_CONTENDED_RETURN(sem, __down_write_trylock,
 				  __down_write_killable)) {
 		rwsem_release(&sem->dep_map, 1, _RET_IP_);
-		trace_rwsem_write_release(sem, _RET_IP_);
 		return -EINTR;
 	}
-	trace_rwsem_write_acquired(sem, _RET_IP_);
 
 	return 0;
 }
@@ -1569,10 +1561,8 @@ int down_write_trylock(struct rw_semaphore *sem)
 {
 	int ret = __down_write_trylock(sem);
 
-	if (ret == 1) {
+	if (ret == 1)
 		rwsem_acquire(&sem->dep_map, 0, 1, _RET_IP_);
-		trace_rwsem_write_acquire(sem, _RET_IP_);
-	}
 
 	return ret;
 }
@@ -1594,7 +1584,6 @@ EXPORT_SYMBOL(up_read);
 void up_write(struct rw_semaphore *sem)
 {
 	rwsem_release(&sem->dep_map, 1, _RET_IP_);
-	trace_rwsem_write_release(sem, _RET_IP_);
 	__up_write(sem);
 }
 EXPORT_SYMBOL(up_write);
@@ -1605,7 +1594,6 @@ EXPORT_SYMBOL(up_write);
 void downgrade_write(struct rw_semaphore *sem)
 {
 	lock_downgrade(&sem->dep_map, _RET_IP_);
-	trace_rwsem_write_downgrade(sem, _RET_IP_);
 	__downgrade_write(sem);
 }
 EXPORT_SYMBOL(downgrade_write);
