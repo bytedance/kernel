@@ -71,6 +71,8 @@
 #define IVHD_FLAG_ISOC_EN_MASK          0x08
 
 #define IVMD_FLAG_EXCL_RANGE            0x08
+#define IVMD_FLAG_IW                    0x04
+#define IVMD_FLAG_IR                    0x02
 #define IVMD_FLAG_UNITY_MAP             0x01
 
 #define ACPI_DEVFLAG_INITPASS           0x01
@@ -714,7 +716,7 @@ static void iommu_enable_ppr_log(struct amd_iommu *iommu)
 	writel(0x00, iommu->mmio_base + MMIO_PPR_HEAD_OFFSET);
 	writel(0x00, iommu->mmio_base + MMIO_PPR_TAIL_OFFSET);
 
-	iommu_feature_enable(iommu, CONTROL_PPFLOG_EN);
+	iommu_feature_enable(iommu, CONTROL_PPRLOG_EN);
 	iommu_feature_enable(iommu, CONTROL_PPR_EN);
 }
 
@@ -1108,29 +1110,6 @@ static int __init add_early_maps(void)
 	}
 
 	return 0;
-}
-
-/*
- * Reads the device exclusion range from ACPI and initializes the IOMMU with
- * it
- */
-static void __init set_device_exclusion_range(u16 devid, struct ivmd_header *m)
-{
-	struct amd_iommu *iommu = amd_iommu_rlookup_table[devid];
-
-	if (!(m->flags & IVMD_FLAG_EXCL_RANGE))
-		return;
-
-	if (iommu) {
-		/*
-		 * We only can configure exclusion ranges per IOMMU, not
-		 * per device. But we can enable the exclusion range per
-		 * device. This is done here
-		 */
-		set_dev_entry_bit(devid, DEV_ENTRY_EX);
-		iommu->exclusion_start = m->range_start;
-		iommu->exclusion_length = m->range_length;
-	}
 }
 
 /*
@@ -1750,7 +1729,6 @@ static const struct attribute_group *amd_iommu_groups[] = {
 static int __init iommu_init_pci(struct amd_iommu *iommu)
 {
 	int cap_ptr = iommu->cap_ptr;
-	u32 range, misc, low, high;
 	int ret;
 
 	iommu->dev = pci_get_domain_bus_and_slot(0, PCI_BUS_NUM(iommu->devid),
@@ -1763,19 +1741,12 @@ static int __init iommu_init_pci(struct amd_iommu *iommu)
 
 	pci_read_config_dword(iommu->dev, cap_ptr + MMIO_CAP_HDR_OFFSET,
 			      &iommu->cap);
-	pci_read_config_dword(iommu->dev, cap_ptr + MMIO_RANGE_OFFSET,
-			      &range);
-	pci_read_config_dword(iommu->dev, cap_ptr + MMIO_MISC_OFFSET,
-			      &misc);
 
 	if (!(iommu->cap & (1 << IOMMU_CAP_IOTLB)))
 		amd_iommu_iotlb_sup = false;
 
 	/* read extended feature bits */
-	low  = readl(iommu->mmio_base + MMIO_EXT_FEATURES);
-	high = readl(iommu->mmio_base + MMIO_EXT_FEATURES + 4);
-
-	iommu->features = ((u64)high << 32) | low;
+	iommu->features = readq(iommu->mmio_base + MMIO_EXT_FEATURES);
 
 	if (iommu_feature(iommu, FEATURE_GT)) {
 		int glxval;
@@ -2067,7 +2038,7 @@ enable_faults:
 	iommu_feature_enable(iommu, CONTROL_EVT_INT_EN);
 
 	if (iommu->ppr_log != NULL)
-		iommu_feature_enable(iommu, CONTROL_PPFINT_EN);
+		iommu_feature_enable(iommu, CONTROL_PPRINT_EN);
 
 	iommu_ga_log_enable(iommu);
 
@@ -2092,30 +2063,6 @@ static void __init free_unity_maps(void)
 	}
 }
 
-/* called when we find an exclusion range definition in ACPI */
-static int __init init_exclusion_range(struct ivmd_header *m)
-{
-	int i;
-
-	switch (m->type) {
-	case ACPI_IVMD_TYPE:
-		set_device_exclusion_range(m->devid, m);
-		break;
-	case ACPI_IVMD_TYPE_ALL:
-		for (i = 0; i <= amd_iommu_last_bdf; ++i)
-			set_device_exclusion_range(i, m);
-		break;
-	case ACPI_IVMD_TYPE_RANGE:
-		for (i = m->devid; i <= m->aux; ++i)
-			set_device_exclusion_range(i, m);
-		break;
-	default:
-		break;
-	}
-
-	return 0;
-}
-
 /* called for unity map ACPI definition */
 static int __init init_unity_map_range(struct ivmd_header *m)
 {
@@ -2125,9 +2072,6 @@ static int __init init_unity_map_range(struct ivmd_header *m)
 	e = kzalloc(sizeof(*e), GFP_KERNEL);
 	if (e == NULL)
 		return -ENOMEM;
-
-	if (m->flags & IVMD_FLAG_EXCL_RANGE)
-		init_exclusion_range(m);
 
 	switch (m->type) {
 	default:
@@ -2151,6 +2095,16 @@ static int __init init_unity_map_range(struct ivmd_header *m)
 	e->address_start = PAGE_ALIGN(m->range_start);
 	e->address_end = e->address_start + PAGE_ALIGN(m->range_length);
 	e->prot = m->flags >> 1;
+
+	/*
+	 * Treat per-device exclusion ranges as r/w unity-mapped regions
+	 * since some buggy BIOSes might lead to the overwritten exclusion
+	 * range (exclusion_start and exclusion_length members). This
+	 * happens when there are multiple exclusion ranges (IVMD entries)
+	 * defined in ACPI table.
+	 */
+	if (m->flags & IVMD_FLAG_EXCL_RANGE)
+		e->prot = (IVMD_FLAG_IW | IVMD_FLAG_IR) >> 1;
 
 	DUMP_printk("%s devid_start: %02x:%02x.%x devid_end: %02x:%02x.%x"
 		    " range_start: %016llx range_end: %016llx flags: %x\n", s,

@@ -26,6 +26,7 @@
 #include "cpuid.h"
 #include "pmu.h"
 #include "hyperv.h"
+#include "lapic.h"
 
 #include <linux/clocksource.h>
 #include <linux/interrupt.h>
@@ -2792,6 +2793,20 @@ int kvm_set_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case MSR_IA32_TSC:
 		kvm_write_tsc(vcpu, msr_info);
 		break;
+	case MSR_IA32_XSS:
+		if (!msr_info->host_initiated &&
+		    !guest_cpuid_has(vcpu, X86_FEATURE_XSAVES))
+			return 1;
+		/*
+		 * We do support PT if kvm_x86_ops->pt_supported(), but we do
+		 * not support IA32_XSS[bit 8]. Guests will have to use
+		 * RDMSR/WRMSR rather than XSAVES/XRSTORS to save/restore PT
+		 * MSRs.
+		 */
+		if (data != 0)
+			return 1;
+		vcpu->arch.ia32_xss = data;
+		break;
 	case MSR_SMI_COUNT:
 		if (!msr_info->host_initiated)
 			return 1;
@@ -3117,6 +3132,12 @@ int kvm_get_msr_common(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 	case MSR_IA32_MC0_CTL ... MSR_IA32_MCx_CTL(KVM_MAX_MCE_BANKS) - 1:
 		return get_msr_mce(vcpu, msr_info->index, &msr_info->data,
 				   msr_info->host_initiated);
+	case MSR_IA32_XSS:
+		if (!msr_info->host_initiated &&
+		    !guest_cpuid_has(vcpu, X86_FEATURE_XSAVES))
+			return 1;
+		msr_info->data = vcpu->arch.ia32_xss;
+		break;
 	case MSR_K7_CLK_CTL:
 		/*
 		 * Provide expected ramp-up count for K7. All other
@@ -7426,18 +7447,22 @@ static void kvm_pv_kick_cpu_op(struct kvm *kvm, unsigned long flags, int apicid)
 	kvm_irq_delivery_to_apic(kvm, NULL, &lapic_irq, NULL);
 }
 
-void kvm_vcpu_deactivate_apicv(struct kvm_vcpu *vcpu)
+bool kvm_apicv_activated(struct kvm *kvm)
 {
-	if (!lapic_in_kernel(vcpu)) {
-		WARN_ON_ONCE(vcpu->arch.apicv_active);
-		return;
-	}
-	if (!vcpu->arch.apicv_active)
-		return;
-
-	vcpu->arch.apicv_active = false;
-	kvm_x86_ops->refresh_apicv_exec_ctrl(vcpu);
+	return (READ_ONCE(kvm->arch.apicv_inhibit_reasons) == 0);
 }
+EXPORT_SYMBOL_GPL(kvm_apicv_activated);
+
+void kvm_apicv_init(struct kvm *kvm, bool enable)
+{
+	if (enable)
+		clear_bit(APICV_INHIBIT_REASON_DISABLE,
+			  &kvm->arch.apicv_inhibit_reasons);
+	else
+		set_bit(APICV_INHIBIT_REASON_DISABLE,
+			&kvm->arch.apicv_inhibit_reasons);
+}
+EXPORT_SYMBOL_GPL(kvm_apicv_init);
 
 static void kvm_sched_yield(struct kvm *kvm, unsigned long dest_id)
 {
@@ -7953,6 +7978,54 @@ void kvm_make_scan_ioapic_request(struct kvm *kvm)
 	kvm_make_all_cpus_request(kvm, KVM_REQ_SCAN_IOAPIC);
 }
 
+void kvm_vcpu_update_apicv(struct kvm_vcpu *vcpu)
+{
+	if (!lapic_in_kernel(vcpu))
+		return;
+
+	vcpu->arch.apicv_active = kvm_apicv_activated(vcpu->kvm);
+	kvm_apic_update_apicv(vcpu);
+	kvm_x86_ops->refresh_apicv_exec_ctrl(vcpu);
+}
+EXPORT_SYMBOL_GPL(kvm_vcpu_update_apicv);
+
+/*
+ * NOTE: Do not hold any lock prior to calling this.
+ *
+ * In particular, kvm_request_apicv_update() expects kvm->srcu not to be
+ * locked, because it calls __x86_set_memory_region() which does
+ * synchronize_srcu(&kvm->srcu).
+ */
+void kvm_request_apicv_update(struct kvm *kvm, bool activate, ulong bit)
+{
+	unsigned long old, new, expected;
+
+	if (!kvm_x86_ops->check_apicv_inhibit_reasons ||
+	    !kvm_x86_ops->check_apicv_inhibit_reasons(bit))
+		return;
+
+	old = READ_ONCE(kvm->arch.apicv_inhibit_reasons);
+	do {
+		expected = new = old;
+		if (activate)
+			__clear_bit(bit, &new);
+		else
+			__set_bit(bit, &new);
+		if (new == old)
+			break;
+		old = cmpxchg(&kvm->arch.apicv_inhibit_reasons, expected, new);
+	} while (old != expected);
+
+	if (!!old == !!new)
+		return;
+
+	trace_kvm_apicv_update_request(activate, bit);
+	if (kvm_x86_ops->pre_update_apicv_exec_ctrl)
+		kvm_x86_ops->pre_update_apicv_exec_ctrl(kvm, activate);
+	kvm_make_all_cpus_request(kvm, KVM_REQ_APICV_UPDATE);
+}
+EXPORT_SYMBOL_GPL(kvm_request_apicv_update);
+
 static void vcpu_scan_ioapic(struct kvm_vcpu *vcpu)
 {
 	if (!kvm_apic_present(vcpu))
@@ -8140,6 +8213,8 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 		 */
 		if (kvm_check_request(KVM_REQ_HV_STIMER, vcpu))
 			kvm_hv_process_stimers(vcpu);
+		if (kvm_check_request(KVM_REQ_APICV_UPDATE, vcpu))
+			kvm_vcpu_update_apicv(vcpu);
 	}
 
 	if (kvm_check_request(KVM_REQ_EVENT, vcpu) || req_int_win) {
@@ -9476,10 +9551,11 @@ int kvm_arch_vcpu_init(struct kvm_vcpu *vcpu)
 		goto fail_free_pio_data;
 
 	if (irqchip_in_kernel(vcpu->kvm)) {
-		vcpu->arch.apicv_active = kvm_x86_ops->get_enable_apicv(vcpu);
 		r = kvm_create_lapic(vcpu, lapic_timer_advance_ns);
 		if (r < 0)
 			goto fail_mmu_destroy;
+		if (kvm_apicv_activated(vcpu->kvm))
+			vcpu->arch.apicv_active = true;
 	} else
 		static_key_slow_inc(&kvm_no_apic_vcpu);
 
@@ -10371,6 +10447,31 @@ bool kvm_arch_no_poll(struct kvm_vcpu *vcpu)
 }
 EXPORT_SYMBOL_GPL(kvm_arch_no_poll);
 
+int kvm_spec_ctrl_test_value(u64 value)
+{
+	/*
+	 * test that setting IA32_SPEC_CTRL to given value
+	 * is allowed by the host processor
+	 */
+
+	u64 saved_value;
+	unsigned long flags;
+	int ret = 0;
+
+	local_irq_save(flags);
+
+	if (rdmsrl_safe(MSR_IA32_SPEC_CTRL, &saved_value))
+		ret = 1;
+	else if (wrmsrl_safe(MSR_IA32_SPEC_CTRL, value))
+		ret = 1;
+	else
+		wrmsrl(MSR_IA32_SPEC_CTRL, saved_value);
+
+	local_irq_restore(flags);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(kvm_spec_ctrl_test_value);
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_exit);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_fast_mmio);
@@ -10392,3 +10493,4 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_pml_full);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_pi_irte_update);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_unaccelerated_access);
 EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_avic_incomplete_ipi);
+EXPORT_TRACEPOINT_SYMBOL_GPL(kvm_apicv_update_request);
