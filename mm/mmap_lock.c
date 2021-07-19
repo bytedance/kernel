@@ -223,19 +223,19 @@ void trace_mmap_lock_unreg(void)
 
 void __mmap_lock_do_trace_start_locking(struct mm_struct *mm, bool write)
 {
-	TRACE_MMAP_LOCK_EVENT(start_locking, mm, write);
+	TRACE_MMAP_LOCK_EVENT(start_locking, mm, write, _RET_IP_);
 }
 EXPORT_SYMBOL(__mmap_lock_do_trace_start_locking);
 
 void __mmap_lock_do_trace_acquire_returned(struct mm_struct *mm, bool write,
 					   bool success)
 {
-	TRACE_MMAP_LOCK_EVENT(acquire_returned, mm, write, success);
+	TRACE_MMAP_LOCK_EVENT(acquire_returned, mm, write, _RET_IP_, success);
 }
 EXPORT_SYMBOL(__mmap_lock_do_trace_acquire_returned);
 
 void __mmap_lock_do_trace_released(struct mm_struct *mm, bool write)
 {
-	TRACE_MMAP_LOCK_EVENT(released, mm, write);
+	TRACE_MMAP_LOCK_EVENT(released, mm, write, _RET_IP_);
 }
 EXPORT_SYMBOL(__mmap_lock_do_trace_released);
