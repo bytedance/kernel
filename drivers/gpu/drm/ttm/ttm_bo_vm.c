@@ -60,7 +60,7 @@ static vm_fault_t ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 		goto out_clear;
 
 	/*
-	 * If possible, avoid waiting for GPU with mmap_sem
+	 * If possible, avoid waiting for GPU with mmap_lock
 	 * held.
 	 */
 	if (vmf->flags & FAULT_FLAG_ALLOW_RETRY) {
@@ -69,7 +69,7 @@ static vm_fault_t ttm_bo_vm_fault_idle(struct ttm_buffer_object *bo,
 			goto out_unlock;
 
 		ttm_bo_get(bo);
-		up_read(&vmf->vma->vm_mm->mmap_sem);
+		mmap_read_unlock(vmf->vma->vm_mm);
 		(void) dma_fence_wait(bo->moving, true);
 		dma_resv_unlock(bo->base.resv);
 		ttm_bo_put(bo);
@@ -127,7 +127,7 @@ static vm_fault_t ttm_bo_vm_fault(struct vm_fault *vmf)
 
 	/*
 	 * Work around locking order reversal in fault / nopfn
-	 * between mmap_sem and bo_reserve: Perform a trylock operation
+	 * between mmap_lock and bo_reserve: Perform a trylock operation
 	 * for reserve, and if it fails, retry the fault after waiting
 	 * for the buffer to become unreserved.
 	 */
@@ -135,7 +135,7 @@ static vm_fault_t ttm_bo_vm_fault(struct vm_fault *vmf)
 		if (vmf->flags & FAULT_FLAG_ALLOW_RETRY) {
 			if (!(vmf->flags & FAULT_FLAG_RETRY_NOWAIT)) {
 				ttm_bo_get(bo);
-				up_read(&vmf->vma->vm_mm->mmap_sem);
+				mmap_read_unlock(vmf->vma->vm_mm);
 				(void) ttm_bo_wait_unreserved(bo);
 				ttm_bo_put(bo);
 			}
@@ -145,7 +145,7 @@ static vm_fault_t ttm_bo_vm_fault(struct vm_fault *vmf)
 
 		/*
 		 * If we'd want to change locking order to
-		 * mmap_sem -> bo::reserve, we'd use a blocking reserve here
+		 * mmap_lock -> bo::reserve, we'd use a blocking reserve here
 		 * instead of retrying the fault...
 		 */
 		return VM_FAULT_NOPAGE;
@@ -223,7 +223,7 @@ static vm_fault_t ttm_bo_vm_fault(struct vm_fault *vmf)
 	/*
 	 * Make a local vma copy to modify the page_prot member
 	 * and vm_flags if necessary. The vma parameter is protected
-	 * by mmap_sem in write mode.
+	 * by mmap_lock in write mode.
 	 */
 	cvma = *vma;
 	cvma.vm_page_prot = vm_get_page_prot(cvma.vm_flags);

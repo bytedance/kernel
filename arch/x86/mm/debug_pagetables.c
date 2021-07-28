@@ -16,9 +16,9 @@ DEFINE_SHOW_ATTRIBUTE(ptdump);
 static int ptdump_curknl_show(struct seq_file *m, void *v)
 {
 	if (current->mm->pgd) {
-		down_read(&current->mm->mmap_sem);
+		mmap_read_lock(current->mm);
 		ptdump_walk_pgd_level_debugfs(m, current->mm->pgd, false);
-		up_read(&current->mm->mmap_sem);
+		mmap_read_unlock(current->mm);
 	}
 	return 0;
 }
@@ -29,9 +29,9 @@ DEFINE_SHOW_ATTRIBUTE(ptdump_curknl);
 static int ptdump_curusr_show(struct seq_file *m, void *v)
 {
 	if (current->mm->pgd) {
-		down_read(&current->mm->mmap_sem);
+		mmap_read_lock(current->mm);
 		ptdump_walk_pgd_level_debugfs(m, current->mm->pgd, true);
-		up_read(&current->mm->mmap_sem);
+		mmap_read_unlock(current->mm);
 	}
 	return 0;
 }

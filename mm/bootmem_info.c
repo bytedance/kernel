@@ -161,11 +161,11 @@ static int __init register_page_bootmem_memmap(unsigned long section_nr,
 		.pte_entry = bootmem_pte_entry,
 	};
 
-	down_read(&mm->mmap_sem);
+	mmap_read_lock(mm);
 	BUG_ON(walk_page_range_novma(mm, (unsigned long)memmap,
 				     (unsigned long)memmap_end,
 				     &ops, &section_nr));
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 
 	return 0;
 }

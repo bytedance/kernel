@@ -101,7 +101,7 @@ void do_page_fault(unsigned long address, struct pt_regs *regs)
 		flags |= FAULT_FLAG_WRITE;
 
 retry:
-	down_read(&mm->mmap_sem);
+	mmap_read_lock(mm);
 
 	vma = find_vma(mm, address);
 	if (!vma)
@@ -135,7 +135,7 @@ retry:
 		/*
 		 * If fault needs to be retried, handle any pending signals
 		 * first (by returning to user mode).
-		 * mmap_sem already relinquished by core mm for RETRY case
+		 * mmap_lock already relinquished by core mm for RETRY case
 		 */
 		if (fatal_signal_pending(current)) {
 			if (!user_mode(regs))
@@ -153,7 +153,7 @@ retry:
 	}
 
 bad_area:
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 
 	/*
 	 * Major/minor page fault accounting
