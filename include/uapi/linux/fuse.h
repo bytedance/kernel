@@ -343,6 +343,8 @@ struct fuse_file_lock {
 #define FUSE_EXPLICIT_INVAL_DATA (1 << 25)
 #define FUSE_MAP_ALIGNMENT	(1 << 26)
 
+#define FUSE_READDIR_PAGES	(1 << 31)
+
 /**
  * CUSE INIT request/reply flags
  *
@@ -700,7 +702,10 @@ struct fuse_init_out {
 	uint32_t	time_gran;
 	uint16_t	max_pages;
 	uint16_t	map_alignment;
-	uint32_t	unused[8];
+	uint32_t	unused[7];
+	uint16_t	unused2;
+	uint8_t		unused3;
+	uint8_t		readdir_pages;
 };
 
 #define CUSE_INIT_INFO_MAX 4096

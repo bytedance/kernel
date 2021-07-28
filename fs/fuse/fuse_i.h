@@ -36,7 +36,10 @@
 #define FUSE_DEFAULT_MAX_PAGES_PER_REQ 32
 
 /** Maximum of max_pages received in init_out */
-#define FUSE_MAX_MAX_PAGES 256
+#define FUSE_MAX_MAX_PAGES 4096
+
+/** Maximum of pages for readdir */
+#define FUSE_MAX_READDIR_PAGES 8
 
 /** Bias for fi->writectr, meaning new writepages must not be sent */
 #define FUSE_NOWRITE INT_MIN
@@ -485,6 +488,7 @@ struct fuse_fs_context {
 	bool no_control:1;
 	bool no_force_umount:1;
 	bool no_mount_options:1;
+	bool delete_stale:1;
 	unsigned int max_read;
 	unsigned int blksize;
 	const char *subtype;
@@ -532,6 +536,9 @@ struct fuse_conn {
 
 	/** Maxmum number of pages that can be used in a single request */
 	unsigned int max_pages;
+
+	/** Number of pages that used in readdir request */
+	unsigned int readdir_pages;
 
 	/** Input queue */
 	struct fuse_iqueue iq;

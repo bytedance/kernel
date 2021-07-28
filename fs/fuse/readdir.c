@@ -316,32 +316,48 @@ static int parse_dirplusfile(char *buf, size_t nbytes, struct file *file,
 
 static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 {
-	int plus;
+	int i, plus, npages;
 	ssize_t res;
-	struct page *page;
+	void *addr = NULL;
 	struct inode *inode = file_inode(file);
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_io_args ia = {};
 	struct fuse_args_pages *ap = &ia.ap;
-	struct fuse_page_desc desc = { .length = PAGE_SIZE };
 	u64 attr_version = 0;
 	bool locked;
 
-	page = alloc_page(GFP_KERNEL);
-	if (!page)
-		return -ENOMEM;
+	npages = fc->readdir_pages;
+	if (npages > 1)
+		addr = alloc_pages_exact(npages << PAGE_SHIFT,
+				GFP_NOWAIT | __GFP_NORETRY | __GFP_NOWARN);
 
+	if (!addr) {
+		npages = 1;
+		addr = alloc_pages_exact(PAGE_SIZE, GFP_KERNEL);
+		if (!addr)
+			return -ENOMEM;
+	}
+
+	res = -ENOMEM;
 	plus = fuse_use_readdirplus(inode, ctx);
 	ap->args.out_pages = 1;
-	ap->num_pages = 1;
-	ap->pages = &page;
-	ap->descs = &desc;
+	ap->num_pages = npages;
+	ap->pages = kzalloc(npages * (sizeof(struct page *) +
+			    sizeof(struct fuse_page_desc)), GFP_KERNEL);
+	if (!ap->pages)
+		goto out;
+
+	ap->descs = (void *)(ap->pages + npages);
+	for (i = 0; i < npages; i++) {
+		ap->pages[i] = virt_to_page(addr + PAGE_SIZE * i);
+		ap->descs[i].length = PAGE_SIZE;
+	}
 	if (plus) {
 		attr_version = fuse_get_attr_version(fc);
-		fuse_read_args_fill(&ia, file, ctx->pos, PAGE_SIZE,
+		fuse_read_args_fill(&ia, file, ctx->pos, npages << PAGE_SHIFT,
 				    FUSE_READDIRPLUS);
 	} else {
-		fuse_read_args_fill(&ia, file, ctx->pos, PAGE_SIZE,
+		fuse_read_args_fill(&ia, file, ctx->pos, npages << PAGE_SHIFT,
 				    FUSE_READDIR);
 	}
 	locked = fuse_lock_inode(inode);
@@ -354,16 +370,17 @@ static int fuse_readdir_uncached(struct file *file, struct dir_context *ctx)
 			if (ff->open_flags & FOPEN_CACHE_DIR)
 				fuse_readdir_cache_end(file, ctx->pos);
 		} else if (plus) {
-			res = parse_dirplusfile(page_address(page), res,
-						file, ctx, attr_version);
+			res = parse_dirplusfile(addr, res, file,
+						ctx, attr_version);
 		} else {
-			res = parse_dirfile(page_address(page), res, file,
-					    ctx);
+			res = parse_dirfile(addr, res, file, ctx);
 		}
 	}
 
-	__free_page(page);
 	fuse_invalidate_atime(inode);
+	kfree(ap->pages);
+out:
+	free_pages_exact(addr, npages << PAGE_SHIFT);
 	return res;
 }
 
