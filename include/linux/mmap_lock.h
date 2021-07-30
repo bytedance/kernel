@@ -9,7 +9,7 @@
 #include <linux/types.h>
 
 #define MMAP_LOCK_INITIALIZER(name) \
-	.mmap_lock = __RWSEM_INITIALIZER((name).mmap_lock),
+	.mmap_sem = __RWSEM_INITIALIZER((name).mmap_sem),
 
 DECLARE_TRACEPOINT(mmap_lock_start_locking);
 DECLARE_TRACEPOINT(mmap_lock_acquire_returned);
@@ -62,20 +62,20 @@ static inline void __mmap_lock_trace_released(struct mm_struct *mm, bool write)
 
 static inline void mmap_init_lock(struct mm_struct *mm)
 {
-	init_rwsem(&mm->mmap_lock);
+	init_rwsem(&mm->mmap_sem);
 }
 
 static inline void mmap_write_lock(struct mm_struct *mm)
 {
 	__mmap_lock_trace_start_locking(mm, true);
-	down_write(&mm->mmap_lock);
+	down_write(&mm->mmap_sem);
 	__mmap_lock_trace_acquire_returned(mm, true, true);
 }
 
 static inline void mmap_write_lock_nested(struct mm_struct *mm, int subclass)
 {
 	__mmap_lock_trace_start_locking(mm, true);
-	down_write_nested(&mm->mmap_lock, subclass);
+	down_write_nested(&mm->mmap_sem, subclass);
 	__mmap_lock_trace_acquire_returned(mm, true, true);
 }
 
@@ -84,7 +84,7 @@ static inline int mmap_write_lock_killable(struct mm_struct *mm)
 	int ret;
 
 	__mmap_lock_trace_start_locking(mm, true);
-	ret = down_write_killable(&mm->mmap_lock);
+	ret = down_write_killable(&mm->mmap_sem);
 	__mmap_lock_trace_acquire_returned(mm, true, ret == 0);
 	return ret;
 }
@@ -94,27 +94,27 @@ static inline bool mmap_write_trylock(struct mm_struct *mm)
 	bool ret;
 
 	__mmap_lock_trace_start_locking(mm, true);
-	ret = down_write_trylock(&mm->mmap_lock) != 0;
+	ret = down_write_trylock(&mm->mmap_sem) != 0;
 	__mmap_lock_trace_acquire_returned(mm, true, ret);
 	return ret;
 }
 
 static inline void mmap_write_unlock(struct mm_struct *mm)
 {
-	up_write(&mm->mmap_lock);
+	up_write(&mm->mmap_sem);
 	__mmap_lock_trace_released(mm, true);
 }
 
 static inline void mmap_write_downgrade(struct mm_struct *mm)
 {
-	downgrade_write(&mm->mmap_lock);
+	downgrade_write(&mm->mmap_sem);
 	__mmap_lock_trace_acquire_returned(mm, false, true);
 }
 
 static inline void mmap_read_lock(struct mm_struct *mm)
 {
 	__mmap_lock_trace_start_locking(mm, false);
-	down_read(&mm->mmap_lock);
+	down_read(&mm->mmap_sem);
 	__mmap_lock_trace_acquire_returned(mm, false, true);
 }
 
@@ -123,7 +123,7 @@ static inline int mmap_read_lock_killable(struct mm_struct *mm)
 	int ret;
 
 	__mmap_lock_trace_start_locking(mm, false);
-	ret = down_read_killable(&mm->mmap_lock);
+	ret = down_read_killable(&mm->mmap_sem);
 	__mmap_lock_trace_acquire_returned(mm, false, ret == 0);
 	return ret;
 }
@@ -133,21 +133,21 @@ static inline bool mmap_read_trylock(struct mm_struct *mm)
 	bool ret;
 
 	__mmap_lock_trace_start_locking(mm, false);
-	ret = down_read_trylock(&mm->mmap_lock) != 0;
+	ret = down_read_trylock(&mm->mmap_sem) != 0;
 	__mmap_lock_trace_acquire_returned(mm, false, ret);
 	return ret;
 }
 
 static inline void mmap_read_unlock(struct mm_struct *mm)
 {
-	up_read(&mm->mmap_lock);
+	up_read(&mm->mmap_sem);
 	__mmap_lock_trace_released(mm, false);
 }
 
 static inline bool mmap_read_trylock_non_owner(struct mm_struct *mm)
 {
 	if (mmap_read_trylock(mm)) {
-		rwsem_release(&mm->mmap_lock.dep_map, 1, _RET_IP_);
+		rwsem_release(&mm->mmap_sem.dep_map, 1, _RET_IP_);
 		return true;
 	}
 	return false;
@@ -155,20 +155,20 @@ static inline bool mmap_read_trylock_non_owner(struct mm_struct *mm)
 
 static inline void mmap_read_unlock_non_owner(struct mm_struct *mm)
 {
-	up_read_non_owner(&mm->mmap_lock);
+	up_read_non_owner(&mm->mmap_sem);
 	__mmap_lock_trace_released(mm, false);
 }
 
 static inline void mmap_assert_locked(struct mm_struct *mm)
 {
-	lockdep_assert_held(&mm->mmap_lock);
-	VM_BUG_ON_MM(!rwsem_is_locked(&mm->mmap_lock), mm);
+	lockdep_assert_held(&mm->mmap_sem);
+	VM_BUG_ON_MM(!rwsem_is_locked(&mm->mmap_sem), mm);
 }
 
 static inline void mmap_assert_write_locked(struct mm_struct *mm)
 {
-	lockdep_assert_held_write(&mm->mmap_lock);
-	VM_BUG_ON_MM(!rwsem_is_locked(&mm->mmap_lock), mm);
+	lockdep_assert_held_write(&mm->mmap_sem);
+	VM_BUG_ON_MM(!rwsem_is_locked(&mm->mmap_sem), mm);
 }
 
 #endif /* _LINUX_MMAP_LOCK_H */

@@ -1518,7 +1518,7 @@ static noinline void
 __do_page_fault(struct pt_regs *regs, unsigned long hw_error_code,
 		unsigned long address)
 {
-	prefetchw(&current->mm->mmap_lock);
+	prefetchw(&current->mm->mmap_sem);
 
 	if (unlikely(kmmio_fault(regs, address)))
 		return;
