@@ -320,7 +320,7 @@ static int allocate_bt(struct mm_struct *mm, long __user *bd_entry)
 	 * 'actual_old_val'.
 	 *
 	 * This can fault, but that's OK because we do not hold
-	 * mmap_lock at this point, unlike some of the other part
+	 * mmap_sem at this point, unlike some of the other part
 	 * of the MPX code that have to pagefault_disable().
 	 */
 	ret = mpx_cmpxchg_bd_entry(mm, &actual_old_val,	bd_entry,
@@ -756,7 +756,7 @@ static int unmap_entire_bt(struct mm_struct *mm,
 			return 0;
 		/*
 		 * Something messed with the bounds directory
-		 * entry.  We hold mmap_lock for read or write
+		 * entry.  We hold mmap_sem for read or write
 		 * here, so it could not be a _new_ bounds table
 		 * that someone just allocated.  Something is
 		 * wrong, so pass up the error and SIGSEGV.

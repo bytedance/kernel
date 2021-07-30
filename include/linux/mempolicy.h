@@ -31,7 +31,7 @@ struct mm_struct;
  * Locking policy for interlave:
  * In process context there is no locking because only the process accesses
  * its own state. All vma manipulation is somewhat protected by a down_read on
- * mmap_lock.
+ * mmap_sem.
  *
  * Freeing policy:
  * Mempolicy objects are reference counted.  A mempolicy will be freed when

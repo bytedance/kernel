@@ -227,7 +227,7 @@ The usage pattern is::
       /*
        * Just wait for range to be valid, safe to ignore return value as we
        * will use the return value of hmm_range_fault() below under the
-       * mmap_lock to ascertain the validity of the range.
+       * mmap_sem to ascertain the validity of the range.
        */
       hmm_range_wait_until_valid(&range, TIMEOUT_IN_MSEC);
 

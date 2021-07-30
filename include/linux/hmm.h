@@ -379,7 +379,7 @@ int hmm_range_register(struct hmm_range *range, struct hmm_mirror *mirror);
 void hmm_range_unregister(struct hmm_range *range);
 
 /*
- * Retry fault if non-blocking, drop mmap_lock and return -EAGAIN in that case.
+ * Retry fault if non-blocking, drop mmap_sem and return -EAGAIN in that case.
  */
 #define HMM_FAULT_ALLOW_RETRY		(1 << 0)
 

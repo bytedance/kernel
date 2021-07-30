@@ -108,18 +108,18 @@ Look at the current lock statistics::
   03                              class name    con-bounces    contentions   waittime-min   waittime-max waittime-total   waittime-avg    acq-bounces   acquisitions   holdtime-min   holdtime-max holdtime-total   holdtime-avg
   04-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   05
-  06                         &mm->mmap_lock-W:            46             84           0.26         939.10       16371.53         194.90          47291        2922365           0.16     2220301.69 17464026916.32        5975.99
-  07                         &mm->mmap_lock-R:            37            100           1.31      299502.61      325629.52        3256.30         212344       34316685           0.10        7744.91    95016910.20           2.77
+  06                         &mm->mmap_sem-W:            46             84           0.26         939.10       16371.53         194.90          47291        2922365           0.16     2220301.69 17464026916.32        5975.99
+  07                         &mm->mmap_sem-R:            37            100           1.31      299502.61      325629.52        3256.30         212344       34316685           0.10        7744.91    95016910.20           2.77
   08                         ---------------
-  09                           &mm->mmap_lock              1          [<ffffffff811502a7>] khugepaged_scan_mm_slot+0x57/0x280
-  10                           &mm->mmap_lock             96          [<ffffffff815351c4>] __do_page_fault+0x1d4/0x510
-  11                           &mm->mmap_lock             34          [<ffffffff81113d77>] vm_mmap_pgoff+0x87/0xd0
-  12                           &mm->mmap_lock             17          [<ffffffff81127e71>] vm_munmap+0x41/0x80
+  09                           &mm->mmap_sem              1          [<ffffffff811502a7>] khugepaged_scan_mm_slot+0x57/0x280
+  10                           &mm->mmap_sem             96          [<ffffffff815351c4>] __do_page_fault+0x1d4/0x510
+  11                           &mm->mmap_sem             34          [<ffffffff81113d77>] vm_mmap_pgoff+0x87/0xd0
+  12                           &mm->mmap_sem             17          [<ffffffff81127e71>] vm_munmap+0x41/0x80
   13                         ---------------
-  14                           &mm->mmap_lock              1          [<ffffffff81046fda>] dup_mmap+0x2a/0x3f0
-  15                           &mm->mmap_lock             60          [<ffffffff81129e29>] SyS_mprotect+0xe9/0x250
-  16                           &mm->mmap_lock             41          [<ffffffff815351c4>] __do_page_fault+0x1d4/0x510
-  17                           &mm->mmap_lock             68          [<ffffffff81113d77>] vm_mmap_pgoff+0x87/0xd0
+  14                           &mm->mmap_sem              1          [<ffffffff81046fda>] dup_mmap+0x2a/0x3f0
+  15                           &mm->mmap_sem             60          [<ffffffff81129e29>] SyS_mprotect+0xe9/0x250
+  16                           &mm->mmap_sem             41          [<ffffffff815351c4>] __do_page_fault+0x1d4/0x510
+  17                           &mm->mmap_sem             68          [<ffffffff81113d77>] vm_mmap_pgoff+0x87/0xd0
   18
   19.............................................................................................................................................................................................................................
   20

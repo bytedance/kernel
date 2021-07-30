@@ -135,7 +135,7 @@ retry:
 		/*
 		 * If fault needs to be retried, handle any pending signals
 		 * first (by returning to user mode).
-		 * mmap_lock already relinquished by core mm for RETRY case
+		 * mmap_sem already relinquished by core mm for RETRY case
 		 */
 		if (fatal_signal_pending(current)) {
 			if (!user_mode(regs))

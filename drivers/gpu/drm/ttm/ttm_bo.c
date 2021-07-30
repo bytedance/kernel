@@ -1983,7 +1983,7 @@ int ttm_bo_wait_unreserved(struct ttm_buffer_object *bo)
 	 * Use the bo::wu_mutex to avoid triggering livelocks due to
 	 * concurrent use of this function. Note that this use of
 	 * bo::wu_mutex can go away if we change locking order to
-	 * mmap_lock -> bo::reserve.
+	 * mmap_sem -> bo::reserve.
 	 */
 	ret = mutex_lock_interruptible(&bo->wu_mutex);
 	if (unlikely(ret != 0))
