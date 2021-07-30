@@ -1426,7 +1426,7 @@ static void retract_page_tables(struct address_space *mapping, pgoff_t pgoff)
 		/*
 		 * Check vma->anon_vma to exclude MAP_PRIVATE mappings that
 		 * got written to. These VMAs are likely not worth investing
-		 * mmap_write_lock(mm) as PMD-mapping is likely to be split
+		 * down_write(mmap_sem) as PMD-mapping is likely to be split
 		 * later.
 		 *
 		 * Not that vma->anon_vma check is racy: it can be set up after

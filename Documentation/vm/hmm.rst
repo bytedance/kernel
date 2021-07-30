@@ -232,10 +232,10 @@ The usage pattern is::
       hmm_range_wait_until_valid(&range, TIMEOUT_IN_MSEC);
 
  again:
-      mmap_read_lock(mm);
+      down_read(&mm->mmap_sem);
       ret = hmm_range_fault(&range, HMM_RANGE_SNAPSHOT);
       if (ret) {
-          mmap_read_unlock(mm);
+          up_read(&mm->mmap_sem);
           if (ret == -EBUSY) {
             /*
              * No need to check hmm_range_wait_until_valid() return value
@@ -250,7 +250,7 @@ The usage pattern is::
       take_lock(driver->update);
       if (!hmm_range_valid(&range)) {
           release_lock(driver->update);
-          mmap_read_unlock(mm);
+          up_read(&mm->mmap_sem);
           goto again;
       }
 
@@ -258,7 +258,7 @@ The usage pattern is::
 
       hmm_range_unregister(&range);
       release_lock(driver->update);
-      mmap_read_unlock(mm);
+      up_read(&mm->mmap_sem);
       return 0;
  }
 

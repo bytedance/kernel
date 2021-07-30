@@ -1812,7 +1812,7 @@ int tcp_mmap(struct file *file, struct socket *sock,
 		return -EPERM;
 	vma->vm_flags &= ~(VM_MAYWRITE | VM_MAYEXEC);
 
-	/* Instruct vm_insert_page() to not mmap_read_lock(mm) */
+	/* Instruct vm_insert_page() to not down_read(mmap_sem) */
 	vma->vm_flags |= VM_MIXEDMAP;
 
 	vma->vm_ops = &tcp_vm_ops;

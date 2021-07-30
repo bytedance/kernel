@@ -1635,19 +1635,19 @@ EXPORT_SYMBOL(get_user_pages);
  *
  * get_user_pages_locked() is suitable to replace the form:
  *
- *      mmap_read_lock(mm);
+ *      down_read(&mm->mmap_sem);
  *      do_something()
  *      get_user_pages(tsk, mm, ..., pages, NULL);
- *      mmap_read_unlock(mm);
+ *      up_read(&mm->mmap_sem);
  *
  *  to:
  *
  *      int locked = 1;
- *      mmap_read_lock(mm);
+ *      down_read(&mm->mmap_sem);
  *      do_something()
  *      get_user_pages_locked(tsk, mm, ..., pages, &locked);
  *      if (locked)
- *          mmap_read_unlock(mm);
+ *          up_read(&mm->mmap_sem);
  */
 long get_user_pages_locked(unsigned long start, unsigned long nr_pages,
 			   unsigned int gup_flags, struct page **pages,
@@ -1671,9 +1671,9 @@ EXPORT_SYMBOL(get_user_pages_locked);
 /*
  * get_user_pages_unlocked() is suitable to replace the form:
  *
- *      mmap_read_lock(mm);
+ *      down_read(&mm->mmap_sem);
  *      get_user_pages(tsk, mm, ..., pages, NULL);
- *      mmap_read_unlock(mm);
+ *      up_read(&mm->mmap_sem);
  *
  *  with:
  *
