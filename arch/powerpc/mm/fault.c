@@ -495,9 +495,9 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 					       get_mm_addr_key(mm, address));
 
 	/*
-	 * We want to do this outside mmap_lock, because reading code around nip
+	 * We want to do this outside mmap_sem, because reading code around nip
 	 * can result in fault, which will cause a deadlock when called with
-	 * mmap_lock held
+	 * mmap_sem held
 	 */
 	if (is_user)
 		flags |= FAULT_FLAG_USER;
@@ -509,7 +509,7 @@ static int __do_page_fault(struct pt_regs *regs, unsigned long address,
 	/* When running in the kernel we expect faults to occur only to
 	 * addresses in user space.  All other faults represent errors in the
 	 * kernel and should generate an OOPS.  Unfortunately, in the case of an
-	 * erroneous fault occurring in a code path which already holds mmap_lock
+	 * erroneous fault occurring in a code path which already holds mmap_sem
 	 * we will deadlock attempting to validate the fault against the
 	 * address space.  Luckily the kernel only validly references user
 	 * space from well defined areas of code, which are listed in the
@@ -590,7 +590,7 @@ good_area:
 	major |= fault & VM_FAULT_MAJOR;
 
 	/*
-	 * Handle the retry right now, the mmap_lock has been released in that
+	 * Handle the retry right now, the mmap_sem has been released in that
 	 * case.
 	 */
 	if (unlikely(fault & VM_FAULT_RETRY)) {

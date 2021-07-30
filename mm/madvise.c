@@ -39,7 +39,7 @@ struct madvise_walk_private {
 
 /*
  * Any behaviour which results in changes to the vma->vm_flags needs to
- * take mmap_lock for writing. Others, which simply traverse vmas, need
+ * take mmap_sem for writing. Others, which simply traverse vmas, need
  * to only take it for reading.
  */
 static int madvise_need_mmap_write(int behavior)
@@ -164,7 +164,7 @@ static long madvise_behavior(struct vm_area_struct *vma,
 
 success:
 	/*
-	 * vm_flags is protected by the mmap_lock held in write mode.
+	 * vm_flags is protected by the mmap_sem held in write mode.
 	 */
 	vma->vm_flags = new_flags;
 
@@ -284,9 +284,9 @@ static long madvise_willneed(struct vm_area_struct *vma,
 	 * Filesystem's fadvise may need to take various locks.  We need to
 	 * explicitly grab a reference because the vma (and hence the
 	 * vma's reference to the file) can go away as soon as we drop
-	 * mmap_lock.
+	 * mmap_sem.
 	 */
-	*prev = NULL;	/* tell sys_madvise we drop mmap_lock */
+	*prev = NULL;	/* tell sys_madvise we drop mmap_sem */
 	get_file(file);
 	offset = (loff_t)(start - vma->vm_start)
 			+ ((loff_t)vma->vm_pgoff << PAGE_SHIFT);
@@ -767,7 +767,7 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
 		return -EINVAL;
 
 	if (!userfaultfd_remove(vma, start, end)) {
-		*prev = NULL; /* mmap_lock has been dropped, prev is stale */
+		*prev = NULL; /* mmap_sem has been dropped, prev is stale */
 
 		mmap_read_lock(current->mm);
 		vma = find_vma(current->mm, start);
@@ -790,7 +790,7 @@ static long madvise_dontneed_free(struct vm_area_struct *vma,
 		if (end > vma->vm_end) {
 			/*
 			 * Don't fail if end > vma->vm_end. If the old
-			 * vma was splitted while the mmap_lock was
+			 * vma was splitted while the mmap_sem was
 			 * released the effect of the concurrent
 			 * operation may not cause madvise() to
 			 * have an undefined result. There may be an
@@ -825,7 +825,7 @@ static long madvise_remove(struct vm_area_struct *vma,
 	int error;
 	struct file *f;
 
-	*prev = NULL;	/* tell sys_madvise we drop mmap_lock */
+	*prev = NULL;	/* tell sys_madvise we drop mmap_sem */
 
 	if (vma->vm_flags & VM_LOCKED)
 		return -EINVAL;
@@ -846,11 +846,11 @@ static long madvise_remove(struct vm_area_struct *vma,
 	 * Filesystem's fallocate may need to take i_mutex.  We need to
 	 * explicitly grab a reference because the vma (and hence the
 	 * vma's reference to the file) can go away as soon as we drop
-	 * mmap_lock.
+	 * mmap_sem.
 	 */
 	get_file(f);
 	if (userfaultfd_remove(vma, start, end)) {
-		/* mmap_lock was not released by userfaultfd_remove() */
+		/* mmap_sem was not released by userfaultfd_remove() */
 		mmap_read_unlock(current->mm);
 	}
 	error = vfs_fallocate(f,
@@ -1135,7 +1135,7 @@ SYSCALL_DEFINE3(madvise, unsigned long, start, size_t, len_in, int, behavior)
 			goto out;
 		if (prev)
 			vma = prev->vm_next;
-		else	/* madvise_remove dropped mmap_lock */
+		else	/* madvise_remove dropped mmap_sem */
 			vma = find_vma(current->mm, start);
 	}
 out:

@@ -1117,7 +1117,7 @@ static int handle_pfmf(struct kvm_vcpu *vcpu)
 }
 
 /*
- * Must be called with relevant read locks held (kvm->mm->mmap_lock, kvm->srcu)
+ * Must be called with relevant read locks held (kvm->mm->mmap_sem, kvm->srcu)
  */
 static inline int __do_essa(struct kvm_vcpu *vcpu, const int orc)
 {

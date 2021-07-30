@@ -191,7 +191,7 @@ out:
 }
 
 /*
- * Called under mmap_write_lock(mm).
+ * Called under down_write(mmap_sem).
  */
 
 #ifndef HAVE_ARCH_HUGETLB_UNMAPPED_AREA

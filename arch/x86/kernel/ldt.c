@@ -8,7 +8,7 @@
  *
  * Lock order:
  *	contex.ldt_usr_sem
- *	  mmap_lock
+ *	  mmap_sem
  *	    context.lock
  */
 

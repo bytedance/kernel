@@ -79,7 +79,7 @@ out_unlock:
 /*
  * The lock ordering for ext2 DAX fault paths is:
  *
- * mmap_lock (MM)
+ * mmap_sem (MM)
  *   sb_start_pagefault (vfs, freeze)
  *     ext2_inode_info->dax_sem
  *       address_space->i_mmap_rwsem or page_lock (mutually exclusive in DAX)

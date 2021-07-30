@@ -244,7 +244,7 @@ void __mmu_notifier_invalidate_range(struct mm_struct *mm,
 
 /*
  * Same as mmu_notifier_register but here the caller must hold the
- * mmap_lock in write mode.
+ * mmap_sem in write mode.
  */
 int __mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 {
@@ -268,7 +268,7 @@ int __mmu_notifier_register(struct mmu_notifier *mn, struct mm_struct *mm)
 		/*
 		 * kmalloc cannot be called under mm_take_all_locks(), but we
 		 * know that mm->mmu_notifier_mm can't change while we hold
-		 * the write side of the mmap_lock.
+		 * the write side of the mmap_sem.
 		 */
 		mmu_notifier_mm =
 			kmalloc(sizeof(struct mmu_notifier_mm), GFP_KERNEL);
@@ -316,7 +316,7 @@ EXPORT_SYMBOL_GPL(__mmu_notifier_register);
  * @mn: The notifier to attach
  * @mm: The mm to attach the notifier to
  *
- * Must not hold mmap_lock nor any other VM related lock when calling
+ * Must not hold mmap_sem nor any other VM related lock when calling
  * this registration function. Must also ensure mm_users can't go down
  * to zero while this runs to avoid races with mmu_notifier_release,
  * so mm has to be current->mm or the mm should be pinned safely such
@@ -374,7 +374,7 @@ find_get_mmu_notifier(struct mm_struct *mm, const struct mmu_notifier_ops *ops)
  * are the same.
  *
  * Each call to mmu_notifier_get() must be paired with a call to
- * mmu_notifier_put(). The caller must hold the write side of mm->mmap_lock.
+ * mmu_notifier_put(). The caller must hold the write side of mm->mmap_sem.
  *
  * While the caller has a mmu_notifier get the mm pointer will remain valid,
  * and can be converted to an active mm pointer via mmget_not_zero().

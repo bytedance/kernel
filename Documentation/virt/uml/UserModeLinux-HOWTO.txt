@@ -3313,7 +3313,7 @@
        (gdb) p *vma.vm_mm
        $24 = {mmap = 0x507d2434, mmap_avl = 0x0, mmap_cache = 0x8048000,
          pgd = 0x80a4f8c, mm_users = {counter = 0}, mm_count = {counter = 134904288},
-         map_count = 134909076, mmap_lock = {count = {counter = 135073792},
+         map_count = 134909076, mmap_sem = {count = {counter = 135073792},
            sleepers = -1342177872, wait = {lock = <optimized out or zero length>,
              task_list = {next = 0xaffffe63, prev = 0xaffffe7a},
              __magic = -1342177670, __creator = -1342177300}, __magic = 98},

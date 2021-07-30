@@ -2975,7 +2975,7 @@ static int read_properties_unlocked(struct drm_i915_private *dev_priv,
  * buffered data written by the GPU besides periodic OA metrics.
  *
  * Note we copy the properties from userspace outside of the i915 perf
- * mutex to avoid an awkward lockdep with mmap_lock.
+ * mutex to avoid an awkward lockdep with mmap_sem.
  *
  * Most of the implementation details are handled by
  * i915_perf_open_ioctl_locked() after taking the &drm_i915_private->perf.lock

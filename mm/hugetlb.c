@@ -4649,7 +4649,7 @@ int hugetlb_mcopy_atomic_pte(struct mm_struct *dst_mm,
 						(const void __user *) src_addr,
 						pages_per_huge_page(h), false);
 
-		/* fallback to copy_from_user outside mmap_lock */
+		/* fallback to copy_from_user outside mmap_sem */
 		if (unlikely(ret)) {
 			ret = -ENOENT;
 			*pagep = page;
