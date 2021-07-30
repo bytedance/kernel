@@ -67,12 +67,14 @@ extern int vfs_path_lookup(struct dentry *, struct vfsmount *,
 long do_mknodat(int dfd, const char __user *filename, umode_t mode,
 		unsigned int dev);
 long do_mkdirat(int dfd, const char __user *pathname, umode_t mode);
-long do_rmdir(int dfd, const char __user *pathname);
+long do_rmdir(int dfd, struct filename *name);
 long do_unlinkat(int dfd, struct filename *name);
 long do_symlinkat(const char __user *oldname, int newdfd,
 		  const char __user *newname);
 int do_linkat(int olddfd, const char __user *oldname, int newdfd,
 	      const char __user *newname, int flags);
+int do_renameat2(int olddfd, struct filename *oldname, int newdfd,
+		 struct filename *newname, unsigned int flags);
 
 /*
  * namespace.c
@@ -124,6 +126,9 @@ extern struct file *do_filp_open(int dfd, struct filename *pathname,
 		const struct open_flags *op);
 extern struct file *do_file_open_root(struct dentry *, struct vfsmount *,
 		const char *, const struct open_flags *);
+extern struct open_how build_open_how(int flags, umode_t mode);
+extern int build_open_flags(const struct open_how *how, struct open_flags *op);
+extern int __close_fd_get_file(unsigned int fd, struct file **res);
 
 long do_sys_ftruncate(unsigned int fd, loff_t length, int small);
 long do_faccessat(int dfd, const char __user *filename, int mode);
@@ -189,3 +194,11 @@ extern int do_vfs_ioctl(struct file *file, unsigned int fd, unsigned int cmd,
 
 /* direct-io.c: */
 int sb_init_dio_done_wq(struct super_block *sb);
+
+/*
+ * fs/stat.c:
+ */
+unsigned vfs_stat_set_lookup_flags(unsigned *lookup_flags, int flags);
+int cp_statx(const struct kstat *stat, struct statx __user *buffer);
+int do_statx(int dfd, const char __user *filename, unsigned flags,
+	     unsigned int mask, struct statx __user *buffer);
