@@ -3999,6 +3999,15 @@ struct bpf_sock_tuple {
 	};
 };
 
+struct bpf_unsafe_ctx {
+        void *ctx;
+        __u16 mod;
+        __u16 cmd;
+        __u16 flags;
+        __u16 data_len;
+        char data[];
+};
+
 struct bpf_xdp_sock {
 	__u32 queue_id;
 };
