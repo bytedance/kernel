@@ -737,12 +737,12 @@ static int get_queue_type(struct mlx5_vdpa_net *ndev)
 	type_mask = MLX5_CAP_DEV_VDPA_EMULATION(ndev->mvdev.mdev, virtio_queue_type);
 
 	/* prefer split queue */
-	if (type_mask & MLX5_VIRTIO_EMULATION_CAP_VIRTIO_QUEUE_TYPE_PACKED)
-		return MLX5_VIRTIO_EMULATION_VIRTIO_QUEUE_TYPE_PACKED;
+	if (type_mask & MLX5_VIRTIO_EMULATION_CAP_VIRTIO_QUEUE_TYPE_SPLIT)
+		return MLX5_VIRTIO_EMULATION_VIRTIO_QUEUE_TYPE_SPLIT;
 
-	WARN_ON(!(type_mask & MLX5_VIRTIO_EMULATION_CAP_VIRTIO_QUEUE_TYPE_SPLIT));
+	WARN_ON(!(type_mask & MLX5_VIRTIO_EMULATION_CAP_VIRTIO_QUEUE_TYPE_PACKED));
 
-	return MLX5_VIRTIO_EMULATION_VIRTIO_QUEUE_TYPE_SPLIT;
+	return MLX5_VIRTIO_EMULATION_VIRTIO_QUEUE_TYPE_PACKED;
 }
 
 static bool vq_is_tx(u16 idx)
@@ -1982,6 +1982,12 @@ void *mlx5_vdpa_add_dev(struct mlx5_core_dev *mdev)
 	struct mlx5_vdpa_net *ndev;
 	u32 max_vqs;
 	int err;
+
+	if (!(MLX5_CAP_DEV_VDPA_EMULATION(mdev, virtio_queue_type) &
+	    MLX5_VIRTIO_EMULATION_CAP_VIRTIO_QUEUE_TYPE_SPLIT)) {
+		dev_warn(mdev->device, "missing support for split virtqueues\n");
+		return -EOPNOTSUPP;
+	}
 
 	/* we save one virtqueue for control virtqueue should we require it */
 	max_vqs = MLX5_CAP_DEV_VDPA_EMULATION(mdev, max_num_virtio_queues);
