@@ -283,25 +283,49 @@ static int tcf_conntrack_nat(struct net *net,
 	return err;
 }
 
-static int __tcf_conntrack(struct sk_buff *skb,
-			   struct tcf_conntrack_info *ca,
-			   u_int8_t family,
-			   const struct tc_action *a,
-			   struct tcf_result *res)
+static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
+			 struct tcf_result *res)
 {
+	struct tcf_conntrack_info *orig_ca = to_conntrack(a);
+	struct tcf_conntrack_info tmp_ca, *ca;
 	struct net *net = dev_net(skb->dev);
 	enum ip_conntrack_info ctinfo;
 	struct nf_conn *tmpl = NULL;
 	struct nf_conn *ct;
+	int nh_ofs;
+	int err, ret = 0;
 	bool cached;
 	struct nf_hook_state state = {
 		.hook = NF_INET_PRE_ROUTING,
 		.pf = PF_INET,
 		.net = net,
 	};
-	int err;
+	u_int8_t family;
 
-	tmpl = ca->tmpl;
+	/* The conntrack module expects to be working at L3. */
+	nh_ofs = skb_network_offset(skb);
+	skb_pull_rcsum(skb, nh_ofs);
+
+	err = tcf_skb_network_trim(skb);
+	if (err)
+		return TC_ACT_SHOT;
+
+	family = tcf_skb_family(skb);
+	if (family == PF_UNSPEC)
+		return TC_ACT_SHOT;
+
+	spin_lock(&orig_ca->tcf_lock);
+	tcf_lastuse_update(&orig_ca->tcf_tm);
+	bstats_update(&orig_ca->tcf_bstats, skb);
+	memcpy(&tmp_ca, orig_ca, sizeof(tmp_ca));
+
+	if (orig_ca->tmpl) {
+		nf_conntrack_get(&orig_ca->tmpl->ct_general);
+		tmpl = orig_ca->tmpl;
+	}
+	spin_unlock(&orig_ca->tcf_lock);
+
+	ca = &tmp_ca;
 	cached = skb_nfct_cached(net, skb, ca->zone);
 
 	if (!cached) {
@@ -314,21 +338,27 @@ static int __tcf_conntrack(struct sk_buff *skb,
 
 		state.pf = family;
 		err = nf_conntrack_in(skb, &state);
-		if (err != NF_ACCEPT)
-			goto drop;
+		if (err != NF_ACCEPT) {
+			ret = -1;
+			goto out;
+		}
 	} else {
 		if (tmpl)
 			nf_conntrack_put(&tmpl->ct_general);
 	}
 
 	ct = nf_ct_get(skb, &ctinfo);
-	if (!ct)
+	if (!ct) {
+		ret = -1;
 		goto out;
+	}
 
 	if (ca->nat && (nf_ct_is_confirmed(ct) || ca->commit)) {
 		err = tcf_conntrack_nat(net, ca, skb, ct, ctinfo);
-		if (err != NF_ACCEPT)
-			goto drop;
+		if (err != NF_ACCEPT) {
+			ret = -1;
+			goto out;
+		}
 	}
 
 	if (ctinfo == IP_CT_ESTABLISHED ||
@@ -374,7 +404,7 @@ static int __tcf_conntrack(struct sk_buff *skb,
 			}
 
 			if (!cl)
-				goto drop;
+				goto out;
 
 			/* Inherit the master's labels, if any.  Must use memcpy for backport
 			 * as struct assignment only copies the length field in older
@@ -407,7 +437,7 @@ static int __tcf_conntrack(struct sk_buff *skb,
 			}
 
 			if (!cl)
-				goto drop;
+				goto out;
 
 			nf_connlabels_replace(ct, ca->labels, ca->labels_mask, 4);
 		}
@@ -416,52 +446,22 @@ skip:
 			goto drop;
 	}
 
-	return ca->tcf_action;
-
 out:
-	ct_notify_underlying_device(skb, ca, NULL, IP_CT_UNTRACKED, net);
-	return ca->tcf_action;
-
-drop:
-	return TC_ACT_SHOT;
-}
-
-static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
-			 struct tcf_result *res)
-{
-	struct tcf_conntrack_info *orig_ca = to_conntrack(a);
-	struct tcf_conntrack_info tmp_ca;
-	u_int8_t family;
-	int nh_ofs;
-	int err;
-
-	err = tcf_skb_network_trim(skb);
-	if (err)
-		return TC_ACT_SHOT;
-
-	family = tcf_skb_family(skb);
-	if (family == PF_UNSPEC)
-		return TC_ACT_SHOT;
-
-	/* The conntrack module expects to be working at L3. */
-	nh_ofs = skb_network_offset(skb);
-	skb_pull_rcsum(skb, nh_ofs);
-
-	spin_lock(&orig_ca->tcf_lock);
-	tcf_lastuse_update(&orig_ca->tcf_tm);
-	bstats_update(&orig_ca->tcf_bstats, skb);
-	memcpy(&tmp_ca, orig_ca, sizeof(tmp_ca));
-
-	if (orig_ca->tmpl)
-		nf_conntrack_get(&orig_ca->tmpl->ct_general);
-	spin_unlock(&orig_ca->tcf_lock);
-
-	err = __tcf_conntrack(skb, &tmp_ca, family, a, res);
+	if (ret)
+		ct_notify_underlying_device(skb, ca, NULL, IP_CT_UNTRACKED,
+					    net);
 
 	skb_push(skb, nh_ofs);
 	skb_postpush_rcsum(skb, skb->data, nh_ofs);
 
-	return err;
+	return ca->tcf_action;
+
+drop:
+	skb_push(skb, nh_ofs);
+	skb_postpush_rcsum(skb, skb->data, nh_ofs);
+
+	spin_unlock(&ca->tcf_lock);
+	return TC_ACT_SHOT;
 }
 
 static const struct nla_policy conntrack_policy[TCA_CONNTRACK_MAX + 1] = {
