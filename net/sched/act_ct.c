@@ -342,7 +342,8 @@ static int __tcf_conntrack(struct sk_buff *skb,
 	if (ctinfo == IP_CT_ESTABLISHED ||
 	    ctinfo == IP_CT_ESTABLISHED_REPLY) {
 		/* TODO: I'm not sure if that "cached" thing affects NAT? */
-		ct_notify_underlying_device(skb, ca, ct, ctinfo, net);
+		if (!cached)
+			ct_notify_underlying_device(skb, ca, ct, ctinfo, net);
 	}
 
 	/* TODO: must check this code very carefully; move to another function */
