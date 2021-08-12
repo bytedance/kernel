@@ -16,7 +16,6 @@ struct tcf_conntrack_info {
 	u32 mark;
 	u32 mark_mask;
 	bool commit;
-	bool clear;
 	struct tcf_block *block;
 	/* NAT */
 	u8 nat;
