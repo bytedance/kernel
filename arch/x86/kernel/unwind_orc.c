@@ -336,11 +336,13 @@ static bool stack_access_ok(struct unwind_state *state, unsigned long _addr,
 	struct stack_info *info = &state->stack_info;
 	void *addr = (void *)_addr;
 
-	if (!on_stack(info, addr, len) &&
-	    (get_stack_info(addr, state->task, info, &state->stack_mask)))
+	if (on_stack(info, addr, len))
+		return true;
+
+	if (get_stack_info(addr, state->task, info, &state->stack_mask))
 		return false;
 
-	return true;
+	return on_stack(info, addr, len);
 }
 
 static bool deref_stack_reg(struct unwind_state *state, unsigned long addr,
