@@ -4024,7 +4024,7 @@ struct bpf_unsafe_ctx {
 	__u16 cmd;
 	__u16 flags;
 	__u16 data_len;
-	char data[0];
+	char data[];
 };
 
 /* user accessible metadata for XDP packet hook
