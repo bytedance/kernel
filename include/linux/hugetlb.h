@@ -616,8 +616,7 @@ extern bool hugetlb_free_vmemmap_enabled;
 
 static inline bool is_hugetlb_free_vmemmap_enabled(void)
 {
-	return hugetlb_free_vmemmap_enabled &&
-	       is_power_of_2(sizeof(struct page));
+	return hugetlb_free_vmemmap_enabled;
 }
 #else
 static inline bool is_hugetlb_free_vmemmap_enabled(void)
