@@ -2748,7 +2748,7 @@ static inline void print_vma_addr(char *prefix, unsigned long rip)
 #endif
 
 void vmemmap_remap_free(unsigned long start, unsigned long end,
-			unsigned long reuse, struct list_head *pgtables);
+			unsigned long reuse);
 void vmemmap_remap_alloc(unsigned long start, unsigned long end,
 			 unsigned long reuse);
 

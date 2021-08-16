@@ -354,8 +354,7 @@ void free_huge_page_vmemmap(struct hstate *h, struct page *head)
 	vmemmap_end = vmemmap_addr + free_vmemmap_pages_size_per_hpage(h);
 	vmemmap_reuse = vmemmap_addr - PAGE_SIZE;
 
-	vmemmap_remap_free(vmemmap_addr, vmemmap_end, vmemmap_reuse,
-			   &head->lru);
+	vmemmap_remap_free(vmemmap_addr, vmemmap_end, vmemmap_reuse);
 }
 
 void __init hugetlb_vmemmap_init(struct hstate *h)
