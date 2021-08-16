@@ -1289,12 +1289,6 @@ static void update_hpage_vmemmap_workfn(struct work_struct *work)
 }
 static DECLARE_WORK(hpage_update_work, update_hpage_vmemmap_workfn);
 
-static inline void flush_hpage_update_work(struct hstate *h)
-{
-	if (free_vmemmap_pages_per_hpage(h))
-		flush_work(&hpage_update_work);
-}
-
 static inline void __update_and_free_page(struct hstate *h, struct page *page)
 {
 	/* No need to allocate vmemmap pages */
@@ -1821,7 +1815,6 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 int dissolve_free_huge_page(struct page *page)
 {
 	int rc = -EBUSY;
-	struct hstate *h = NULL;
 
 	/* Not to disrupt normal path by vainly holding hugetlb_lock */
 	if (!PageHuge(page))
@@ -1835,9 +1828,8 @@ int dissolve_free_huge_page(struct page *page)
 
 	if (!page_count(page)) {
 		struct page *head = compound_head(page);
+		struct hstate *h = page_hstate(head);
 		int nid = page_to_nid(head);
-
-		h = page_hstate(head);
 		if (h->free_huge_pages - h->resv_huge_pages == 0)
 			goto out;
 
@@ -1851,14 +1843,6 @@ int dissolve_free_huge_page(struct page *page)
 	}
 out:
 	spin_unlock(&hugetlb_lock);
-
-	/*
-	 * We should flush work before return to make sure that
-	 * the HugeTLB page is freed to the buddy.
-	 */
-	if (!rc && h)
-		flush_hpage_update_work(h);
-
 	return rc;
 }
 
