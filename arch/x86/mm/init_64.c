@@ -1223,7 +1223,7 @@ static struct kcore_list kcore_vsyscall;
 
 static void __init register_page_bootmem_info(void)
 {
-#if defined(CONFIG_NUMA) || defined(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP)
+#ifdef CONFIG_NUMA
 	int i;
 
 	for_each_online_node(i)
