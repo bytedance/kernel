@@ -38,7 +38,7 @@ static int walk_pmd_range(pud_t *pud, unsigned long addr, unsigned long end,
 	do {
 again:
 		next = pmd_addr_end(addr, end);
-		if (pmd_none(*pmd) || (!walk->vma && !walk->no_vma)) {
+		if (pmd_none(*pmd) || !walk->vma) {
 			if (ops->pte_hole)
 				err = ops->pte_hole(addr, next, walk);
 			if (err)
@@ -64,16 +64,13 @@ again:
 		 * Check this here so we only break down trans_huge
 		 * pages when we _need_ to
 		 */
-		if ((!walk->vma && (pmd_leaf(*pmd) || !pmd_present(*pmd))) ||
-		    walk->action == ACTION_CONTINUE ||
+		if (walk->action == ACTION_CONTINUE ||
 		    !(ops->pte_entry))
 			continue;
 
-		if (walk->vma) {
-			split_huge_pmd(walk->vma, pmd, addr);
-			if (pmd_trans_unstable(pmd))
-				goto again;
-		}
+		split_huge_pmd(walk->vma, pmd, addr);
+		if (pmd_trans_unstable(pmd))
+			goto again;
 
 		err = walk_pte_range(pmd, addr, next, walk);
 		if (err)
@@ -95,7 +92,7 @@ static int walk_pud_range(p4d_t *p4d, unsigned long addr, unsigned long end,
 	do {
  again:
 		next = pud_addr_end(addr, end);
-		if (pud_none(*pud) || (!walk->vma && !walk->no_vma)) {
+		if (pud_none(*pud) || !walk->vma) {
 			if (ops->pte_hole)
 				err = ops->pte_hole(addr, next, walk);
 			if (err)
@@ -113,13 +110,11 @@ static int walk_pud_range(p4d_t *p4d, unsigned long addr, unsigned long end,
 		if (walk->action == ACTION_AGAIN)
 			goto again;
 
-		if ((!walk->vma && (pud_leaf(*pud) || !pud_present(*pud))) ||
-		    walk->action == ACTION_CONTINUE ||
+		if (walk->action == ACTION_CONTINUE ||
 		    !(ops->pmd_entry || ops->pte_entry))
 			continue;
 
-		if (walk->vma)
-			split_huge_pud(walk->vma, pud, addr);
+		split_huge_pud(walk->vma, pud, addr);
 		if (pud_none(*pud))
 			goto again;
 
@@ -376,25 +371,6 @@ int walk_page_range(struct mm_struct *mm, unsigned long start,
 			break;
 	} while (start = next, start < end);
 	return err;
-}
-
-int walk_page_range_novma(struct mm_struct *mm, unsigned long start,
-			  unsigned long end, const struct mm_walk_ops *ops,
-			  void *private)
-{
-	struct mm_walk walk = {
-		.ops		= ops,
-		.mm		= mm,
-		.private	= private,
-		.no_vma		= true
-	};
-
-	if (start >= end || !walk.mm)
-		return -EINVAL;
-
-	mmap_assert_locked(walk.mm);
-
-	return __walk_page_range(start, end, &walk);
 }
 
 int walk_page_vma(struct vm_area_struct *vma, const struct mm_walk_ops *ops,
