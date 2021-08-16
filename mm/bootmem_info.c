@@ -13,9 +13,9 @@
 
 void get_page_bootmem(unsigned long info, struct page *page, unsigned long type)
 {
-	BUG_ON(info > BOOTMEM_INFO_MAX);
-	BUG_ON(type > BOOTMEM_TYPE_MAX);
-	page->freelist = (void *)((info << BOOTMEM_TYPE_BITS) | type);
+	page->freelist = (void *)type;
+	SetPagePrivate(page);
+	set_page_private(page, info);
 	page_ref_inc(page);
 }
 
@@ -23,12 +23,14 @@ void put_page_bootmem(struct page *page)
 {
 	unsigned long type;
 
-	type = page_bootmem_type(page);
+	type = (unsigned long) page->freelist;
 	BUG_ON(type < MEMORY_HOTPLUG_MIN_BOOTMEM_TYPE ||
 	       type > MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE);
 
 	if (page_ref_dec_return(page) == 1) {
 		page->freelist = NULL;
+		ClearPagePrivate(page);
+		set_page_private(page, 0);
 		INIT_LIST_HEAD(&page->lru);
 		free_reserved_page(page);
 	}
@@ -184,8 +186,6 @@ static void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
 	unsigned long i, pfn, end_pfn, nr_pages;
 	int node = pgdat->node_id;
 	struct page *page;
-
-	BUILD_BUG_ON(MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE > BOOTMEM_TYPE_MAX);
 
 	nr_pages = PAGE_ALIGN(sizeof(struct pglist_data)) >> PAGE_SHIFT;
 	page = virt_to_page(pgdat);

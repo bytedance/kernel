@@ -714,12 +714,12 @@ static void free_map_bootmem(struct page *memmap)
 		>> PAGE_SHIFT;
 
 	for (i = 0; i < nr_pages; i++, page++) {
-		magic = page_bootmem_type(page);
+		magic = (unsigned long) page->freelist;
 
 		BUG_ON(magic == NODE_INFO);
 
 		maps_section_nr = pfn_to_section_nr(page_to_pfn(page));
-		removing_section_nr = page_bootmem_info(page);
+		removing_section_nr = page_private(page);
 
 		/*
 		 * When this function is called, the removing section is
