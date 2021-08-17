@@ -193,6 +193,10 @@ struct flow_action_entry {
 			s64			burst;
 			u64			rate_bytes_ps;
 		} police;
+		struct {				/* FLOW_ACTION_CT */
+			int action;
+			u16 zone;
+		} ct;
 		struct {				/* FLOW_ACTION_MPLS_PUSH */
 			u32		label;
 			__be16		proto;
@@ -360,10 +364,6 @@ struct flow_cls_offload {
 	struct flow_rule *rule;
 	struct flow_stats stats;
 	u32 classid;
-
-	/* FIXME: ugly */
-	u8 ct_state_key;
-	u8 ct_state_mask;
 };
 
 static inline struct flow_rule *

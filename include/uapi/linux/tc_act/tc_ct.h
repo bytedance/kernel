@@ -4,38 +4,38 @@
 
 #include <linux/types.h>
 #include <linux/pkt_cls.h>
-#include <stdbool.h>
-
-#define TCA_ACT_CONNTRACK 18
-
-struct tc_conntrack {
-	tc_gen;
-	__u16 zone;
-	__u32 labels[4];
-	__u32 labels_mask[4];
-	__u32 mark;
-	__u32 mark_mask;
-	bool commit;
-	bool clear;
-};
 
 enum {
-	TCA_CONNTRACK_UNSPEC,
-	TCA_CONNTRACK_PARMS,
-
-	TCA_CONNTRACK_TM,
-	TCA_CONNTRACK_PAD,
-
-	TCA_CONNTRACK_NAT,
-	TCA_CONNTRACK_NAT_SRC,
-	TCA_CONNTRACK_NAT_DST,
-	TCA_CONNTRACK_NAT_IP_MIN,
-	TCA_CONNTRACK_NAT_IP_MAX,
-	TCA_CONNTRACK_NAT_PORT_MIN,
-	TCA_CONNTRACK_NAT_PORT_MAX,
-
-	__TCA_CONNTRACK_MAX
+	TCA_CT_UNSPEC,
+	TCA_CT_PARMS,
+	TCA_CT_TM,
+	TCA_CT_ACTION,		/* u16 */
+	TCA_CT_ZONE,		/* u16 */
+	TCA_CT_MARK,		/* u32 */
+	TCA_CT_MARK_MASK,	/* u32 */
+	TCA_CT_LABELS,		/* u128 */
+	TCA_CT_LABELS_MASK,	/* u128 */
+	TCA_CT_NAT_IPV4_MIN,	/* be32 */
+	TCA_CT_NAT_IPV4_MAX,	/* be32 */
+	TCA_CT_NAT_IPV6_MIN,	/* struct in6_addr */
+	TCA_CT_NAT_IPV6_MAX,	/* struct in6_addr */
+	TCA_CT_NAT_PORT_MIN,	/* be16 */
+	TCA_CT_NAT_PORT_MAX,	/* be16 */
+	TCA_CT_PAD,
+	__TCA_CT_MAX
 };
-#define TCA_CONNTRACK_MAX (__TCA_CONNTRACK_MAX - 1)
+
+#define TCA_CT_MAX (__TCA_CT_MAX - 1)
+
+#define TCA_CT_ACT_COMMIT	(1 << 0)
+#define TCA_CT_ACT_FORCE	(1 << 1)
+#define TCA_CT_ACT_CLEAR	(1 << 2)
+#define TCA_CT_ACT_NAT		(1 << 3)
+#define TCA_CT_ACT_NAT_SRC	(1 << 4)
+#define TCA_CT_ACT_NAT_DST	(1 << 5)
+
+struct tc_ct {
+	tc_gen;
+};
 
 #endif /* __UAPI_TC_CT_H */

@@ -850,27 +850,6 @@ enum tc_setup_type {
 	TC_SETUP_ROOT_QDISC,
 	TC_SETUP_QDISC_GRED,
 	TC_SETUP_QDISC_TAPRIO,
-	TC_SETUP_CT,
-	TC_SETUP_MINIFLOW_CT,
-};
-
-struct tc_miniflow_offload {
-	struct sk_buff *skb;
-	unsigned long cookie;
-	bool last_flow;
-	bool is_drop;
-	uint32_t chain_index;
-};
-
-struct tc_ct_offload {
-	struct sk_buff *skb;
-	struct net *net;
-	struct nf_conntrack_tuple *tuple;
-	struct nf_conntrack_zone *zone;
-	unsigned long nat;
-	__be32 ipv4;
-	__be16 port;
-	__u8 proto;
 };
 
 /* These structures hold the attributes of bpf state that are being passed
