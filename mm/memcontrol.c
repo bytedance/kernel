@@ -4311,7 +4311,7 @@ static int memcg_numa_stat_show(struct seq_file *m, void *v)
 			for_each_mem_cgroup_tree(iter, memcg) {
 				nr += mem_cgroup_node_nr_lru_pages(
 					iter, nid, stat->lru_mask);
-				cond_resched()
+				cond_resched();
 			}
 			seq_printf(m, " N%d=%lu", nid, nr);
 		}
