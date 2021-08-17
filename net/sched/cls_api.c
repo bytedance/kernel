@@ -36,10 +36,9 @@
 #include <net/tc_act/tc_police.h>
 #include <net/tc_act/tc_sample.h>
 #include <net/tc_act/tc_skbedit.h>
-#include <net/tc_act/tc_mpls.h>
 #include <net/tc_act/tc_ct.h>
+#include <net/tc_act/tc_mpls.h>
 #include <net/flow_offload.h>
-#include <net/vxlan.h>
 
 extern const struct nla_policy rtm_tca_policy[TCA_MAX + 1];
 
@@ -1585,7 +1584,6 @@ reclassify:
 			first_tp = orig_tp;
 			goto reset;
 		} else if (unlikely(TC_ACT_EXT_CMP(err, TC_ACT_GOTO_CHAIN))) {
-			skb->recirc_id = err & (TC_ACT_EXT_VAL_MASK);
 			first_tp = res->goto_tp;
 
 #if IS_ENABLED(CONFIG_NET_TC_SKB_EXT)
@@ -3271,24 +3269,6 @@ err_unlock:
 }
 EXPORT_SYMBOL(tc_setup_cb_add);
 
-int tc_setup_cb_call_all(struct tcf_block *block, enum tc_setup_type type, void *type_data)
-{
-	struct flow_block_cb *block_cb;
-	int err;
-
-	if (block && !netif_is_vxlan(block->q->dev_queue->dev)) {
-		/* Assumption: this list has only one element (rep) */
-		list_for_each_entry(block_cb, &block->flow_block.cb_list, list) {
-			err = block_cb->cb(type, type_data,
-					   block_cb->cb_priv);
-			return err;
-		}
-	}
-
-	return tc_setup_cb_egdev_all_call_fast(type, type_data);
-}
-EXPORT_SYMBOL(tc_setup_cb_call_all);
-
 /* Destructive filter replace. If filter that wasn't already in hardware is
  * successfully offloaded, increment block offload counter. On failure,
  * previously offloaded filter is considered to be destroyed and offload counter
@@ -3554,6 +3534,10 @@ int tc_setup_flow_action(struct flow_action *flow_action,
 			entry->police.burst = tcf_police_tcfp_burst(act);
 			entry->police.rate_bytes_ps =
 				tcf_police_rate_bytes_ps(act);
+		} else if (is_tcf_ct(act)) {
+			entry->id = FLOW_ACTION_CT;
+			entry->ct.action = tcf_ct_action(act);
+			entry->ct.zone = tcf_ct_zone(act);
 		} else if (is_tcf_mpls(act)) {
 			switch (tcf_mpls_action(act)) {
 			case TCA_MPLS_ACT_PUSH:
@@ -3581,8 +3565,6 @@ int tc_setup_flow_action(struct flow_action *flow_action,
 		} else if (is_tcf_skbedit_ptype(act)) {
 			entry->id = FLOW_ACTION_PTYPE;
 			entry->ptype = tcf_skbedit_ptype(act);
-		} else if (is_tcf_ct(act)) {
-			entry->id = FLOW_ACTION_CT;
 		} else {
 			err = -EOPNOTSUPP;
 			goto err_out;

@@ -99,7 +99,6 @@ struct ovs_skb_cb {
 	u16			mru;
 	u16			acts_origlen;
 	u32			cutlen;
-	u32			recirc_id;
 };
 #define OVS_CB(skb) ((struct ovs_skb_cb *)(skb)->cb)
 

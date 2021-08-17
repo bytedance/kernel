@@ -80,7 +80,6 @@ enum {
 #define TCA_ACT_SKBMOD 15
 #define TCA_ACT_CSUM 16
 #define TCA_ACT_TUNNEL_KEY 17
-#define TCA_ACT_CONNTRACK 18
 #define TCA_ACT_SIMP 22
 #define TCA_ACT_IFE 25
 #define TCA_ACT_SAMPLE 26
@@ -102,12 +101,12 @@ enum tca_id {
 	TCA_ID_SKBMOD = TCA_ACT_SKBMOD,
 	TCA_ID_CSUM = TCA_ACT_CSUM,
 	TCA_ID_TUNNEL_KEY = TCA_ACT_TUNNEL_KEY,
-	TCA_ID_CONNTRACK = TCA_ACT_CONNTRACK,
 	TCA_ID_SIMP = TCA_ACT_SIMP,
 	TCA_ID_IFE = TCA_ACT_IFE,
 	TCA_ID_SAMPLE = TCA_ACT_SAMPLE,
 	TCA_ID_CTINFO,
 	TCA_ID_MPLS,
+	TCA_ID_CT,
 	/* other actions go here */
 	__TCA_ID_MAX = 255
 };
@@ -540,40 +539,26 @@ enum {
 	TCA_FLOWER_KEY_PORT_DST_MIN,	/* be16 */
 	TCA_FLOWER_KEY_PORT_DST_MAX,	/* be16 */
 
-	TCA_FLOWER_KEY_CT_STATE,	/* u8 */
-	TCA_FLOWER_KEY_CT_STATE_MASK,	/* u8 */
-
+	TCA_FLOWER_KEY_CT_STATE,	/* u16 */
+	TCA_FLOWER_KEY_CT_STATE_MASK,	/* u16 */
 	TCA_FLOWER_KEY_CT_ZONE,		/* u16 */
 	TCA_FLOWER_KEY_CT_ZONE_MASK,	/* u16 */
-
 	TCA_FLOWER_KEY_CT_MARK,		/* u32 */
 	TCA_FLOWER_KEY_CT_MARK_MASK,	/* u32 */
-
-	TCA_FLOWER_KEY_CT_LABELS,	/* u32*4 */
-	TCA_FLOWER_KEY_CT_LABELS_MASK,	/* u32*4 */
+	TCA_FLOWER_KEY_CT_LABELS,	/* u128 */
+	TCA_FLOWER_KEY_CT_LABELS_MASK,	/* u128 */
 
 	__TCA_FLOWER_MAX,
 };
 
 #define TCA_FLOWER_MAX (__TCA_FLOWER_MAX - 1)
 
-/* TODO: FIXME: CT_STATE flags; is that the correct place? */
-/* Should we use OVS defines? e.g., OVS_CS_F_NEW */
-#define TCA_FLOWER_KEY_CT_FLAGS_NEW               0x01 /* Beginning of a new connection. */
-#define TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED       0x02 /* Part of an existing connection. */
-#define TCA_FLOWER_KEY_CT_FLAGS_RELATED           0x04 /* Related to an established
-							* connection. */
-#define TCA_FLOWER_KEY_CT_FLAGS_REPLY_DIR         0x08 /* Flow is in the reply direction. */
-#define TCA_FLOWER_KEY_CT_FLAGS_INVALID           0x10 /* Could not track connection. */
-#define TCA_FLOWER_KEY_CT_FLAGS_TRACKED           0x20 /* Conntrack has occurred. */
-#define TCA_FLOWER_KEY_CT_FLAGS_SRC_NAT           0x40 /* Packet's source address/port was
-							* mangled by NAT.
-							*/
-#define TCA_FLOWER_KEY_CT_FLAGS_DST_NAT           0x80 /* Packet's destination address/port
-							* was mangled by NAT.
-							*/
-#define TCA_FLOWER_KEY_CT_FLAGS_NAT_MASK (TCA_FLOWER_KEY_CT_FLAGS_SRC_NAT | \
-					  TCA_FLOWER_KEY_CT_FLAGS_DST_NAT)
+enum {
+	TCA_FLOWER_KEY_CT_FLAGS_NEW = 1 << 0, /* Beginning of a new connection. */
+	TCA_FLOWER_KEY_CT_FLAGS_ESTABLISHED = 1 << 1, /* Part of an existing connection. */
+	TCA_FLOWER_KEY_CT_FLAGS_RELATED = 1 << 2, /* Related to an established connection. */
+	TCA_FLOWER_KEY_CT_FLAGS_TRACKED = 1 << 3, /* Conntrack has occurred. */
+};
 
 enum {
 	TCA_FLOWER_KEY_ENC_OPTS_UNSPEC,

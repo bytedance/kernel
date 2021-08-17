@@ -1,13 +1,11 @@
-/*
- * net/sched/act_conntrack.c  connection tracking action
+// SPDX-License-Identifier: GPL-2.0 OR Linux-OpenIB
+/* -
+ * net/sched/act_ct.c  Connection Tracking action
  *
- * Copyright (c) 2018 Yossi Kuperman <yossiku@mellanox.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
-*/
+ * Authors:   Paul Blakey <paulb@mellanox.com>
+ *            Yossi Kuperman <yossiku@mellanox.com>
+ *            Marcelo Ricardo Leitner <marcelo.leitner@gmail.com>
+ */
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -19,7 +17,10 @@
 #include <linux/ipv6.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
+#include <net/pkt_cls.h>
 #include <net/act_api.h>
+#include <net/ip.h>
+#include <net/ipv6_frag.h>
 #include <uapi/linux/tc_act/tc_ct.h>
 #include <net/tc_act/tc_ct.h>
 
@@ -27,83 +28,20 @@
 #include <net/netfilter/nf_conntrack_core.h>
 #include <net/netfilter/nf_conntrack_zones.h>
 #include <net/netfilter/nf_conntrack_helper.h>
-#include <net/netfilter/nf_conntrack_labels.h>
-#include <linux/netfilter/nf_nat.h>
-#include <net/netfilter/nf_nat.h>
-/* #include <net/netfilter/nf_nat_l3proto.h> */
+#include <net/netfilter/ipv6/nf_defrag_ipv6.h>
+#include <uapi/linux/netfilter/nf_nat.h>
 
-#include <net/ip.h>
-#include <net/pkt_cls.h>
+static struct tc_action_ops act_ct_ops;
+static unsigned int ct_net_id;
 
-static unsigned int conntrack_net_id;
-static struct tc_action_ops act_conntrack_ops;
-
-enum ovs_ct_nat {
-	OVS_CT_NAT = 1 << 0,     /* NAT for committed connections only. */
-	OVS_CT_SRC_NAT = 1 << 1, /* Source NAT for NEW connections. */
-	OVS_CT_DST_NAT = 1 << 2, /* Destination NAT for NEW connections. */
+struct tc_ct_action_net {
+	struct tc_action_net tn; /* Must be first */
+	bool labels;
 };
 
-static void ct_parse_nat(struct tc_ct_offload *cto,
-			 struct tcf_conntrack_info *ca,
-			 struct nf_conn *ct,
-			 enum ip_conntrack_info ctinfo)
-{
-	struct nf_conntrack_tuple target;
-	unsigned long nat = 0;
-
-	if (!(ct->status & IPS_NAT_MASK) || !ca->nat)
-		return;
-
-	if (ca->nat & OVS_CT_SRC_NAT) {
-		nat = IPS_SRC_NAT;
-	} else if (ca->nat & OVS_CT_DST_NAT) {
-		nat = IPS_DST_NAT;
-	} else {
-		if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY)
-			nat = ct->status & IPS_SRC_NAT ?
-			      IPS_DST_NAT : IPS_SRC_NAT;
-		else
-			nat = ct->status & IPS_SRC_NAT ?
-			      IPS_SRC_NAT : IPS_DST_NAT;
-	}
-
-	/* We are aiming to look like inverse of other direction. */
-	nf_ct_invert_tuple(&target, nf_ct_tuple(ct, !CTINFO2DIR(ctinfo)));
-
-	if (nat & IPS_SRC_NAT) {
-		cto->ipv4 = target.src.u3.ip;
-		cto->port = target.src.u.all;
-	}
-
-	if (nat & IPS_DST_NAT) {
-		cto->ipv4 = target.dst.u3.ip;
-		cto->port = target.dst.u.all;
-	}
-
-	cto->proto = target.dst.protonum;
-	cto->nat = nat;
-}
-
-static void ct_notify_underlying_device(struct sk_buff *skb,
-					struct tcf_conntrack_info *ca,
-					struct nf_conn *ct,
-					enum ip_conntrack_info ctinfo,
-					struct net *net)
-{
-	struct tc_ct_offload cto = { skb, net, NULL, NULL };
-
-	if (ct) {
-		cto.zone = (struct nf_conntrack_zone *)nf_ct_zone(ct);
-		cto.tuple = nf_ct_tuple(ct, CTINFO2DIR(ctinfo));
-
-		ct_parse_nat(&cto, ca, ct, ctinfo);
-	}
-
-	tc_setup_cb_call_all(NULL, TC_SETUP_CT, &cto);
-}
-
-static bool skb_nfct_cached(struct net *net, struct sk_buff *skb, u16 zone_id)
+/* Determine whether skb->_nfct is equal to the result of conntrack lookup. */
+static bool tcf_ct_skb_nfct_cached(struct net *net, struct sk_buff *skb,
+				   u16 zone_id, bool force)
 {
 	enum ip_conntrack_info ctinfo;
 	struct nf_conn *ct;
@@ -111,11 +49,22 @@ static bool skb_nfct_cached(struct net *net, struct sk_buff *skb, u16 zone_id)
 	ct = nf_ct_get(skb, &ctinfo);
 	if (!ct)
 		return false;
-
 	if (!net_eq(net, read_pnet(&ct->ct_net)))
 		return false;
 	if (nf_ct_zone(ct)->id != zone_id)
 		return false;
+
+	/* Force conntrack entry direction. */
+	if (force && CTINFO2DIR(ctinfo) != IP_CT_DIR_ORIGINAL) {
+		if (nf_ct_is_confirmed(ct))
+			nf_ct_kill(ct);
+
+		nf_conntrack_put(&ct->ct_general);
+		nf_ct_set(skb, NULL, IP_CT_UNTRACKED);
+
+		return false;
+	}
+
 	return true;
 }
 
@@ -125,16 +74,16 @@ static bool skb_nfct_cached(struct net *net, struct sk_buff *skb, u16 zone_id)
  * (such as nf_ip_checksum). The caller needs to pull the skb to the
  * network header, and ensure ip_hdr/ipv6_hdr points to valid data.
  */
-static int tcf_skb_network_trim(struct sk_buff *skb)
+static int tcf_ct_skb_network_trim(struct sk_buff *skb, int family)
 {
 	unsigned int len;
 	int err;
 
-	switch (skb->protocol) {
-	case htons(ETH_P_IP):
+	switch (family) {
+	case NFPROTO_IPV4:
 		len = ntohs(ip_hdr(skb)->tot_len);
 		break;
-	case htons(ETH_P_IPV6):
+	case NFPROTO_IPV6:
 		len = sizeof(struct ipv6hdr)
 			+ ntohs(ipv6_hdr(skb)->payload_len);
 		break;
@@ -147,29 +96,133 @@ static int tcf_skb_network_trim(struct sk_buff *skb)
 	return err;
 }
 
-static u_int8_t tcf_skb_family(struct sk_buff *skb)
+static u8 tcf_ct_skb_nf_family(struct sk_buff *skb)
 {
-	u_int8_t family = PF_UNSPEC;
+	u8 family = NFPROTO_UNSPEC;
 
-	switch (skb->protocol) {
+	switch (skb_protocol(skb, true)) {
 	case htons(ETH_P_IP):
-		family = PF_INET;
+		family = NFPROTO_IPV4;
 		break;
 	case htons(ETH_P_IPV6):
-		family = PF_INET6;
+		family = NFPROTO_IPV6;
 		break;
 	default:
-        break;
+		break;
 	}
 
 	return family;
 }
 
-static int tcf_conntrack_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
-				     enum ip_conntrack_info ctinfo,
-				     const struct nf_nat_range2 *range,
-				     enum nf_nat_manip_type maniptype)
+static int tcf_ct_ipv4_is_fragment(struct sk_buff *skb, bool *frag)
 {
+	unsigned int len;
+
+	len =  skb_network_offset(skb) + sizeof(struct iphdr);
+	if (unlikely(skb->len < len))
+		return -EINVAL;
+	if (unlikely(!pskb_may_pull(skb, len)))
+		return -ENOMEM;
+
+	*frag = ip_is_fragment(ip_hdr(skb));
+	return 0;
+}
+
+static int tcf_ct_ipv6_is_fragment(struct sk_buff *skb, bool *frag)
+{
+	unsigned int flags = 0, len, payload_ofs = 0;
+	unsigned short frag_off;
+	int nexthdr;
+
+	len =  skb_network_offset(skb) + sizeof(struct ipv6hdr);
+	if (unlikely(skb->len < len))
+		return -EINVAL;
+	if (unlikely(!pskb_may_pull(skb, len)))
+		return -ENOMEM;
+
+	nexthdr = ipv6_find_hdr(skb, &payload_ofs, -1, &frag_off, &flags);
+	if (unlikely(nexthdr < 0))
+		return -EPROTO;
+
+	*frag = flags & IP6_FH_F_FRAG;
+	return 0;
+}
+
+static int tcf_ct_handle_fragments(struct net *net, struct sk_buff *skb,
+				   u8 family, u16 zone)
+{
+	enum ip_conntrack_info ctinfo;
+	struct nf_conn *ct;
+	int err = 0;
+	bool frag;
+
+	/* Previously seen (loopback)? Ignore. */
+	ct = nf_ct_get(skb, &ctinfo);
+	if ((ct && !nf_ct_is_template(ct)) || ctinfo == IP_CT_UNTRACKED)
+		return 0;
+
+	if (family == NFPROTO_IPV4)
+		err = tcf_ct_ipv4_is_fragment(skb, &frag);
+	else
+		err = tcf_ct_ipv6_is_fragment(skb, &frag);
+	if (err || !frag)
+		return err;
+
+	skb_get(skb);
+
+	if (family == NFPROTO_IPV4) {
+		enum ip_defrag_users user = IP_DEFRAG_CONNTRACK_IN + zone;
+
+		memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
+		local_bh_disable();
+		err = ip_defrag(net, skb, user);
+		local_bh_enable();
+		if (err && err != -EINPROGRESS)
+			goto out_free;
+	} else { /* NFPROTO_IPV6 */
+#if IS_ENABLED(CONFIG_NF_DEFRAG_IPV6)
+		enum ip6_defrag_users user = IP6_DEFRAG_CONNTRACK_IN + zone;
+
+		memset(IP6CB(skb), 0, sizeof(struct inet6_skb_parm));
+		err = nf_ct_frag6_gather(net, skb, user);
+		if (err && err != -EINPROGRESS)
+			return err;
+#else
+		err = -EOPNOTSUPP;
+		goto out_free;
+#endif
+	}
+
+	skb_clear_hash(skb);
+	skb->ignore_df = 1;
+	return err;
+
+out_free:
+	kfree_skb(skb);
+	return err;
+}
+
+static void tcf_ct_params_free(struct rcu_head *head)
+{
+	struct tcf_ct_params *params = container_of(head,
+						    struct tcf_ct_params, rcu);
+
+	if (params->tmpl)
+		nf_conntrack_put(&params->tmpl->ct_general);
+	kfree(params);
+}
+
+#if IS_ENABLED(CONFIG_NF_NAT)
+/* Modelled after nf_nat_ipv[46]_fn().
+ * range is only used for new, uninitialized NAT state.
+ * Returns either NF_ACCEPT or NF_DROP.
+ */
+static int ct_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
+			  enum ip_conntrack_info ctinfo,
+			  const struct nf_nat_range2 *range,
+			  enum nf_nat_manip_type maniptype)
+{
+	__be16 proto = skb_protocol(skb, true);
 	int hooknum, err = NF_ACCEPT;
 
 	/* See HOOK2MANIP(). */
@@ -181,15 +234,13 @@ static int tcf_conntrack_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 	switch (ctinfo) {
 	case IP_CT_RELATED:
 	case IP_CT_RELATED_REPLY:
-		if (IS_ENABLED(CONFIG_NF_NAT_IPV4) &&
-		    skb->protocol == htons(ETH_P_IP) &&
+		if (proto == htons(ETH_P_IP) &&
 		    ip_hdr(skb)->protocol == IPPROTO_ICMP) {
 			if (!nf_nat_icmp_reply_translation(skb, ct, ctinfo,
 							   hooknum))
 				err = NF_DROP;
-			goto push;
-		} else if (IS_ENABLED(CONFIG_NF_NAT_IPV6) &&
-			   skb->protocol == htons(ETH_P_IPV6)) {
+			goto out;
+		} else if (IS_ENABLED(CONFIG_IPV6) && proto == htons(ETH_P_IPV6)) {
 			__be16 frag_off;
 			u8 nexthdr = ipv6_hdr(skb)->nexthdr;
 			int hdrlen = ipv6_skip_exthdr(skb,
@@ -202,10 +253,11 @@ static int tcf_conntrack_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 								     hooknum,
 								     hdrlen))
 					err = NF_DROP;
-				goto push;
+				goto out;
 			}
 		}
 		/* Non-ICMP, fall thru to initialize if needed. */
+		/* fall through */
 	case IP_CT_NEW:
 		/* Seen it before?  This can happen for loopback, retrans,
 		 * or local packets.
@@ -219,7 +271,7 @@ static int tcf_conntrack_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 				? nf_nat_setup_info(ct, range, maniptype)
 				: nf_nat_alloc_null_binding(ct, hooknum);
 			if (err != NF_ACCEPT)
-				goto push;
+				goto out;
 		}
 		break;
 
@@ -229,35 +281,66 @@ static int tcf_conntrack_nat_execute(struct sk_buff *skb, struct nf_conn *ct,
 
 	default:
 		err = NF_DROP;
-		goto push;
+		goto out;
 	}
 
 	err = nf_nat_packet(ct, ctinfo, hooknum, skb);
-push:
+out:
 	return err;
 }
+#endif /* CONFIG_NF_NAT */
 
-/* Returns NF_DROP if the packet should be dropped, NF_ACCEPT otherwise. */
-static int tcf_conntrack_nat(struct net *net,
-			     struct tcf_conntrack_info *info,
-			     struct sk_buff *skb, struct nf_conn *ct,
-			     enum ip_conntrack_info ctinfo)
+static void tcf_ct_act_set_mark(struct nf_conn *ct, u32 mark, u32 mask)
 {
-	enum nf_nat_manip_type maniptype;
+#if IS_ENABLED(CONFIG_NF_CONNTRACK_MARK)
+	u32 new_mark;
+
+	if (!mask)
+		return;
+
+	new_mark = mark | (ct->mark & ~(mask));
+	if (ct->mark != new_mark) {
+		ct->mark = new_mark;
+		if (nf_ct_is_confirmed(ct))
+			nf_conntrack_event_cache(IPCT_MARK, ct);
+	}
+#endif
+}
+
+static void tcf_ct_act_set_labels(struct nf_conn *ct,
+				  u32 *labels,
+				  u32 *labels_m)
+{
+#if IS_ENABLED(CONFIG_NF_CONNTRACK_LABELS)
+	size_t labels_sz = FIELD_SIZEOF(struct tcf_ct_params, labels);
+
+	if (!memchr_inv(labels_m, 0, labels_sz))
+		return;
+
+	nf_connlabels_replace(ct, labels, labels_m, 4);
+#endif
+}
+
+static int tcf_ct_act_nat(struct sk_buff *skb,
+			  struct nf_conn *ct,
+			  enum ip_conntrack_info ctinfo,
+			  int ct_action,
+			  struct nf_nat_range2 *range,
+			  bool commit)
+{
+#if IS_ENABLED(CONFIG_NF_NAT)
 	int err;
+	enum nf_nat_manip_type maniptype;
+
+	if (!(ct_action & TCA_CT_ACT_NAT))
+		return NF_ACCEPT;
 
 	/* Add NAT extension if not confirmed yet. */
 	if (!nf_ct_is_confirmed(ct) && !nf_ct_nat_ext_add(ct))
-		return NF_ACCEPT;   /* Can't NAT. */
+		return NF_DROP;   /* Can't NAT. */
 
-	/* Determine NAT type.
-	 * Check if the NAT type can be deduced from the tracked connection.
-	 * Make sure new expected connections (IP_CT_RELATED) are NATted only
-	 * when committing.
-	 */
-	if (info->nat & OVS_CT_NAT && ctinfo != IP_CT_NEW &&
-	    ct->status & IPS_NAT_MASK &&
-	    (ctinfo != IP_CT_RELATED || info->commit)) {
+	if (ctinfo != IP_CT_NEW && (ct->status & IPS_NAT_MASK) &&
+	    (ctinfo != IP_CT_RELATED || commit)) {
 		/* NAT an established or related connection like before. */
 		if (CTINFO2DIR(ctinfo) == IP_CT_DIR_REPLY)
 			/* This is the REPLY direction for a connection
@@ -269,555 +352,642 @@ static int tcf_conntrack_nat(struct net *net,
 		else
 			maniptype = ct->status & IPS_SRC_NAT
 				? NF_NAT_MANIP_SRC : NF_NAT_MANIP_DST;
-	} else if (info->nat & OVS_CT_SRC_NAT) {
+	} else if (ct_action & TCA_CT_ACT_NAT_SRC) {
 		maniptype = NF_NAT_MANIP_SRC;
-	} else if (info->nat & OVS_CT_DST_NAT) {
+	} else if (ct_action & TCA_CT_ACT_NAT_DST) {
 		maniptype = NF_NAT_MANIP_DST;
 	} else {
-		return NF_ACCEPT; /* Connection is not NATed. */
+		return NF_ACCEPT;
 	}
 
-	err = tcf_conntrack_nat_execute(skb, ct, ctinfo, &info->range,
-					maniptype);
+	err = ct_nat_execute(skb, ct, ctinfo, range, maniptype);
+	if (err == NF_ACCEPT &&
+	    ct->status & IPS_SRC_NAT && ct->status & IPS_DST_NAT) {
+		if (maniptype == NF_NAT_MANIP_SRC)
+			maniptype = NF_NAT_MANIP_DST;
+		else
+			maniptype = NF_NAT_MANIP_SRC;
 
+		err = ct_nat_execute(skb, ct, ctinfo, range, maniptype);
+	}
 	return err;
+#else
+	return NF_ACCEPT;
+#endif
 }
 
-static void tcf_ct_clear(struct sk_buff *skb)
-{
-	if (skb_nfct(skb)) {
-		nf_conntrack_put(skb_nfct(skb));
-		nf_ct_set(skb, NULL, IP_CT_UNTRACKED);
-	}
-}
-
-static int __tcf_conntrack(struct sk_buff *skb,
-			   struct tcf_conntrack_info *ca,
-			   u_int8_t family,
-			   const struct tc_action *a,
-			   struct tcf_result *res)
+static int tcf_ct_act(struct sk_buff *skb, const struct tc_action *a,
+		      struct tcf_result *res)
 {
 	struct net *net = dev_net(skb->dev);
+	bool cached, commit, clear, force;
 	enum ip_conntrack_info ctinfo;
+	struct tcf_ct *c = to_ct(a);
 	struct nf_conn *tmpl = NULL;
+	struct nf_hook_state state;
+	int nh_ofs, err, retval;
+	struct tcf_ct_params *p;
 	struct nf_conn *ct;
-	bool cached;
-	struct nf_hook_state state = {
-		.hook = NF_INET_PRE_ROUTING,
-		.pf = PF_INET,
-		.net = net,
-	};
-	int err;
+	u8 family;
 
-	tmpl = ca->tmpl;
-	cached = skb_nfct_cached(net, skb, ca->zone);
+	p = rcu_dereference_bh(c->params);
 
+	retval = READ_ONCE(c->tcf_action);
+	commit = p->ct_action & TCA_CT_ACT_COMMIT;
+	clear = p->ct_action & TCA_CT_ACT_CLEAR;
+	force = p->ct_action & TCA_CT_ACT_FORCE;
+	tmpl = p->tmpl;
+
+	if (clear) {
+		ct = nf_ct_get(skb, &ctinfo);
+		if (ct) {
+			nf_conntrack_put(&ct->ct_general);
+			nf_ct_set(skb, NULL, IP_CT_UNTRACKED);
+		}
+
+		goto out;
+	}
+
+	family = tcf_ct_skb_nf_family(skb);
+	if (family == NFPROTO_UNSPEC)
+		goto drop;
+
+	/* The conntrack module expects to be working at L3.
+	 * We also try to pull the IPv4/6 header to linear area
+	 */
+	nh_ofs = skb_network_offset(skb);
+	skb_pull_rcsum(skb, nh_ofs);
+	err = tcf_ct_handle_fragments(net, skb, family, p->zone);
+	if (err == -EINPROGRESS) {
+		retval = TC_ACT_STOLEN;
+		goto out;
+	}
+	if (err)
+		goto drop;
+
+	err = tcf_ct_skb_network_trim(skb, family);
+	if (err)
+		goto drop;
+
+	/* If we are recirculating packets to match on ct fields and
+	 * committing with a separate ct action, then we don't need to
+	 * actually run the packet through conntrack twice unless it's for a
+	 * different zone.
+	 */
+	cached = tcf_ct_skb_nfct_cached(net, skb, p->zone, force);
 	if (!cached) {
+		/* Associate skb with specified zone. */
 		if (tmpl) {
+			ct = nf_ct_get(skb, &ctinfo);
 			if (skb_nfct(skb))
 				nf_conntrack_put(skb_nfct(skb));
-
+			nf_conntrack_get(&tmpl->ct_general);
 			nf_ct_set(skb, tmpl, IP_CT_NEW);
 		}
 
+		state.hook = NF_INET_PRE_ROUTING;
+		state.net = net;
 		state.pf = family;
 		err = nf_conntrack_in(skb, &state);
 		if (err != NF_ACCEPT)
-			goto drop;
-	} else {
-		if (tmpl)
-			nf_conntrack_put(&tmpl->ct_general);
+			goto out_push;
 	}
 
 	ct = nf_ct_get(skb, &ctinfo);
 	if (!ct)
-		goto out;
+		goto out_push;
+	nf_ct_deliver_cached_events(ct);
 
-	if (ca->nat && (nf_ct_is_confirmed(ct) || ca->commit)) {
-		err = tcf_conntrack_nat(net, ca, skb, ct, ctinfo);
-		if (err != NF_ACCEPT)
-			goto drop;
+	err = tcf_ct_act_nat(skb, ct, ctinfo, p->ct_action, &p->range, commit);
+	if (err != NF_ACCEPT)
+		goto drop;
+
+	if (commit) {
+		tcf_ct_act_set_mark(ct, p->mark, p->mark_mask);
+		tcf_ct_act_set_labels(ct, p->labels, p->labels_mask);
+
+		/* This will take care of sending queued events
+		 * even if the connection is already confirmed.
+		 */
+		nf_conntrack_confirm(skb);
 	}
 
-	if (ctinfo == IP_CT_ESTABLISHED ||
-	    ctinfo == IP_CT_ESTABLISHED_REPLY) {
-		/* TODO: I'm not sure if that "cached" thing affects NAT? */
-		ct_notify_underlying_device(skb, ca, ct, ctinfo, net);
-	}
-
-	/* TODO: must check this code very carefully; move to another function */
-	if (ca->commit) {
-		u32 *labels = ca->labels;
-		u32 *labels_m = ca->labels_mask;
-
-#if IS_ENABLED(CONFIG_NF_CONNTRACK_MARK)
-		if (ca->mark_mask) {
-			u32 ct_mark = ca->mark;
-			u32 mask = ca->mark_mask;
-			u32 new_mark;
-
-			new_mark = ct_mark | (ct->mark & ~(mask));
-			if (ct->mark != new_mark) {
-				ct->mark = new_mark;
-				if (nf_ct_is_confirmed(ct))
-					nf_conntrack_event_cache(IPCT_MARK, ct);
-			}
-		}
-#endif
-		if (!nf_ct_is_confirmed(ct)) {
-			struct nf_conn_labels *cl, *master_cl;
-			bool have_mask = !!(memchr_inv(ca->labels_mask, 0, sizeof(ca->labels_mask)));
-
-			/* Inherit master's labels to the related connection? */
-			master_cl = ct->master ? nf_ct_labels_find(ct->master) : NULL;
-
-			if (!master_cl && !have_mask)
-				goto skip; /* Nothing to do. */
-
-			cl = nf_ct_labels_find(ct);
-			if (!cl) {
-				nf_ct_labels_ext_add(ct);
-				cl = nf_ct_labels_find(ct);
-			}
-
-			if (!cl)
-				goto drop;
-
-			/* Inherit the master's labels, if any.  Must use memcpy for backport
-			 * as struct assignment only copies the length field in older
-			 * kernels.
-	 		*/
-			if (master_cl)
-				memcpy(cl->bits, master_cl->bits, NF_CT_LABELS_MAX_SIZE);
-
-			if (have_mask) {
-				u32 *dst = (u32 *)cl->bits;
-				int i;
-
-				for (i = 0; i < 4; i++)
-					dst[i] = (dst[i] & ~labels_m[i]) | (labels[i] & labels_m[i]);
-
-				//todo: can we just replace?
-			}
-
-			/* Labels are included in the IPCTNL_MSG_CT_NEW event only if the
-			 * IPCT_LABEL bit is set in the event cache.
-			 */
-			nf_conntrack_event_cache(IPCT_LABEL, ct);
-		} else if (!!memchr_inv(labels_m, 0, sizeof(ca->labels_mask))) {
-			struct nf_conn_labels *cl;
-
-			cl = nf_ct_labels_find(ct);
-			if (!cl) {
-				nf_ct_labels_ext_add(ct);
-				cl = nf_ct_labels_find(ct);
-			}
-
-			if (!cl)
-				goto drop;
-
-			nf_connlabels_replace(ct, ca->labels, ca->labels_mask, 4);
-		}
-skip:
-		if (nf_conntrack_confirm(skb) != NF_ACCEPT)
-			goto drop;
-	}
-
-	return ca->tcf_action;
+out_push:
+	skb_push_rcsum(skb, nh_ofs);
 
 out:
-	ct_notify_underlying_device(skb, ca, NULL, IP_CT_UNTRACKED, net);
-	return ca->tcf_action;
+	bstats_cpu_update(this_cpu_ptr(a->cpu_bstats), skb);
+	return retval;
 
 drop:
+	qstats_drop_inc(this_cpu_ptr(a->cpu_qstats));
 	return TC_ACT_SHOT;
 }
 
-static int tcf_conntrack(struct sk_buff *skb, const struct tc_action *a,
-			 struct tcf_result *res)
-{
-	struct tcf_conntrack_info *orig_ca = to_conntrack(a);
-	struct tcf_conntrack_info tmp_ca;
-	u_int8_t family;
-	int nh_ofs;
-	int err;
-
-	err = tcf_skb_network_trim(skb);
-	if (err)
-		return TC_ACT_SHOT;
-
-	family = tcf_skb_family(skb);
-	if (family == PF_UNSPEC)
-		return TC_ACT_SHOT;
-
-	/* TODO: temporary; should be in a different action? */
-	if (orig_ca->clear) {
-		tcf_ct_clear(skb);
-		return orig_ca->tcf_action;
-	}
-
-	/* The conntrack module expects to be working at L3. */
-	nh_ofs = skb_network_offset(skb);
-	skb_pull_rcsum(skb, nh_ofs);
-
-	spin_lock(&orig_ca->tcf_lock);
-	tcf_lastuse_update(&orig_ca->tcf_tm);
-	bstats_update(&orig_ca->tcf_bstats, skb);
-	memcpy(&tmp_ca, orig_ca, sizeof(tmp_ca));
-
-	if (orig_ca->tmpl)
-		nf_conntrack_get(&orig_ca->tmpl->ct_general);
-	spin_unlock(&orig_ca->tcf_lock);
-
-	err = __tcf_conntrack(skb, &tmp_ca, family, a, res);
-
-	skb_push(skb, nh_ofs);
-	skb_postpush_rcsum(skb, skb->data, nh_ofs);
-
-	return err;
-}
-
-static const struct nla_policy conntrack_policy[TCA_CONNTRACK_MAX + 1] = {
-	[TCA_CONNTRACK_PARMS] = { .type = NLA_EXACT_LEN, .len = sizeof(struct tc_conntrack) },
-	/* TODO: should be nested */
-	/* TODO: support IPv6 */
-	[TCA_CONNTRACK_NAT] = { .type = NLA_FLAG },
-	[TCA_CONNTRACK_NAT_SRC] = { .type = NLA_FLAG },
-	[TCA_CONNTRACK_NAT_DST] = { .type = NLA_FLAG },
-	[TCA_CONNTRACK_NAT_IP_MIN] = { .type = NLA_U32 },
-	[TCA_CONNTRACK_NAT_IP_MAX] = { .type = NLA_U32 },
-	[TCA_CONNTRACK_NAT_PORT_MIN] = { .type = NLA_U16 },
-	[TCA_CONNTRACK_NAT_PORT_MAX] = { .type = NLA_U16 },
+static const struct nla_policy ct_policy[TCA_CT_MAX + 1] = {
+	[TCA_CT_UNSPEC] = { .strict_start_type = TCA_CT_UNSPEC + 1 },
+	[TCA_CT_ACTION] = { .type = NLA_U16 },
+	[TCA_CT_PARMS] = { .type = NLA_EXACT_LEN, .len = sizeof(struct tc_ct) },
+	[TCA_CT_ZONE] = { .type = NLA_U16 },
+	[TCA_CT_MARK] = { .type = NLA_U32 },
+	[TCA_CT_MARK_MASK] = { .type = NLA_U32 },
+	[TCA_CT_LABELS] = { .type = NLA_BINARY,
+			    .len = 128 / BITS_PER_BYTE },
+	[TCA_CT_LABELS_MASK] = { .type = NLA_BINARY,
+				 .len = 128 / BITS_PER_BYTE },
+	[TCA_CT_NAT_IPV4_MIN] = { .type = NLA_U32 },
+	[TCA_CT_NAT_IPV4_MAX] = { .type = NLA_U32 },
+	[TCA_CT_NAT_IPV6_MIN] = { .type = NLA_EXACT_LEN,
+				  .len = sizeof(struct in6_addr) },
+	[TCA_CT_NAT_IPV6_MAX] = { .type = NLA_EXACT_LEN,
+				   .len = sizeof(struct in6_addr) },
+	[TCA_CT_NAT_PORT_MIN] = { .type = NLA_U16 },
+	[TCA_CT_NAT_PORT_MAX] = { .type = NLA_U16 },
 };
 
-static void tcf_conntrack_nat_parse(struct tcf_conntrack_info *info,
-				    struct nlattr *tb[])
+static int tcf_ct_fill_params_nat(struct tcf_ct_params *p,
+				  struct tc_ct *parm,
+				  struct nlattr **tb,
+				  struct netlink_ext_ack *extack)
 {
-	bool have_ip_max = false;
-	bool have_proto_max = false;
+	struct nf_nat_range2 *range;
 
-	if (!tb[TCA_CONNTRACK_NAT])
-		return;
+	if (!(p->ct_action & TCA_CT_ACT_NAT))
+		return 0;
 
-	info->nat |= OVS_CT_NAT;
-
-	if (tb[TCA_CONNTRACK_NAT_SRC])
-		info->nat |= OVS_CT_SRC_NAT;
-	if (tb[TCA_CONNTRACK_NAT_DST])
-		info->nat |= OVS_CT_DST_NAT;
-
-	if (tb[TCA_CONNTRACK_NAT_IP_MIN]) {
-		info->range.min_addr.ip = nla_get_u32(tb[TCA_CONNTRACK_NAT_IP_MIN]);
-		info->range.flags |= NF_NAT_RANGE_MAP_IPS;
-	}
-	if (tb[TCA_CONNTRACK_NAT_IP_MAX]) {
-		info->range.max_addr.ip = nla_get_u32(tb[TCA_CONNTRACK_NAT_IP_MAX]);
-		info->range.flags |= NF_NAT_RANGE_MAP_IPS;
-		have_ip_max = true;
+	if (!IS_ENABLED(CONFIG_NF_NAT)) {
+		NL_SET_ERR_MSG_MOD(extack, "Netfilter nat isn't enabled in kernel");
+		return -EOPNOTSUPP;
 	}
 
-	if (tb[TCA_CONNTRACK_NAT_PORT_MIN]) {
-		info->range.min_proto.all = htons(nla_get_u16(tb[TCA_CONNTRACK_NAT_PORT_MIN]));
-		info->range.flags |= NF_NAT_RANGE_PROTO_SPECIFIED;
-	}
-	if (tb[TCA_CONNTRACK_NAT_PORT_MAX]) {
-		info->range.max_proto.all = htons(nla_get_u16(tb[TCA_CONNTRACK_NAT_PORT_MAX]));
-		info->range.flags |= NF_NAT_RANGE_PROTO_SPECIFIED;
-		have_proto_max = true;
+	if (!(p->ct_action & (TCA_CT_ACT_NAT_SRC | TCA_CT_ACT_NAT_DST)))
+		return 0;
+
+	if ((p->ct_action & TCA_CT_ACT_NAT_SRC) &&
+	    (p->ct_action & TCA_CT_ACT_NAT_DST)) {
+		NL_SET_ERR_MSG_MOD(extack, "dnat and snat can't be enabled at the same time");
+		return -EOPNOTSUPP;
 	}
 
-	/* Allow missing IP_MAX. */
-	if (info->range.flags & NF_NAT_RANGE_MAP_IPS && !have_ip_max)
-		info->range.max_addr.ip = info->range.min_addr.ip;
+	range = &p->range;
+	if (tb[TCA_CT_NAT_IPV4_MIN]) {
+		struct nlattr *max_attr = tb[TCA_CT_NAT_IPV4_MAX];
 
-	/* Allow missing PROTO_MAX. */
-	if (info->range.flags & NF_NAT_RANGE_PROTO_SPECIFIED &&
-	    !have_proto_max) {
-		info->range.max_proto.all = info->range.min_proto.all;
+		p->ipv4_range = true;
+		range->flags |= NF_NAT_RANGE_MAP_IPS;
+		range->min_addr.ip =
+			nla_get_in_addr(tb[TCA_CT_NAT_IPV4_MIN]);
+
+		range->max_addr.ip = max_attr ?
+				     nla_get_in_addr(max_attr) :
+				     range->min_addr.ip;
+	} else if (tb[TCA_CT_NAT_IPV6_MIN]) {
+		struct nlattr *max_attr = tb[TCA_CT_NAT_IPV6_MAX];
+
+		p->ipv4_range = false;
+		range->flags |= NF_NAT_RANGE_MAP_IPS;
+		range->min_addr.in6 =
+			nla_get_in6_addr(tb[TCA_CT_NAT_IPV6_MIN]);
+
+		range->max_addr.in6 = max_attr ?
+				      nla_get_in6_addr(max_attr) :
+				      range->min_addr.in6;
 	}
+
+	if (tb[TCA_CT_NAT_PORT_MIN]) {
+		range->flags |= NF_NAT_RANGE_PROTO_SPECIFIED;
+		range->min_proto.all = nla_get_be16(tb[TCA_CT_NAT_PORT_MIN]);
+
+		range->max_proto.all = tb[TCA_CT_NAT_PORT_MAX] ?
+				       nla_get_be16(tb[TCA_CT_NAT_PORT_MAX]) :
+				       range->min_proto.all;
+	}
+
+	return 0;
 }
 
-static int tcf_conntrack_init(struct net *net, struct nlattr *nla,
-			     struct nlattr *est, struct tc_action **a,
-			     int ovr, int bind, bool rtnl_held,
-			     struct tcf_proto *tp,
-			     struct netlink_ext_ack *extack)
+static void tcf_ct_set_key_val(struct nlattr **tb,
+			       void *val, int val_type,
+			       void *mask, int mask_type,
+			       int len)
 {
-	struct tc_action_net *tn = net_generic(net, conntrack_net_id);
-	struct tcf_block *block = tp->chain->block;
-	struct nlattr *tb[TCA_CONNTRACK_MAX + 1];
-	struct tcf_conntrack_info *ci;
-	struct tc_conntrack *parm;
-	int ret = 0;
+	if (!tb[val_type])
+		return;
+	nla_memcpy(val, tb[val_type], len);
+
+	if (!mask)
+		return;
+
+	if (mask_type == TCA_CT_UNSPEC || !tb[mask_type])
+		memset(mask, 0xff, len);
+	else
+		nla_memcpy(mask, tb[mask_type], len);
+}
+
+static int tcf_ct_fill_params(struct net *net,
+			      struct tcf_ct_params *p,
+			      struct tc_ct *parm,
+			      struct nlattr **tb,
+			      struct netlink_ext_ack *extack)
+{
+	struct tc_ct_action_net *tn = net_generic(net, ct_net_id);
 	struct nf_conntrack_zone zone;
-	struct nf_conn *tmpl = NULL;
+	struct nf_conn *tmpl;
+	int err;
+
+	p->zone = NF_CT_DEFAULT_ZONE_ID;
+
+	tcf_ct_set_key_val(tb,
+			   &p->ct_action, TCA_CT_ACTION,
+			   NULL, TCA_CT_UNSPEC,
+			   sizeof(p->ct_action));
+
+	if (p->ct_action & TCA_CT_ACT_CLEAR)
+		return 0;
+
+	err = tcf_ct_fill_params_nat(p, parm, tb, extack);
+	if (err)
+		return err;
+
+	if (tb[TCA_CT_MARK]) {
+		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_MARK)) {
+			NL_SET_ERR_MSG_MOD(extack, "Conntrack mark isn't enabled.");
+			return -EOPNOTSUPP;
+		}
+		tcf_ct_set_key_val(tb,
+				   &p->mark, TCA_CT_MARK,
+				   &p->mark_mask, TCA_CT_MARK_MASK,
+				   sizeof(p->mark));
+	}
+
+	if (tb[TCA_CT_LABELS]) {
+		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_LABELS)) {
+			NL_SET_ERR_MSG_MOD(extack, "Conntrack labels isn't enabled.");
+			return -EOPNOTSUPP;
+		}
+
+		if (!tn->labels) {
+			NL_SET_ERR_MSG_MOD(extack, "Failed to set connlabel length");
+			return -EOPNOTSUPP;
+		}
+		tcf_ct_set_key_val(tb,
+				   p->labels, TCA_CT_LABELS,
+				   p->labels_mask, TCA_CT_LABELS_MASK,
+				   sizeof(p->labels));
+	}
+
+	if (tb[TCA_CT_ZONE]) {
+		if (!IS_ENABLED(CONFIG_NF_CONNTRACK_ZONES)) {
+			NL_SET_ERR_MSG_MOD(extack, "Conntrack zones isn't enabled.");
+			return -EOPNOTSUPP;
+		}
+
+		tcf_ct_set_key_val(tb,
+				   &p->zone, TCA_CT_ZONE,
+				   NULL, TCA_CT_UNSPEC,
+				   sizeof(p->zone));
+	}
+
+	if (p->zone == NF_CT_DEFAULT_ZONE_ID)
+		return 0;
+
+	nf_ct_zone_init(&zone, p->zone, NF_CT_DEFAULT_ZONE_DIR, 0);
+	tmpl = nf_ct_tmpl_alloc(net, &zone, GFP_KERNEL);
+	if (!tmpl) {
+		NL_SET_ERR_MSG_MOD(extack, "Failed to allocate conntrack template");
+		return -ENOMEM;
+	}
+	__set_bit(IPS_CONFIRMED_BIT, &tmpl->status);
+	nf_conntrack_get(&tmpl->ct_general);
+	p->tmpl = tmpl;
+
+	return 0;
+}
+
+static int tcf_ct_init(struct net *net, struct nlattr *nla,
+		       struct nlattr *est, struct tc_action **a,
+		       int replace, int bind, bool rtnl_held,
+		       struct tcf_proto *tp,
+		       struct netlink_ext_ack *extack)
+{
+	struct tc_action_net *tn = net_generic(net, ct_net_id);
+	struct tcf_ct_params *params = NULL;
+	struct nlattr *tb[TCA_CT_MAX + 1];
+	struct tcf_chain *goto_ch = NULL;
+	struct tc_ct *parm;
+	struct tcf_ct *c;
+	int err, res = 0;
 	u32 index;
 
-	if (!nla)
+	if (!nla) {
+		NL_SET_ERR_MSG_MOD(extack, "Ct requires attributes to be passed");
 		return -EINVAL;
+	}
 
-	ret = nla_parse_nested(tb, TCA_CONNTRACK_MAX, nla, conntrack_policy,
-			       NULL);
-	if (ret < 0)
-		return ret;
+	err = nla_parse_nested(tb, TCA_CT_MAX, nla, ct_policy, extack);
+	if (err < 0)
+		return err;
 
-	if (!tb[TCA_CONNTRACK_PARMS])
+	if (!tb[TCA_CT_PARMS]) {
+		NL_SET_ERR_MSG_MOD(extack, "Missing required ct parameters");
 		return -EINVAL;
-
-	parm = nla_data(tb[TCA_CONNTRACK_PARMS]);
+	}
+	parm = nla_data(tb[TCA_CT_PARMS]);
 	index = parm->index;
-	ret = tcf_idr_check_alloc(tn, &index, a, bind);
-	if (!ret) {
-		ret = tcf_idr_create(tn, index, est, a,
-				     &act_conntrack_ops, bind, false);
-		if (ret) {
+	err = tcf_idr_check_alloc(tn, &index, a, bind);
+	if (err < 0)
+		return err;
+
+	if (!err) {
+		err = tcf_idr_create(tn, index, est, a,
+				     &act_ct_ops, bind, true);
+		if (err) {
 			tcf_idr_cleanup(tn, index);
-			return ret;
+			return err;
 		}
-
-		ci = to_conntrack(*a);
-		ci->tcf_action = parm->action;
-		ci->net = net;
-		ci->commit = parm->commit;
-		ci->clear = parm->clear;
-
-		tcf_conntrack_nat_parse(ci, tb);
-
-		ci->zone = parm->zone;
-		if (parm->zone != NF_CT_DEFAULT_ZONE_ID) {
-			nf_ct_zone_init(&zone, parm->zone,
-							NF_CT_DEFAULT_ZONE_DIR, 0);
-
-			tmpl = nf_ct_tmpl_alloc(net, &zone, GFP_ATOMIC);
-			if (!tmpl) {
-				pr_debug("Failed to allocate conntrack template");
-				tcf_idr_cleanup(tn, index);
-				return -ENOMEM;
-			}
-			__set_bit(IPS_CONFIRMED_BIT, &tmpl->status);
-			nf_conntrack_get(&tmpl->ct_general);
-		}
-
-		ci->tmpl = tmpl;
-		ci->mark = parm->mark;
-		ci->mark_mask = parm->mark_mask;
-		ci->block = block;
-		memcpy(ci->labels, parm->labels, sizeof(parm->labels));
-		memcpy(ci->labels_mask, parm->labels_mask, sizeof(parm->labels_mask));
-
-		//tcf_idr_insert(tn, *a);
-		ret = ACT_P_CREATED;
-	} else if (ret > 0) {
+		res = ACT_P_CREATED;
+	} else {
 		if (bind)
 			return 0;
 
-		if (!ovr) {
+		if (!replace) {
 			tcf_idr_release(*a, bind);
 			return -EEXIST;
 		}
+	}
+	err = tcf_action_check_ctrlact(parm->action, tp, &goto_ch, extack);
+	if (err < 0)
+		goto cleanup;
 
-		if (parm->zone != NF_CT_DEFAULT_ZONE_ID) {
-			nf_ct_zone_init(&zone, parm->zone,
-							NF_CT_DEFAULT_ZONE_DIR, 0);
+	c = to_ct(*a);
 
-			tmpl = nf_ct_tmpl_alloc(net, &zone, GFP_ATOMIC);
-			if (!tmpl) {
-				pr_debug("Failed to allocate conntrack template");
-				return -ENOMEM;
-			}
-		}
-
-		/* replacing action and zone */
-		ci = to_conntrack(*a);
-		spin_lock_bh(&ci->tcf_lock);
-		ci->tcf_action = parm->action;
-		ci->zone = parm->zone;
-		swap(ci->tmpl, tmpl);
-		spin_unlock_bh(&ci->tcf_lock);
-
-		if (tmpl) {
-			nf_conntrack_put(&tmpl->ct_general);
-		}
-
-		ret = 0;
+	params = kzalloc(sizeof(*params), GFP_KERNEL);
+	if (unlikely(!params)) {
+		err = -ENOMEM;
+		goto cleanup;
 	}
 
-	return ret;
-}
-
-static void tcf_conntrack_release(struct tc_action *a)
-{
-	struct tcf_conntrack_info *ci = to_conntrack(a);
-	struct nf_conn *tmpl = NULL;
-
-	spin_lock_bh(&ci->tcf_lock);
-	if (ci->tmpl) {
-		swap(ci->tmpl, tmpl);
-	}
-	spin_unlock_bh(&ci->tcf_lock);
-
-	if (tmpl) {
-		nf_conntrack_put(&tmpl->ct_general);
-	}
-}
-
-static int tcf_conntrack_dump_nat(struct sk_buff *skb,
-				  struct tcf_conntrack_info *info)
-{
-	int err;
-
-	if (!info->nat)
-		return 0;
-
-	err = nla_put_flag(skb, TCA_CONNTRACK_NAT);
+	err = tcf_ct_fill_params(net, params, parm, tb, extack);
 	if (err)
-		goto nla_put_failure;
+		goto cleanup;
 
-	if (info->nat & OVS_CT_SRC_NAT) {
-		err = nla_put_flag(skb, TCA_CONNTRACK_NAT_SRC);
-		if (err)
-			goto nla_put_failure;
-	}
+	spin_lock_bh(&c->tcf_lock);
+	goto_ch = tcf_action_set_ctrlact(*a, parm->action, goto_ch);
+	rcu_swap_protected(c->params, params, lockdep_is_held(&c->tcf_lock));
+	spin_unlock_bh(&c->tcf_lock);
 
-	if (info->nat & OVS_CT_DST_NAT) {
-		err = nla_put_flag(skb, TCA_CONNTRACK_NAT_DST);
-		if (err)
-			goto nla_put_failure;
-	}
+	if (goto_ch)
+		tcf_chain_put_by_act(goto_ch);
+	if (params)
+		call_rcu(&params->rcu, tcf_ct_params_free);
 
-	if (info->range.flags & NF_NAT_RANGE_MAP_IPS) {
-		err = nla_put_be32(skb, TCA_CONNTRACK_NAT_IP_MIN,
-				   info->range.min_addr.ip);
-		if (err)
-			goto nla_put_failure;
+	return res;
 
-		err = nla_put_be32(skb, TCA_CONNTRACK_NAT_IP_MAX,
-				   info->range.max_addr.ip);
-		if (err)
-			goto nla_put_failure;
-	}
-
-	if (info->range.flags & NF_NAT_RANGE_PROTO_SPECIFIED) {
-		err = nla_put_be16(skb, TCA_CONNTRACK_NAT_PORT_MIN,
-				   info->range.min_proto.all);
-		if (err)
-			goto nla_put_failure;
-
-		err = nla_put_be16(skb, TCA_CONNTRACK_NAT_PORT_MAX,
-				   info->range.max_proto.all);
-		if (err)
-			goto nla_put_failure;
-	}
-
-nla_put_failure:
+cleanup:
+	if (goto_ch)
+		tcf_chain_put_by_act(goto_ch);
+	kfree(params);
+	tcf_idr_release(*a, bind);
 	return err;
 }
 
-static inline int tcf_conntrack_dump(struct sk_buff *skb, struct tc_action *a,
-				    int bind, int ref)
+static void tcf_ct_cleanup(struct tc_action *a)
+{
+	struct tcf_ct_params *params;
+	struct tcf_ct *c = to_ct(a);
+
+	params = rcu_dereference_protected(c->params, 1);
+	if (params)
+		call_rcu(&params->rcu, tcf_ct_params_free);
+}
+
+static int tcf_ct_dump_key_val(struct sk_buff *skb,
+			       void *val, int val_type,
+			       void *mask, int mask_type,
+			       int len)
+{
+	int err;
+
+	if (mask && !memchr_inv(mask, 0, len))
+		return 0;
+
+	err = nla_put(skb, val_type, len, val);
+	if (err)
+		return err;
+
+	if (mask_type != TCA_CT_UNSPEC) {
+		err = nla_put(skb, mask_type, len, mask);
+		if (err)
+			return err;
+	}
+
+	return 0;
+}
+
+static int tcf_ct_dump_nat(struct sk_buff *skb, struct tcf_ct_params *p)
+{
+	struct nf_nat_range2 *range = &p->range;
+
+	if (!(p->ct_action & TCA_CT_ACT_NAT))
+		return 0;
+
+	if (!(p->ct_action & (TCA_CT_ACT_NAT_SRC | TCA_CT_ACT_NAT_DST)))
+		return 0;
+
+	if (range->flags & NF_NAT_RANGE_MAP_IPS) {
+		if (p->ipv4_range) {
+			if (nla_put_in_addr(skb, TCA_CT_NAT_IPV4_MIN,
+					    range->min_addr.ip))
+				return -1;
+			if (nla_put_in_addr(skb, TCA_CT_NAT_IPV4_MAX,
+					    range->max_addr.ip))
+				return -1;
+		} else {
+			if (nla_put_in6_addr(skb, TCA_CT_NAT_IPV6_MIN,
+					     &range->min_addr.in6))
+				return -1;
+			if (nla_put_in6_addr(skb, TCA_CT_NAT_IPV6_MAX,
+					     &range->max_addr.in6))
+				return -1;
+		}
+	}
+
+	if (range->flags & NF_NAT_RANGE_PROTO_SPECIFIED) {
+		if (nla_put_be16(skb, TCA_CT_NAT_PORT_MIN,
+				 range->min_proto.all))
+			return -1;
+		if (nla_put_be16(skb, TCA_CT_NAT_PORT_MAX,
+				 range->max_proto.all))
+			return -1;
+	}
+
+	return 0;
+}
+
+static inline int tcf_ct_dump(struct sk_buff *skb, struct tc_action *a,
+			      int bind, int ref)
 {
 	unsigned char *b = skb_tail_pointer(skb);
-	struct tcf_conntrack_info *ci = to_conntrack(a);
+	struct tcf_ct *c = to_ct(a);
+	struct tcf_ct_params *p;
 
-	struct tc_conntrack opt = {
-		.index   = ci->tcf_index,
-		.refcnt  = refcount_read(&ci->tcf_refcnt) - ref,
-		.bindcnt = atomic_read(&ci->tcf_bindcnt) - bind,
+	struct tc_ct opt = {
+		.index   = c->tcf_index,
+		.refcnt  = refcount_read(&c->tcf_refcnt) - ref,
+		.bindcnt = atomic_read(&c->tcf_bindcnt) - bind,
 	};
 	struct tcf_t t;
 
- 	spin_lock_bh(&ci->tcf_lock);
-	opt.action  = ci->tcf_action,
-	opt.zone   = ci->zone,
-	opt.commit = ci->commit,
-	opt.clear = ci->clear,
-	opt.mark = ci->mark,
-	opt.mark_mask = ci->mark_mask,
+	spin_lock_bh(&c->tcf_lock);
+	p = rcu_dereference_protected(c->params,
+				      lockdep_is_held(&c->tcf_lock));
+	opt.action = c->tcf_action;
 
- 	memcpy(opt.labels, ci->labels, sizeof(opt.labels));
-	memcpy(opt.labels_mask, ci->labels_mask, sizeof(opt.labels_mask));
-
-	if (nla_put(skb, TCA_CONNTRACK_PARMS, sizeof(opt), &opt))
+	if (tcf_ct_dump_key_val(skb,
+				&p->ct_action, TCA_CT_ACTION,
+				NULL, TCA_CT_UNSPEC,
+				sizeof(p->ct_action)))
 		goto nla_put_failure;
 
-	if (tcf_conntrack_dump_nat(skb, ci))
+	if (p->ct_action & TCA_CT_ACT_CLEAR)
+		goto skip_dump;
+
+	if (IS_ENABLED(CONFIG_NF_CONNTRACK_MARK) &&
+	    tcf_ct_dump_key_val(skb,
+				&p->mark, TCA_CT_MARK,
+				&p->mark_mask, TCA_CT_MARK_MASK,
+				sizeof(p->mark)))
 		goto nla_put_failure;
 
-	tcf_tm_dump(&t, &ci->tcf_tm);
-	if (nla_put_64bit(skb, TCA_CONNTRACK_TM, sizeof(t), &t,
-			  TCA_CONNTRACK_PAD))
+	if (IS_ENABLED(CONFIG_NF_CONNTRACK_LABELS) &&
+	    tcf_ct_dump_key_val(skb,
+				p->labels, TCA_CT_LABELS,
+				p->labels_mask, TCA_CT_LABELS_MASK,
+				sizeof(p->labels)))
 		goto nla_put_failure;
-	spin_unlock_bh(&ci->tcf_lock);
+
+	if (IS_ENABLED(CONFIG_NF_CONNTRACK_ZONES) &&
+	    tcf_ct_dump_key_val(skb,
+				&p->zone, TCA_CT_ZONE,
+				NULL, TCA_CT_UNSPEC,
+				sizeof(p->zone)))
+		goto nla_put_failure;
+
+	if (tcf_ct_dump_nat(skb, p))
+		goto nla_put_failure;
+
+skip_dump:
+	if (nla_put(skb, TCA_CT_PARMS, sizeof(opt), &opt))
+		goto nla_put_failure;
+
+	tcf_tm_dump(&t, &c->tcf_tm);
+	if (nla_put_64bit(skb, TCA_CT_TM, sizeof(t), &t, TCA_CT_PAD))
+		goto nla_put_failure;
+	spin_unlock_bh(&c->tcf_lock);
 
 	return skb->len;
 nla_put_failure:
-	spin_unlock_bh(&ci->tcf_lock);
+	spin_unlock_bh(&c->tcf_lock);
 	nlmsg_trim(skb, b);
 	return -1;
 }
 
-static int tcf_conntrack_walker(struct net *net, struct sk_buff *skb,
-			       struct netlink_callback *cb, int type,
-			       const struct tc_action_ops *ops,
-			       struct netlink_ext_ack *extack)
+static int tcf_ct_walker(struct net *net, struct sk_buff *skb,
+			 struct netlink_callback *cb, int type,
+			 const struct tc_action_ops *ops,
+			 struct netlink_ext_ack *extack)
 {
-	struct tc_action_net *tn = net_generic(net, conntrack_net_id);
+	struct tc_action_net *tn = net_generic(net, ct_net_id);
 
 	return tcf_generic_walker(tn, skb, cb, type, ops, extack);
 }
 
-static int tcf_conntrack_search(struct net *net, struct tc_action **a, u32 index)
+static int tcf_ct_search(struct net *net, struct tc_action **a, u32 index)
 {
-	struct tc_action_net *tn = net_generic(net, conntrack_net_id);
+	struct tc_action_net *tn = net_generic(net, ct_net_id);
 
 	return tcf_idr_search(tn, a, index);
 }
 
-static struct tc_action_ops act_conntrack_ops = {
+static void tcf_stats_update(struct tc_action *a, u64 bytes, u32 packets,
+			     u64 lastuse, bool hw)
+{
+	struct tcf_ct *c = to_ct(a);
+
+	_bstats_cpu_update(this_cpu_ptr(a->cpu_bstats), bytes, packets);
+
+	if (hw)
+		_bstats_cpu_update(this_cpu_ptr(a->cpu_bstats_hw),
+				   bytes, packets);
+	c->tcf_tm.lastuse = max_t(u64, c->tcf_tm.lastuse, lastuse);
+}
+
+static struct tc_action_ops act_ct_ops = {
 	.kind		=	"ct",
-	.id		=	TCA_ACT_CONNTRACK,
+	.id		=	TCA_ID_CT,
 	.owner		=	THIS_MODULE,
-	.act		=	tcf_conntrack,
-	.dump		=	tcf_conntrack_dump,
-	.init		=	tcf_conntrack_init,
-	.cleanup	=	tcf_conntrack_release,
-	.walk		=	tcf_conntrack_walker,
-	.lookup		=	tcf_conntrack_search,
-	.size		=	sizeof(struct tcf_conntrack_info),
+	.act		=	tcf_ct_act,
+	.dump		=	tcf_ct_dump,
+	.init		=	tcf_ct_init,
+	.cleanup	=	tcf_ct_cleanup,
+	.walk		=	tcf_ct_walker,
+	.lookup		=	tcf_ct_search,
+	.stats_update	=	tcf_stats_update,
+	.size		=	sizeof(struct tcf_ct),
 };
 
-static __net_init int conntrack_init_net(struct net *net)
+static __net_init int ct_init_net(struct net *net)
 {
-	struct tc_action_net *tn = net_generic(net, conntrack_net_id);
+	unsigned int n_bits = FIELD_SIZEOF(struct tcf_ct_params, labels) * 8;
+	struct tc_ct_action_net *tn = net_generic(net, ct_net_id);
 
-	return tc_action_net_init(net, tn, &act_conntrack_ops);
+	if (nf_connlabels_get(net, n_bits - 1)) {
+		tn->labels = false;
+		pr_err("act_ct: Failed to set connlabels length");
+	} else {
+		tn->labels = true;
+	}
+
+	return tc_action_net_init(net, &tn->tn, &act_ct_ops);
 }
 
-static void __net_exit conntrack_exit_net(struct list_head *net_list)
+static void __net_exit ct_exit_net(struct list_head *net_list)
 {
-	tc_action_net_exit(net_list, conntrack_net_id);
+	struct net *net;
+
+	rtnl_lock();
+	list_for_each_entry(net, net_list, exit_list) {
+		struct tc_ct_action_net *tn = net_generic(net, ct_net_id);
+
+		if (tn->labels)
+			nf_connlabels_put(net);
+	}
+	rtnl_unlock();
+
+	tc_action_net_exit(net_list, ct_net_id);
 }
 
-static struct pernet_operations conntrack_net_ops = {
-	.init = conntrack_init_net,
-	.exit_batch = conntrack_exit_net,
-	.id   = &conntrack_net_id,
-	.size = sizeof(struct tc_action_net),
+static struct pernet_operations ct_net_ops = {
+	.init = ct_init_net,
+	.exit_batch = ct_exit_net,
+	.id   = &ct_net_id,
+	.size = sizeof(struct tc_ct_action_net),
 };
 
-static int __init conntrack_init_module(void)
+static int __init ct_init_module(void)
 {
-	return tcf_register_action(&act_conntrack_ops, &conntrack_net_ops);
+	return tcf_register_action(&act_ct_ops, &ct_net_ops);
 }
 
-static void __exit conntrack_cleanup_module(void)
+static void __exit ct_cleanup_module(void)
 {
-	tcf_unregister_action(&act_conntrack_ops, &conntrack_net_ops);
+	tcf_unregister_action(&act_ct_ops, &ct_net_ops);
 }
 
-module_init(conntrack_init_module);
-module_exit(conntrack_cleanup_module);
+module_init(ct_init_module);
+module_exit(ct_cleanup_module);
+MODULE_AUTHOR("Paul Blakey <paulb@mellanox.com>");
 MODULE_AUTHOR("Yossi Kuperman <yossiku@mellanox.com>");
+MODULE_AUTHOR("Marcelo Ricardo Leitner <marcelo.leitner@gmail.com>");
 MODULE_DESCRIPTION("Connection tracking action");
-MODULE_LICENSE("GPL");
-
+MODULE_LICENSE("GPL v2");

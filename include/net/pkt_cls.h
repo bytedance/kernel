@@ -514,8 +514,6 @@ void tc_cleanup_flow_action(struct flow_action *flow_action);
 
 int tc_setup_cb_call(struct tcf_block *block, enum tc_setup_type type,
 		     void *type_data, bool err_stop, bool rtnl_held);
-int tc_setup_cb_call_all(struct tcf_block *block, enum tc_setup_type type,
-			 void *type_data);
 int tc_setup_cb_add(struct tcf_block *block, struct tcf_proto *tp,
 		    enum tc_setup_type type, void *type_data, bool err_stop,
 		    u32 *flags, unsigned int *in_hw_count, bool rtnl_held);
@@ -830,4 +828,5 @@ struct tc_root_qopt_offload {
 	u32 handle;
 	bool ingress;
 };
+
 #endif
