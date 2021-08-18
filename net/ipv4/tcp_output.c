@@ -241,7 +241,7 @@ void tcp_select_initial_window(const struct sock *sk, int __space, __u32 mss,
 
 	if (sysctl_tcp_init_rwnd) {
 		*rcv_wnd = max(*rcv_wnd, sysctl_tcp_init_rwnd * mss);
-		*rcv_wnd = min(*rcv_wnd, U16_MAX);
+		*rcv_wnd = min_t(u32, *rcv_wnd, U16_MAX);
 	}
 
 	*rcv_wscale = 0;
@@ -783,7 +783,6 @@ unsigned int tcp_established_options(struct sock *sk, struct sk_buff *skb,
 					struct tcp_md5sig_key **md5)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
-	struct inet_sock *inet = inet_sk(sk);
 	unsigned int size = 0;
 	unsigned int eff_sacks;
 #ifdef CONFIG_TCP_SKB_TRACE

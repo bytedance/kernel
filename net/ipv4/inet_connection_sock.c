@@ -780,9 +780,9 @@ static void reqsk_timer_handler(struct timer_list *t)
 			to_init = sysctl_tcp_synack_timeout_init;
 
 		if (sysctl_tcp_synack_beb_close == 0)
-			timeo = min(to_init << req->num_timeout, TCP_RTO_MAX);
+			timeo = min_t(unsigned long, to_init << req->num_timeout, TCP_RTO_MAX);
 		else
-			timeo = min(to_init, TCP_RTO_MAX);
+			timeo = min_t(unsigned long, to_init, TCP_RTO_MAX);
 		mod_timer(&req->rsk_timer, jiffies + timeo);
 		return;
 	}
