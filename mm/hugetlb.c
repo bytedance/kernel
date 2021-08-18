@@ -72,21 +72,6 @@ DEFINE_SPINLOCK(hugetlb_lock);
 static int num_fault_mutexes;
 struct mutex *hugetlb_fault_mutex_table ____cacheline_aligned_in_smp;
 
-static inline bool PageHugeFreed(struct page *head)
-{
-	return page_private(head + SUBPAGE_INDEX_FREED) == -1UL;
-}
-
-static inline void SetPageHugeFreed(struct page *head)
-{
-	set_page_private(head + SUBPAGE_INDEX_FREED, -1UL);
-}
-
-static inline void ClearPageHugeFreed(struct page *head)
-{
-	set_page_private(head + SUBPAGE_INDEX_FREED, 0);
-}
-
 static bool hugetlb_clear_hpage_background __read_mostly;
 static int __init early_hugetlb_clear_hpage_background_param(char *buf)
 {
@@ -104,6 +89,21 @@ static int __init early_hugetlb_clear_hpage_background_param(char *buf)
 }
 early_param("hugetlb_clear_hpage_background",
 	    early_hugetlb_clear_hpage_background_param);
+
+static inline bool PageHugeFreed(struct page *head)
+{
+	return page_private(head + SUBPAGE_INDEX_FREED) == -1UL;
+}
+
+static inline void SetPageHugeFreed(struct page *head)
+{
+	set_page_private(head + SUBPAGE_INDEX_FREED, -1UL);
+}
+
+static inline void ClearPageHugeFreed(struct page *head)
+{
+	set_page_private(head + SUBPAGE_INDEX_FREED, 0);
+}
 
 /* Forward declaration */
 static int hugetlb_acct_memory(struct hstate *h, long delta);
@@ -972,9 +972,9 @@ static struct page *dequeue_huge_page_node_exact(struct hstate *h, int nid)
 	 */
 	if (&h->hugepage_freelists[nid] == &page->lru)
 		return NULL;
-	ClearPageHugeFreed(page);
 	list_move(&page->lru, &h->hugepage_activelist);
 	set_page_refcounted(page);
+	ClearPageHugeFreed(page);
 	h->free_huge_pages--;
 	h->free_huge_pages_node[nid]--;
 	return page;
@@ -1261,184 +1261,17 @@ static inline void destroy_compound_gigantic_page(struct page *page,
 						unsigned int order) { }
 #endif
 
-static void __free_hugepage(struct hstate *h, struct page *page);
-
-/*
- * As update_and_free_page() is always called with holding hugetlb_lock, so we
- * cannot use GFP_KERNEL to allocate vmemmap pages. However, we can defer the
- * actual freeing in a workqueue to prevent from using GFP_ATOMIC to allocate
- * the vmemmap pages.
- *
- * The update_hpage_vmemmap_workfn() is where the call to allocate vmemmmap
- * pages will be inserted.
- *
- * update_hpage_vmemmap_workfn() locklessly retrieves the linked list of pages
- * to be freed and frees them one-by-one. As the page->mapping pointer is going
- * to be cleared in update_hpage_vmemmap_workfn() anyway, it is reused as the
- * llist_node structure of a lockless linked list of huge pages to be freed.
- */
-static LLIST_HEAD(hpage_update_freelist);
-
-static void update_hpage_vmemmap_workfn(struct work_struct *work)
+static void __update_and_free_page(struct hstate *h, struct page *page)
 {
-	struct llist_node *node;
+	int i;
 
-	node = llist_del_all(&hpage_update_freelist);
+	VM_BUG_ON_PAGE(HPageVmemmapOptimized(page), page);
 
-	while (node) {
-		struct page *page;
-		struct hstate *h;
-
-		page = container_of((struct address_space **)node,
-				     struct page, mapping);
-		node = node->next;
-		page->mapping = NULL;
-		h = page_hstate(page);
-
-		alloc_huge_page_vmemmap(h, page);
-
-		spin_lock(&hugetlb_lock);
-		__free_hugepage(h, page);
-		spin_unlock(&hugetlb_lock);
-
-		cond_resched();
-	}
-}
-static DECLARE_WORK(hpage_update_work, update_hpage_vmemmap_workfn);
-
-static inline void flush_hpage_update_work(struct hstate *h)
-{
-	if (free_vmemmap_pages_per_hpage(h))
-		flush_work(&hpage_update_work);
-}
-
-#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-static inline bool PageHugeInflight(struct page *head)
-{
-	return page_private(head + SUBPAGE_INDEX_INFLIGHT) == 1;
-}
-
-static inline void SetPageHugeInflight(struct page *head)
-{
-	set_page_private(head + SUBPAGE_INDEX_INFLIGHT, 1);
-}
-
-static inline void ClearPageHugeInflight(struct page *head)
-{
-	set_page_private(head + SUBPAGE_INDEX_INFLIGHT, 0);
-}
-#else
-static inline bool PageHugeInflight(struct page *head)
-{
-	return false;
-}
-
-static inline void SetPageHugeInflight(struct page *head)
-{
-}
-
-static inline void ClearPageHugeInflight(struct page *head)
-{
-}
-#endif
-
-static inline void __update_and_free_page(struct hstate *h, struct page *page)
-{
-	/* No need to allocate vmemmap pages */
-	if (!free_vmemmap_pages_per_hpage(h)) {
-		__free_hugepage(h, page);
-		return;
-	}
-
-	ClearPageHugeFreed(page);
-	SetPageHugeInflight(page);
-
-	/*
-	 * Defer freeing to avoid using GFP_ATOMIC to allocate vmemmap
-	 * pages.
-	 *
-	 * Only call schedule_work() if hpage_update_freelist is previously
-	 * empty. Otherwise, schedule_work() had been called but the workfn
-	 * hasn't retrieved the list yet.
-	 */
-	if (llist_add((struct llist_node *)&page->mapping,
-		      &hpage_update_freelist))
-		schedule_work(&hpage_update_work);
-}
-
-#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-static inline void hwpoison_subpage_deliver(struct hstate *h, struct page *head)
-{
-	struct page *page;
-
-	if (!PageHWPoison(head) || !free_vmemmap_pages_per_hpage(h))
-		return;
-
-	page = head + page_private(head + SUBPAGE_INDEX_HWPOISON);
-
-	/*
-	 * Move PageHWPoison flag from head page to the raw error page,
-	 * which makes any subpages rather than the error page reusable.
-	 */
-	if (page != head) {
-		SetPageHWPoison(page);
-		ClearPageHWPoison(head);
-	}
-}
-
-static inline void hwpoison_subpage_set(struct hstate *h, struct page *head,
-					struct page *page)
-{
-	if (!PageHWPoison(head))
-		return;
-
-	if (free_vmemmap_pages_per_hpage(h)) {
-		set_page_private(head + SUBPAGE_INDEX_HWPOISON, page - head);
-	} else if (page != head) {
-		/*
-		 * Move PageHWPoison flag from head page to the raw error page,
-		 * which makes any subpages rather than the error page reusable.
-		 */
-		SetPageHWPoison(page);
-		ClearPageHWPoison(head);
-	}
-}
-#else
-static inline void hwpoison_subpage_deliver(struct hstate *h, struct page *head)
-{
-}
-
-static inline void hwpoison_subpage_set(struct hstate *h, struct page *head,
-					struct page *page)
-{
-	if (PageHWPoison(head) && page != head) {
-		/*
-		 * Move PageHWPoison flag from head page to the raw error page,
-		 * which makes any subpages rather than the error page reusable.
-		 */
-		SetPageHWPoison(page);
-		ClearPageHWPoison(head);
-	}
-}
-#endif
-
-static void update_and_free_page(struct hstate *h, struct page *page)
-{
 	if (hstate_is_gigantic(h) && !gigantic_page_runtime_supported())
 		return;
 
 	h->nr_huge_pages--;
 	h->nr_huge_pages_node[page_to_nid(page)]--;
-
-	__update_and_free_page(h, page);
-}
-
-static void __free_hugepage(struct hstate *h, struct page *page)
-{
-	int i;
-
-	hwpoison_subpage_deliver(h, page);
-
 	for (i = 0; i < pages_per_huge_page(h); i++) {
 		page[i].flags &= ~(1 << PG_locked | 1 << PG_error |
 				1 << PG_referenced | 1 << PG_dirty |
@@ -1454,6 +1287,95 @@ static void __free_hugepage(struct hstate *h, struct page *page)
 	} else {
 		__free_pages(page, huge_page_order(h));
 	}
+}
+
+static void add_hugetlb_page(struct hstate *h, struct page *page)
+{
+	VM_BUG_ON_PAGE(!HPageVmemmapOptimized(page), page);
+
+	lockdep_assert_held(&hugetlb_lock);
+
+	INIT_LIST_HEAD(&page->lru);
+	h->surplus_huge_pages++;
+	h->surplus_huge_pages_node[page_to_nid(page)]++;
+	arch_clear_hugepage_flags(page);
+	enqueue_huge_page(h, page);
+}
+
+/*
+ * As update_and_free_page() can be called under any context, so we cannot
+ * use GFP_KERNEL to allocate vmemmap pages. However, we can defer the
+ * actual freeing in a workqueue to prevent from using GFP_ATOMIC to allocate
+ * the vmemmap pages.
+ *
+ * hpage_free_vmemmap_workfn() locklessly retrieves the linked list of pages
+ * to be freed and frees them one-by-one. As the page->mapping pointer is going
+ * to be cleared in hpage_free_vmemmap_workfn() anyway, it is reused as the
+ * llist_node structure of a lockless linked list of huge pages to be freed.
+ */
+static LLIST_HEAD(hpage_defer_freelist);
+
+static void hpage_free_vmemmap_workfn(struct work_struct *work)
+{
+	struct llist_node *node;
+
+	node = llist_del_all(&hpage_defer_freelist);
+
+	while (node) {
+		struct page *page;
+		struct hstate *h;
+
+		page = container_of((struct address_space **)node,
+				     struct page, mapping);
+		node = node->next;
+		page->mapping = NULL;
+		/*
+		 * The VM_BUG_ON_PAGE(!PageHuge(page), page) in page_hstate()
+		 * is going to trigger because a previous call to
+		 * remove_hugetlb_page() will set_compound_page_dtor(page,
+		 * NULL_COMPOUND_DTOR), so do not use page_hstate() directly.
+		 */
+		h = size_to_hstate(page_size(page));
+
+		if (alloc_huge_page_vmemmap(h, page)) {
+			spin_lock(&hugetlb_lock);
+			add_hugetlb_page(h, page);
+			spin_unlock(&hugetlb_lock);
+			continue;
+		}
+
+		spin_lock(&hugetlb_lock);
+		__update_and_free_page(h, page);
+		spin_unlock(&hugetlb_lock);
+
+		cond_resched();
+	}
+}
+static DECLARE_WORK(hpage_free_vmemmap_work, hpage_free_vmemmap_workfn);
+
+static inline void flush_free_hpage_work(struct hstate *h)
+{
+	if (free_vmemmap_pages_per_hpage(h))
+		flush_work(&hpage_free_vmemmap_work);
+}
+
+static void update_and_free_page(struct hstate *h, struct page *page)
+{
+	if (!HPageVmemmapOptimized(page)) {
+		__update_and_free_page(h, page);
+		return;
+	}
+
+	/*
+	 * Defer freeing to avoid using GFP_ATOMIC to allocate vmemmap pages.
+	 *
+	 * Only call schedule_work() if hpage_defer_freelist is previously
+	 * empty. Otherwise, schedule_work() had been called but the workfn
+	 * hasn't retrieved the list yet.
+	 */
+	if (llist_add((struct llist_node *)&page->mapping,
+		      &hpage_defer_freelist))
+		schedule_work(&hpage_free_vmemmap_work);
 }
 
 struct hstate *size_to_hstate(unsigned long size)
@@ -1566,9 +1488,9 @@ static void __free_huge_page(struct page *page)
 	} else if (h->surplus_huge_pages_node[nid]) {
 		/* remove the page from active list */
 		list_del(&page->lru);
-		update_and_free_page(h, page);
 		h->surplus_huge_pages--;
 		h->surplus_huge_pages_node[nid]--;
+		update_and_free_page(h, page);
 	} else {
 		arch_clear_hugepage_flags(page);
 		enqueue_huge_page(h, page);
@@ -1626,15 +1548,8 @@ void free_huge_page(struct page *page)
 
 static void prep_new_huge_page(struct hstate *h, struct page *page, int nid)
 {
+	ClearHPageVmemmapOptimized(page);
 	free_huge_page_vmemmap(h, page);
-	/*
-	 * Because we store preallocated pages on @page->lru,
-	 * vmemmap_pgtable_free() must be called before the
-	 * initialization of @page->lru in INIT_LIST_HEAD().
-	 */
-	vmemmap_pgtable_free(&page->lru);
-
-	ClearPageHugeInflight(page);
 	INIT_LIST_HEAD(&page->lru);
 	set_compound_page_dtor(page, HUGETLB_PAGE_DTOR);
 	spin_lock(&hugetlb_lock);
@@ -1775,29 +1690,14 @@ static struct page *alloc_fresh_huge_page(struct hstate *h,
 		nodemask_t *node_alloc_noretry)
 {
 	struct page *page;
-	LIST_HEAD(pgtables);
-
-	if (vmemmap_pgtable_prealloc(h, &pgtables))
-		return NULL;
 
 	if (hstate_is_gigantic(h))
 		page = alloc_gigantic_page(h, gfp_mask, nid, nmask);
 	else
 		page = alloc_buddy_huge_page(h, gfp_mask,
 				nid, nmask, node_alloc_noretry);
-	if (!page) {
-		vmemmap_pgtable_free(&pgtables);
+	if (!page)
 		return NULL;
-	}
-
-	/*
-	 * Use the huge page lru list to temporarily store the preallocated
-	 * pages. The preallocated pages are used and the list is emptied
-	 * before the huge page is put into use. When the huge page is put
-	 * into use by prep_new_huge_page() the list will be reinitialized.
-	 */
-	INIT_LIST_HEAD(&page->lru);
-	list_splice(&pgtables, &page->lru);
 
 	if (hstate_is_gigantic(h))
 		prep_compound_gigantic_page(page, huge_page_order(h));
@@ -1871,6 +1771,7 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
 				h->surplus_huge_pages--;
 				h->surplus_huge_pages_node[node]--;
 			}
+			ClearPageHugeFreed(page);
 			update_and_free_page(h, page);
 			ret = 1;
 			break;
@@ -1885,15 +1786,18 @@ static int free_pool_huge_page(struct hstate *h, nodemask_t *nodes_allowed,
  * nothing for in-use hugepages and non-hugepages.
  * This function returns values like below:
  *
- *  -EBUSY: failed to dissolved free hugepages or the hugepage is in-use
- *          (allocated or reserved.)
- *       0: successfully dissolved free hugepages or the page is not a
- *          hugepage (considered as already dissolved)
+ *  -ENOMEM: failed to allocate vmemmap pages to free the freed hugepages
+ *           when the system is under memory pressure and the feature of
+ *           freeing unused vmemmap pages associated with each hugetlb page
+ *           is enabled.
+ *  -EBUSY:  failed to dissolved free hugepages or the hugepage is in-use
+ *           (allocated or reserved.)
+ *       0:  successfully dissolved free hugepages or the page is not a
+ *           hugepage (considered as already dissolved)
  */
 int dissolve_free_huge_page(struct page *page)
 {
 	int rc = -EBUSY;
-	struct hstate *h = NULL;
 
 retry:
 	/* Not to disrupt normal path by vainly holding hugetlb_lock */
@@ -1908,9 +1812,8 @@ retry:
 
 	if (!page_count(page)) {
 		struct page *head = compound_head(page);
+		struct hstate *h = page_hstate(head);
 		int nid = page_to_nid(head);
-
-		h = page_hstate(head);
 		if (h->free_huge_pages - h->resv_huge_pages == 0)
 			goto out;
 
@@ -1919,8 +1822,6 @@ retry:
 		 * when it is dissolved.
 		 */
 		if (unlikely(!PageHugeFreed(head))) {
-			if (PageHugeInflight(head))
-				goto done;
 			spin_unlock(&hugetlb_lock);
 			cond_resched();
 
@@ -1934,28 +1835,43 @@ retry:
 			 */
 			goto retry;
 		}
-done:
-		rc = 0;
-		hwpoison_subpage_set(h, head, page);
-		if (PageHugeInflight(head))
-			goto out;
 
 		list_del(&head->lru);
 		h->free_huge_pages--;
 		h->free_huge_pages_node[nid]--;
 		h->max_huge_pages--;
-		update_and_free_page(h, head);
+		ClearPageHugeFreed(page);
+		spin_unlock(&hugetlb_lock);
+
+		/*
+		 * Normally update_and_free_page will allocate required vmemmmap
+		 * before freeing the page.  update_and_free_page will fail to
+		 * free the page if it can not allocate required vmemmap.  We
+		 * need to adjust max_huge_pages if the page is not freed.
+		 * Attempt to allocate vmemmmap here so that we can take
+		 * appropriate action on failure.
+		 */
+		rc = alloc_huge_page_vmemmap(h, head);
+		spin_lock(&hugetlb_lock);
+		if (!rc) {
+			/*
+			 * Move PageHWPoison flag from head page to the raw
+			 * error page, which makes any subpages rather than
+			 * the error page reusable.
+			 */
+			if (PageHWPoison(head) && page != head) {
+				SetPageHWPoison(page);
+				ClearPageHWPoison(head);
+			}
+			update_and_free_page(h, head);
+		} else {
+			INIT_LIST_HEAD(&head->lru);
+			enqueue_huge_page(h, head);
+			h->max_huge_pages++;
+		}
 	}
 out:
 	spin_unlock(&hugetlb_lock);
-
-	/*
-	 * We should flush work before return to make sure that
-	 * the HugeTLB page is freed to the buddy.
-	 */
-	if (!rc && h)
-		flush_hpage_update_work(h);
-
 	return rc;
 }
 
@@ -2590,7 +2506,6 @@ static void __init gather_bootmem_prealloc(void)
 		WARN_ON(page_count(page) != 1);
 		prep_compound_huge_page(page, h->order);
 		WARN_ON(PageReserved(page));
-		gigantic_vmemmap_pgtable_init(m, page);
 		prep_new_huge_page(h, page, page_to_nid(page));
 		put_page(page); /* free it into the hugepage allocator */
 
@@ -2639,10 +2554,6 @@ static void __init hugetlb_hstate_alloc_pages(struct hstate *h)
 			break;
 		cond_resched();
 	}
-
-	if (hstate_is_gigantic(h))
-		i -= gigantic_vmemmap_pgtable_prealloc();
-
 	if (i < h->max_huge_pages) {
 		char buf[32];
 
@@ -2782,6 +2693,12 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 	else
 		return -ENOMEM;
 
+	/*
+	 * resize_lock mutex prevents concurrent adjustments to number of
+	 * pages in hstate via the proc/sysfs interfaces.
+	 */
+	mutex_lock(&h->resize_lock);
+	flush_free_hpage_work(h);
 	spin_lock(&hugetlb_lock);
 
 	/*
@@ -2814,6 +2731,7 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 	if (hstate_is_gigantic(h) && !IS_ENABLED(CONFIG_CONTIG_ALLOC)) {
 		if (count > persistent_huge_pages(h)) {
 			spin_unlock(&hugetlb_lock);
+			mutex_unlock(&h->resize_lock);
 			NODEMASK_FREE(node_alloc_noretry);
 			return -EINVAL;
 		}
@@ -2881,6 +2799,11 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 			break;
 		cond_resched_lock(&hugetlb_lock);
 	}
+
+	spin_unlock(&hugetlb_lock);
+	flush_free_hpage_work(h);
+	spin_lock(&hugetlb_lock);
+
 	while (count < persistent_huge_pages(h)) {
 		if (!adjust_pool_surplus(h, nodes_allowed, 1))
 			break;
@@ -2888,6 +2811,7 @@ static int set_max_huge_pages(struct hstate *h, unsigned long count, int nid,
 out:
 	h->max_huge_pages = persistent_huge_pages(h);
 	spin_unlock(&hugetlb_lock);
+	mutex_unlock(&h->resize_lock);
 
 	NODEMASK_FREE(node_alloc_noretry);
 
@@ -3351,6 +3275,7 @@ void __init hugetlb_add_hstate(unsigned int order)
 	BUG_ON(hugetlb_max_hstate >= HUGE_MAX_HSTATE);
 	BUG_ON(order == 0);
 	h = &hstates[hugetlb_max_hstate++];
+	mutex_init(&h->resize_lock);
 	h->order = order;
 	h->mask = ~((1ULL << (order + PAGE_SHIFT)) - 1);
 	h->nr_huge_pages = 0;

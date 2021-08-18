@@ -2747,10 +2747,10 @@ static inline void print_vma_addr(char *prefix, unsigned long rip)
 }
 #endif
 
-void vmemmap_remap_free(unsigned long start, unsigned long end,
-			unsigned long reuse, struct list_head *pgtables);
-void vmemmap_remap_alloc(unsigned long start, unsigned long end,
-			 unsigned long reuse);
+int vmemmap_remap_free(unsigned long start, unsigned long end,
+		       unsigned long reuse);
+int vmemmap_remap_alloc(unsigned long start, unsigned long end,
+			unsigned long reuse, gfp_t gfp_mask);
 
 void *sparse_buffer_alloc(unsigned long size);
 struct page * __populate_section_memmap(unsigned long pfn,
@@ -2774,6 +2774,8 @@ void vmemmap_populate_print_last(void);
 void vmemmap_free(unsigned long start, unsigned long end,
 		struct vmem_altmap *altmap);
 #endif
+void register_page_bootmem_memmap(unsigned long section_nr, struct page *map,
+				  unsigned long nr_pages);
 
 enum mf_flags {
 	MF_COUNT_INCREASED = 1 << 0,

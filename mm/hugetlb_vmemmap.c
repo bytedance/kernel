@@ -10,25 +10,24 @@
  * page frame. By default, there is a one-to-one mapping from a page frame to
  * it's corresponding page struct.
  *
- * The HugeTLB pages consist of multiple base page size pages and is supported
- * by many architectures. See hugetlbpage.rst in the Documentation directory
- * for more details. On the x86-64 architecture, HugeTLB pages of size 2MB and
- * 1GB are currently supported. Since the base page size on x86 is 4KB, a 2MB
+ * HugeTLB pages consist of multiple base page size pages and is supported by
+ * many architectures. See hugetlbpage.rst in the Documentation directory for
+ * more details. On the x86-64 architecture, HugeTLB pages of size 2MB and 1GB
+ * are currently supported. Since the base page size on x86 is 4KB, a 2MB
  * HugeTLB page consists of 512 base pages and a 1GB HugeTLB page consists of
  * 4096 base pages. For each base page, there is a corresponding page struct.
  *
  * Within the HugeTLB subsystem, only the first 4 page structs are used to
- * contain unique information about a HugeTLB page. HUGETLB_CGROUP_MIN_ORDER
- * provides this upper limit. The only 'useful' information in the remaining
- * page structs is the compound_head field, and this field is the same for all
- * tail pages.
+ * contain unique information about a HugeTLB page. __NR_USED_SUBPAGE provides
+ * this upper limit. The only 'useful' information in the remaining page structs
+ * is the compound_head field, and this field is the same for all tail pages.
  *
  * By removing redundant page structs for HugeTLB pages, memory can be returned
  * to the buddy allocator for other uses.
  *
  * Different architectures support different HugeTLB pages. For example, the
  * following table is the HugeTLB page size supported by x86 and arm64
- * architectures. Becasue arm64 supports 4k, 16k, and 64k base pages and
+ * architectures. Because arm64 supports 4k, 16k, and 64k base pages and
  * supports contiguous entries, so it supports many kinds of sizes of HugeTLB
  * page.
  *
@@ -45,7 +44,7 @@
  * +--------------+-----------+-----------+-----------+-----------+-----------+
  *
  * When the system boot up, every HugeTLB page has more than one struct page
- * structs whose size is (unit: pages):
+ * structs which size is (unit: pages):
  *
  *    struct_size = HugeTLB_Size / PAGE_SIZE * sizeof(struct page) / PAGE_SIZE
  *
@@ -75,10 +74,10 @@
  *
  * This optimization only supports 64-bit system, so the value of sizeof(pte_t)
  * is 8. And this optimization also applicable only when the size of struct page
- * is a power of two. In most cases, the size of struct page is 64 (e.g. x86-64
- * and arm64). So if we use pmd level mapping for a HugeTLB page, the size of
- * struct page structs of it is 8 pages whose size depends on the size of the
- * base page.
+ * is a power of two. In most cases, the size of struct page is 64 bytes (e.g.
+ * x86-64 and arm64). So if we use pmd level mapping for a HugeTLB page, the
+ * size of struct page structs of it is 8 page frames which size depends on the
+ * size of the base page.
  *
  * For the HugeTLB page of the pud level mapping, then
  *
@@ -88,6 +87,9 @@
  *
  * Where the struct_size(pmd) is the size of the struct page structs of a
  * HugeTLB page of the pmd level mapping.
+ *
+ * E.g.: A 2MB HugeTLB page on x86_64 consists in 8 page frames while 1GB
+ * HugeTLB page consists in 4096.
  *
  * Next, we take the pmd level mapping of the HugeTLB page as an example to
  * show the internal implementation of this optimization. There are 8 pages
@@ -165,12 +167,14 @@
  * The contiguous bit is used to increase the mapping size at the pmd and pte
  * (last) level. So this type of HugeTLB page can be optimized only when its
  * size of the struct page structs is greater than 1 pages.
+ *
+ * Notice: The head vmemmap page is not freed to the buddy allocator and all
+ * tail vmemmap pages are mapped to the head vmemmap page frame. So we can see
+ * more than one struct page struct with PG_head (e.g. 8 per 2 MB HugeTLB page)
+ * associated with each HugeTLB page. The compound_head() can handle this
+ * correctly (more details refer to the comment above compound_head()).
  */
 #define pr_fmt(fmt)	"HugeTLB: " fmt
-
-#include <linux/list.h>
-#include <linux/memblock.h>
-#include <asm/pgalloc.h>
 
 #include "hugetlb_vmemmap.h"
 
@@ -184,9 +188,9 @@
 #define RESERVE_VMEMMAP_NR		1U
 #define RESERVE_VMEMMAP_SIZE		(RESERVE_VMEMMAP_NR << PAGE_SHIFT)
 
-bool hugetlb_free_vmemmap_enabled __read_mostly =
-	IS_ENABLED(CONFIG_HUGETLB_FREE_VMEMMAP_DEFAULT_ON);
-EXPORT_SYMBOL(hugetlb_free_vmemmap_enabled);
+DEFINE_STATIC_KEY_MAYBE(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
+			hugetlb_free_vmemmap_enabled_key);
+EXPORT_SYMBOL(hugetlb_free_vmemmap_enabled_key);
 
 static int __init early_hugetlb_free_vmemmap_param(char *buf)
 {
@@ -200,9 +204,9 @@ static int __init early_hugetlb_free_vmemmap_param(char *buf)
 		return -EINVAL;
 
 	if (!strcmp(buf, "on"))
-		hugetlb_free_vmemmap_enabled = true;
+		static_branch_enable(&hugetlb_free_vmemmap_enabled_key);
 	else if (!strcmp(buf, "off"))
-		hugetlb_free_vmemmap_enabled = false;
+		static_branch_disable(&hugetlb_free_vmemmap_enabled_key);
 	else
 		return -EINVAL;
 
@@ -215,134 +219,35 @@ static inline unsigned long free_vmemmap_pages_size_per_hpage(struct hstate *h)
 	return (unsigned long)free_vmemmap_pages_per_hpage(h) << PAGE_SHIFT;
 }
 
-static inline unsigned int vmemmap_pages_per_hpage(struct hstate *h)
+/*
+ * Previously discarded vmemmap pages will be allocated and remapping
+ * after this function returns zero.
+ */
+int alloc_huge_page_vmemmap(struct hstate *h, struct page *head)
 {
-	return free_vmemmap_pages_per_hpage(h) + RESERVE_VMEMMAP_NR;
-}
-
-static inline unsigned long vmemmap_pages_size_per_hpage(struct hstate *h)
-{
-	return (unsigned long)vmemmap_pages_per_hpage(h) << PAGE_SHIFT;
-}
-
-static inline unsigned int pgtable_pages_to_prealloc_per_hpage(struct hstate *h)
-{
-	unsigned long vmemmap_size = vmemmap_pages_size_per_hpage(h);
-
-	/*
-	 * No need pre-allocate page tables when there is no vmemmap pages
-	 * to free.
-	 */
-	if (!free_vmemmap_pages_per_hpage(h))
-		return 0;
-
-	return ALIGN(vmemmap_size, PMD_SIZE) >> PMD_SHIFT;
-}
-
-void vmemmap_pgtable_free(struct list_head *pgtables)
-{
-	struct page *pte_page, *t_page;
-
-	list_for_each_entry_safe(pte_page, t_page, pgtables, lru) {
-		list_del(&pte_page->lru);
-		pte_free_kernel(&init_mm, page_to_virt(pte_page));
-	}
-}
-
-int vmemmap_pgtable_prealloc(struct hstate *h, struct list_head *pgtables)
-{
-	unsigned int nr = pgtable_pages_to_prealloc_per_hpage(h);
-
-	while (nr--) {
-		pte_t *pte_p;
-
-		pte_p = pte_alloc_one_kernel(&init_mm);
-		if (!pte_p)
-			goto out;
-		list_add(&virt_to_page(pte_p)->lru, pgtables);
-	}
-
-	return 0;
-out:
-	vmemmap_pgtable_free(pgtables);
-	return -ENOMEM;
-}
-
-unsigned long __init gigantic_vmemmap_pgtable_prealloc(void)
-{
-	struct huge_bootmem_page *m, *tmp;
-	unsigned long nr_free = 0;
-
-	list_for_each_entry_safe(m, tmp, &huge_boot_pages, list) {
-		struct hstate *h = m->hstate;
-		unsigned int nr = pgtable_pages_to_prealloc_per_hpage(h);
-		unsigned long size;
-
-		if (!nr)
-			continue;
-
-		size = nr << PAGE_SHIFT;
-		m->vmemmap_pte = memblock_alloc_try_nid(size, PAGE_SIZE, 0,
-							MEMBLOCK_ALLOC_ACCESSIBLE,
-							NUMA_NO_NODE);
-		if (!m->vmemmap_pte) {
-			nr_free++;
-			list_del(&m->list);
-			memblock_free_early(__pa(m), huge_page_size(h));
-		}
-	}
-
-	return nr_free;
-}
-
-void __init gigantic_vmemmap_pgtable_init(struct huge_bootmem_page *m,
-					  struct page *head)
-{
-	struct hstate *h = m->hstate;
-	unsigned long pte = (unsigned long)m->vmemmap_pte;
-	unsigned int nr = pgtable_pages_to_prealloc_per_hpage(h);
-
-	if (!nr)
-		return;
-
-	/*
-	 * If we had gigantic hugepages allocated at boot time, we need
-	 * to restore the 'stolen' pages to totalram_pages in order to
-	 * fix confusing memory reports from free(1) and another
-	 * side-effects, like CommitLimit going negative.
-	 */
-	adjust_managed_page_count(head, nr);
-
-	/*
-	 * Use the huge page lru list to temporarily store the preallocated
-	 * pages. The preallocated pages are used and the list is emptied
-	 * before the huge page is put into use. When the huge page is put
-	 * into use by prep_new_huge_page() the list will be reinitialized.
-	 */
-	INIT_LIST_HEAD(&head->lru);
-
-	while (nr--) {
-		struct page *pte_page = virt_to_page(pte);
-
-		__ClearPageReserved(pte_page);
-		list_add(&pte_page->lru, &head->lru);
-		pte += PAGE_SIZE;
-	}
-}
-
-void alloc_huge_page_vmemmap(struct hstate *h, struct page *head)
-{
+	int ret;
 	unsigned long vmemmap_addr = (unsigned long)head;
 	unsigned long vmemmap_end, vmemmap_reuse;
 
-	if (!free_vmemmap_pages_per_hpage(h))
-		return;
+	if (!HPageVmemmapOptimized(head))
+		return 0;
 
 	vmemmap_addr += RESERVE_VMEMMAP_SIZE;
 	vmemmap_end = vmemmap_addr + free_vmemmap_pages_size_per_hpage(h);
 	vmemmap_reuse = vmemmap_addr - PAGE_SIZE;
+	/*
+	 * The pages which the vmemmap virtual address range [@vmemmap_addr,
+	 * @vmemmap_end) are mapped to are freed to the buddy allocator, and
+	 * the range is mapped to the page which @vmemmap_reuse is mapped to.
+	 * When a HugeTLB page is freed to the buddy allocator, previously
+	 * discarded vmemmap pages must be allocated and remapping.
+	 */
+	ret = vmemmap_remap_alloc(vmemmap_addr, vmemmap_end, vmemmap_reuse,
+				  GFP_KERNEL | __GFP_NORETRY | __GFP_THISNODE);
+	if (!ret)
+		ClearHPageVmemmapOptimized(head);
 
-	vmemmap_remap_alloc(vmemmap_addr, vmemmap_end, vmemmap_reuse);
+	return ret;
 }
 
 void free_huge_page_vmemmap(struct hstate *h, struct page *head)
@@ -357,11 +262,16 @@ void free_huge_page_vmemmap(struct hstate *h, struct page *head)
 	vmemmap_end = vmemmap_addr + free_vmemmap_pages_size_per_hpage(h);
 	vmemmap_reuse = vmemmap_addr - PAGE_SIZE;
 
-	vmemmap_remap_free(vmemmap_addr, vmemmap_end, vmemmap_reuse,
-			   &head->lru);
+	/*
+	 * Remap the vmemmap virtual address range [@vmemmap_addr, @vmemmap_end)
+	 * to the page which @vmemmap_reuse is mapped to, then free the pages
+	 * which the range [@vmemmap_addr, @vmemmap_end] is mapped to.
+	 */
+	if (!vmemmap_remap_free(vmemmap_addr, vmemmap_end, vmemmap_reuse))
+		SetHPageVmemmapOptimized(head);
 }
 
-void __init hugetlb_vmemmap_init(struct hstate *h)
+void hugetlb_vmemmap_init(struct hstate *h)
 {
 	unsigned int nr_pages = pages_per_huge_page(h);
 	unsigned int vmemmap_pages;
@@ -371,15 +281,8 @@ void __init hugetlb_vmemmap_init(struct hstate *h)
 	 * page structs that can be used when CONFIG_HUGETLB_PAGE_FREE_VMEMMAP,
 	 * so add a BUILD_BUG_ON to catch invalid usage of the tail struct page.
 	 */
-	BUILD_BUG_ON(NR_USED_SUBPAGE >=
+	BUILD_BUG_ON(__NR_USED_SUBPAGE >=
 		     RESERVE_VMEMMAP_SIZE / sizeof(struct page));
-
-	/*
-	 * The compiler can help us to optimize this function to null
-	 * when the size of the struct page is not power of 2.
-	 */
-	if (!is_power_of_2(sizeof(struct page)))
-		return;
 
 	if (!hugetlb_free_vmemmap_enabled)
 		return;
@@ -398,4 +301,29 @@ void __init hugetlb_vmemmap_init(struct hstate *h)
 
 	pr_info("can free %d vmemmap pages for %s\n", h->nr_free_vmemmap_pages,
 		h->name);
+}
+
+int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
+				   void *buffer, size_t *length, loff_t *ppos)
+{
+	int enable = hugetlb_free_vmemmap_enabled;
+
+	/*
+	 * The vmemmap pages cannot be optimized if a "struct page" crosses page
+	 * boundaries.
+	 */
+	if (write && !is_power_of_2(sizeof(struct page)))
+		return -EPERM;
+
+	if (proc_do_static_key(table, write, buffer, length, ppos))
+		return -EINVAL;
+
+	if (write && !enable) {
+		struct hstate *h;
+
+		for_each_hstate(h)
+			hugetlb_vmemmap_init(h);
+	}
+
+	return 0;
 }

@@ -18,13 +18,13 @@
 #include <linux/mmdebug.h>
 
 struct hugetlb_cgroup;
+
+#ifdef CONFIG_CGROUP_HUGETLB
 /*
  * Minimum page order trackable by hugetlb cgroup.
  * At least 3 pages are necessary for all the tracking information.
  */
-#define HUGETLB_CGROUP_MIN_ORDER	2
-
-#ifdef CONFIG_CGROUP_HUGETLB
+#define HUGETLB_CGROUP_MIN_ORDER order_base_2(__MAX_CGROUP_SUBPAGE_INDEX + 1)
 
 static inline struct hugetlb_cgroup *hugetlb_cgroup_from_page(struct page *page)
 {

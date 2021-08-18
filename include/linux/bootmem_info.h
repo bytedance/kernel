@@ -5,7 +5,7 @@
 #include <linux/mm.h>
 
 /*
- * Types for free bootmem stored in page->freelist. These have to be in
+ * Types for free bootmem stored in page->lru.next. These have to be in
  * some random range in unsigned long space for debugging purposes.
  */
 enum {
@@ -16,21 +16,9 @@ enum {
 	MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE = NODE_INFO,
 };
 
-#define BOOTMEM_TYPE_BITS	(ilog2(MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE) + 1)
-#define BOOTMEM_TYPE_MAX	((1UL << BOOTMEM_TYPE_BITS) - 1)
-#define BOOTMEM_INFO_MAX	(ULONG_MAX >> BOOTMEM_TYPE_BITS)
-
-static inline unsigned long page_bootmem_type(struct page *page)
-{
-	return (unsigned long)page->freelist & BOOTMEM_TYPE_MAX;
-}
-
-static inline unsigned long page_bootmem_info(struct page *page)
-{
-	return (unsigned long)page->freelist >> BOOTMEM_TYPE_BITS;
-}
-
 #ifdef CONFIG_HAVE_BOOTMEM_INFO_NODE
+void __init register_page_bootmem_info_node(struct pglist_data *pgdat);
+
 void get_page_bootmem(unsigned long info, struct page *page,
 		      unsigned long type);
 void put_page_bootmem(struct page *page);
@@ -42,20 +30,24 @@ void put_page_bootmem(struct page *page);
  */
 static inline void free_bootmem_page(struct page *page)
 {
-	unsigned long magic = page_bootmem_type(page);
+	unsigned long magic = (unsigned long)page->freelist;
 
 	/*
 	 * The reserve_bootmem_region sets the reserved flag on bootmem
 	 * pages.
 	 */
-	VM_WARN_ON_PAGE(page_ref_count(page) != 2, page);
+	VM_BUG_ON_PAGE(page_ref_count(page) != 2, page);
 
 	if (magic == SECTION_INFO || magic == MIX_SECTION_INFO)
 		put_page_bootmem(page);
 	else
-		VM_WARN_ON_PAGE(1, page);
+		VM_BUG_ON_PAGE(1, page);
 }
 #else
+static inline void register_page_bootmem_info_node(struct pglist_data *pgdat)
+{
+}
+
 static inline void put_page_bootmem(struct page *page)
 {
 }
@@ -67,6 +59,7 @@ static inline void get_page_bootmem(unsigned long info, struct page *page,
 
 static inline void free_bootmem_page(struct page *page)
 {
+	free_reserved_page(page);
 }
 #endif
 

@@ -38,16 +38,13 @@ static int walk_pmd_range(pud_t *pud, unsigned long addr, unsigned long end,
 	do {
 again:
 		next = pmd_addr_end(addr, end);
-		if (pmd_none(*pmd) || (!walk->vma && !walk->no_vma)) {
+		if (pmd_none(*pmd) || !walk->vma) {
 			if (ops->pte_hole)
 				err = ops->pte_hole(addr, next, walk);
 			if (err)
 				break;
 			continue;
 		}
-
-		walk->action = ACTION_SUBTREE;
-
 		/*
 		 * This implies that each ->pmd_entry() handler
 		 * needs to know about pmd_trans_huge() pmds
@@ -57,24 +54,16 @@ again:
 		if (err)
 			break;
 
-		if (walk->action == ACTION_AGAIN)
-			goto again;
-
 		/*
 		 * Check this here so we only break down trans_huge
 		 * pages when we _need_ to
 		 */
-		if ((!walk->vma && (pmd_leaf(*pmd) || !pmd_present(*pmd))) ||
-		    walk->action == ACTION_CONTINUE ||
-		    !(ops->pte_entry))
+		if (!ops->pte_entry)
 			continue;
 
-		if (walk->vma) {
-			split_huge_pmd(walk->vma, pmd, addr);
-			if (pmd_trans_unstable(pmd))
-				goto again;
-		}
-
+		split_huge_pmd(walk->vma, pmd, addr);
+		if (pmd_trans_unstable(pmd))
+			goto again;
 		err = walk_pte_range(pmd, addr, next, walk);
 		if (err)
 			break;
@@ -95,7 +84,7 @@ static int walk_pud_range(p4d_t *p4d, unsigned long addr, unsigned long end,
 	do {
  again:
 		next = pud_addr_end(addr, end);
-		if (pud_none(*pud) || (!walk->vma && !walk->no_vma)) {
+		if (pud_none(*pud) || !walk->vma) {
 			if (ops->pte_hole)
 				err = ops->pte_hole(addr, next, walk);
 			if (err)
@@ -103,27 +92,24 @@ static int walk_pud_range(p4d_t *p4d, unsigned long addr, unsigned long end,
 			continue;
 		}
 
-		walk->action = ACTION_SUBTREE;
+		if (ops->pud_entry) {
+			spinlock_t *ptl = pud_trans_huge_lock(pud, walk->vma);
 
-		if (ops->pud_entry)
-			err = ops->pud_entry(pud, addr, next, walk);
-		if (err)
-			break;
+			if (ptl) {
+				err = ops->pud_entry(pud, addr, next, walk);
+				spin_unlock(ptl);
+				if (err)
+					break;
+				continue;
+			}
+		}
 
-		if (walk->action == ACTION_AGAIN)
-			goto again;
-
-		if ((!walk->vma && (pud_leaf(*pud) || !pud_present(*pud))) ||
-		    walk->action == ACTION_CONTINUE ||
-		    !(ops->pmd_entry || ops->pte_entry))
-			continue;
-
-		if (walk->vma)
-			split_huge_pud(walk->vma, pud, addr);
+		split_huge_pud(walk->vma, pud, addr);
 		if (pud_none(*pud))
 			goto again;
 
-		err = walk_pmd_range(pud, addr, next, walk);
+		if (ops->pmd_entry || ops->pte_entry)
+			err = walk_pmd_range(pud, addr, next, walk);
 		if (err)
 			break;
 	} while (pud++, addr = next, addr != end);
@@ -149,12 +135,7 @@ static int walk_p4d_range(pgd_t *pgd, unsigned long addr, unsigned long end,
 				break;
 			continue;
 		}
-		if (ops->p4d_entry) {
-			err = ops->p4d_entry(p4d, addr, next, walk);
-			if (err)
-				break;
-		}
-		if (ops->pud_entry || ops->pmd_entry || ops->pte_entry)
+		if (ops->pmd_entry || ops->pte_entry)
 			err = walk_pud_range(p4d, addr, next, walk);
 		if (err)
 			break;
@@ -181,13 +162,7 @@ static int walk_pgd_range(unsigned long addr, unsigned long end,
 				break;
 			continue;
 		}
-		if (ops->pgd_entry) {
-			err = ops->pgd_entry(pgd, addr, next, walk);
-			if (err)
-				break;
-		}
-		if (ops->p4d_entry || ops->pud_entry || ops->pmd_entry ||
-		    ops->pte_entry)
+		if (ops->pmd_entry || ops->pte_entry)
 			err = walk_p4d_range(pgd, addr, next, walk);
 		if (err)
 			break;
@@ -376,25 +351,6 @@ int walk_page_range(struct mm_struct *mm, unsigned long start,
 			break;
 	} while (start = next, start < end);
 	return err;
-}
-
-int walk_page_range_novma(struct mm_struct *mm, unsigned long start,
-			  unsigned long end, const struct mm_walk_ops *ops,
-			  void *private)
-{
-	struct mm_walk walk = {
-		.ops		= ops,
-		.mm		= mm,
-		.private	= private,
-		.no_vma		= true
-	};
-
-	if (start >= end || !walk.mm)
-		return -EINVAL;
-
-	mmap_assert_locked(walk.mm);
-
-	return __walk_page_range(start, end, &walk);
 }
 
 int walk_page_vma(struct vm_area_struct *vma, const struct mm_walk_ops *ops,

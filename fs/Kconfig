@@ -215,23 +215,10 @@ config HUGETLB_PAGE
 
 config HUGETLB_PAGE_FREE_VMEMMAP
 	def_bool HUGETLB_PAGE
-	select HAVE_BOOTMEM_INFO_NODE
-	depends on X86_64 || ARM64
+	depends on X86_64
 	depends on SPARSEMEM_VMEMMAP
-	help
-	  The option HUGETLB_PAGE_FREE_VMEMMAP allows for the freeing of
-	  some vmemmap pages associated with pre-allocated HugeTLB pages.
-	  For example, on X86_64 7 vmemmap pages of size 4KB each can be
-	  saved for each 2MB HugeTLB page.  4095 vmemmap pages of size 4KB
-	  each can be saved for each 1GB HugeTLB page.
 
-	  When a HugeTLB page is allocated or freed, the vmemmap array
-	  representing the range associated with the page will need to be
-	  remapped.  When a page is allocated, vmemmap pages are freed
-	  after remapping.  When a page is freed, previously discarded
-	  vmemmap pages must be allocated before remapping.
-
-config HUGETLB_FREE_VMEMMAP_DEFAULT_ON
+config HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON
 	bool "Default freeing vmemmap pages of HugeTLB to on"
 	default n
 	depends on HUGETLB_PAGE_FREE_VMEMMAP

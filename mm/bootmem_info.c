@@ -1,21 +1,23 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- *  linux/mm/bootmem_info.c
+ * Bootmem core functions.
  *
- *  Copyright (C)
+ * Copyright (c) 2020, Bytedance.
+ *
+ *     Author: Muchun Song <songmuchun@bytedance.com>
+ *
  */
 #include <linux/mm.h>
 #include <linux/compiler.h>
 #include <linux/memblock.h>
 #include <linux/bootmem_info.h>
 #include <linux/memory_hotplug.h>
-#include <linux/pagewalk.h>
 
 void get_page_bootmem(unsigned long info, struct page *page, unsigned long type)
 {
-	BUG_ON(info > BOOTMEM_INFO_MAX);
-	BUG_ON(type > BOOTMEM_TYPE_MAX);
-	page->freelist = (void *)((info << BOOTMEM_TYPE_BITS) | type);
+	page->freelist = (void *)type;
+	SetPagePrivate(page);
+	set_page_private(page, info);
 	page_ref_inc(page);
 }
 
@@ -23,22 +25,21 @@ void put_page_bootmem(struct page *page)
 {
 	unsigned long type;
 
-	type = page_bootmem_type(page);
+	type = (unsigned long) page->freelist;
 	BUG_ON(type < MEMORY_HOTPLUG_MIN_BOOTMEM_TYPE ||
 	       type > MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE);
 
 	if (page_ref_dec_return(page) == 1) {
 		page->freelist = NULL;
-		if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP) &&
-		    PageTable(page))
-			pgtable_pmd_page_dtor(page);
+		ClearPagePrivate(page);
+		set_page_private(page, 0);
 		INIT_LIST_HEAD(&page->lru);
 		free_reserved_page(page);
 	}
 }
 
 #ifndef CONFIG_SPARSEMEM_VMEMMAP
-static void __init register_page_bootmem_info_section(unsigned long start_pfn)
+static void register_page_bootmem_info_section(unsigned long start_pfn)
 {
 	unsigned long mapsize, section_nr, i;
 	struct mem_section *ms;
@@ -73,104 +74,7 @@ static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 
 }
 #else /* CONFIG_SPARSEMEM_VMEMMAP */
-static int __init bootmem_pte_entry(pte_t *pte, unsigned long addr,
-				    unsigned long next, struct mm_walk *walk)
-{
-	struct page *page = pte_page(*pte);
-	unsigned long *section_nr = walk->private;
-
-	get_page_bootmem(*section_nr, page, SECTION_INFO);
-
-	return 0;
-}
-
-static int __init bootmem_pmd_entry(pmd_t *pmd, unsigned long addr,
-				    unsigned long next, struct mm_walk *walk)
-{
-	struct page *page = pmd_page(*pmd);
-	unsigned long *section_nr = walk->private;
-
-	if (pmd_leaf(*pmd)) {
-		unsigned int nr_pages = 1 << (PMD_SHIFT - PAGE_SHIFT);
-
-		while (nr_pages--)
-			get_page_bootmem(*section_nr, page++, SECTION_INFO);
-	} else {
-		get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
-	}
-
-	return 0;
-}
-
-static int __init bootmem_pud_entry(pud_t *pud, unsigned long addr,
-				    unsigned long next, struct mm_walk *walk)
-{
-	struct page *page = pud_page(*pud);
-	unsigned long *section_nr = walk->private;
-
-	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
-
-	if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP)) {
-		/*
-		 * The page->private shares storage with page->ptl. So
-		 * make sure that the PG_private is not set and initialize
-		 * page->private to zero.
-		 */
-		VM_BUG_ON_PAGE(PagePrivate(page), page);
-		set_page_private(page, 0);
-
-		BUG_ON(!pgtable_pmd_page_ctor(page));
-	}
-
-	return 0;
-}
-
-static int __init bootmem_p4d_entry(p4d_t *p4d, unsigned long addr,
-				    unsigned long next, struct mm_walk *walk)
-{
-	struct page *page = p4d_page(*p4d);
-	unsigned long *section_nr = walk->private;
-
-	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
-
-	return 0;
-}
-
-static int __init bootmem_pgd_entry(pgd_t *pgd, unsigned long addr,
-				    unsigned long next, struct mm_walk *walk)
-{
-	struct page *page = pgd_page(*pgd);
-	unsigned long *section_nr = walk->private;
-
-	get_page_bootmem(*section_nr, page, MIX_SECTION_INFO);
-
-	return 0;
-}
-
-static int __init register_page_bootmem_memmap(unsigned long section_nr,
-					       struct page *memmap)
-{
-	struct mm_struct *mm = &init_mm;
-	struct page *memmap_end = memmap + PAGES_PER_SECTION;
-
-	static const struct mm_walk_ops ops __initconst = {
-		.pgd_entry = bootmem_pgd_entry,
-		.p4d_entry = bootmem_p4d_entry,
-		.pud_entry = bootmem_pud_entry,
-		.pmd_entry = bootmem_pmd_entry,
-		.pte_entry = bootmem_pte_entry,
-	};
-
-	mmap_read_lock(mm);
-	BUG_ON(walk_page_range_novma(mm, (unsigned long)memmap,
-				     (unsigned long)memmap_end,
-				     &ops, &section_nr));
-	mmap_read_unlock(mm);
-
-	return 0;
-}
-
-static void __init register_page_bootmem_info_section(unsigned long start_pfn)
+static void register_page_bootmem_info_section(unsigned long start_pfn)
 {
 	unsigned long mapsize, section_nr, i;
 	struct mem_section *ms;
@@ -182,7 +86,7 @@ static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 
 	memmap = sparse_decode_mem_map(ms->section_mem_map, section_nr);
 
-	register_page_bootmem_memmap(section_nr, memmap);
+	register_page_bootmem_memmap(section_nr, memmap, PAGES_PER_SECTION);
 
 	usage = ms->usage;
 	page = virt_to_page(usage);
@@ -194,13 +98,11 @@ static void __init register_page_bootmem_info_section(unsigned long start_pfn)
 }
 #endif /* !CONFIG_SPARSEMEM_VMEMMAP */
 
-static void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
+void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
 {
 	unsigned long i, pfn, end_pfn, nr_pages;
 	int node = pgdat->node_id;
 	struct page *page;
-
-	BUILD_BUG_ON(MEMORY_HOTPLUG_MAX_BOOTMEM_TYPE > BOOTMEM_TYPE_MAX);
 
 	nr_pages = PAGE_ALIGN(sizeof(struct pglist_data)) >> PAGE_SHIFT;
 	page = virt_to_page(pgdat);
@@ -223,14 +125,3 @@ static void __init register_page_bootmem_info_node(struct pglist_data *pgdat)
 			register_page_bootmem_info_section(pfn);
 	}
 }
-
-static int __init register_page_bootmem_info(void)
-{
-	int i;
-
-	for_each_online_node(i)
-		register_page_bootmem_info_node(NODE_DATA(i));
-
-	return 0;
-}
-pure_initcall(register_page_bootmem_info);

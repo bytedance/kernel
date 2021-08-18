@@ -27,19 +27,39 @@ typedef struct { unsigned long pd; } hugepd_t;
 #include <linux/shm.h>
 #include <asm/tlbflush.h>
 
+/*
+ * For HugeTLB page, there are more metadata to save in the struct page. But
+ * the head struct page cannot meet our needs, so we have to abuse other tail
+ * struct page to store the metadata. In order to avoid conflicts caused by
+ * subsequent use of more tail struct pages, we gather these discrete indexes
+ * of tail struct page here.
+ */
 enum {
 	SUBPAGE_INDEX_ACTIVE = 1,	/* reuse page flags of PG_private */
 	SUBPAGE_INDEX_TEMPORARY,	/* reuse page->mapping */
 #ifdef CONFIG_CGROUP_HUGETLB
 	SUBPAGE_INDEX_CGROUP = SUBPAGE_INDEX_TEMPORARY,/* reuse page->private */
+	__MAX_CGROUP_SUBPAGE_INDEX = SUBPAGE_INDEX_CGROUP,
 #endif
-	SUBPAGE_INDEX_FREED,
-#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-	SUBPAGE_INDEX_HWPOISON,		/* reuse page->private */
-	SUBPAGE_INDEX_INFLIGHT,		/* reuse page->private */
-#endif
-	NR_USED_SUBPAGE,
+	SUBPAGE_INDEX_FREED,		/* reuse page->private */
+	SUBPAGE_INDEX_VMEMMAP_OPTIMIZED,/* reuse page->private */
+	__NR_USED_SUBPAGE,
 };
+
+static inline bool HPageVmemmapOptimized(struct page *head)
+{
+	return page_private(head + SUBPAGE_INDEX_VMEMMAP_OPTIMIZED) == -1UL;
+}
+
+static inline void SetHPageVmemmapOptimized(struct page *head)
+{
+	set_page_private(head + SUBPAGE_INDEX_VMEMMAP_OPTIMIZED, -1UL);
+}
+
+static inline void ClearHPageVmemmapOptimized(struct page *head)
+{
+	set_page_private(head + SUBPAGE_INDEX_VMEMMAP_OPTIMIZED, 0);
+}
 
 struct hugepage_subpool {
 	spinlock_t lock;
@@ -344,6 +364,7 @@ unsigned long hugetlb_get_unmapped_area(struct file *file, unsigned long addr,
 #define HSTATE_NAME_LEN 32
 /* Defines one hugetlb page size */
 struct hstate {
+	struct mutex resize_lock;
 	int next_nid_to_alloc;
 	int next_nid_to_free;
 	unsigned int order;
@@ -374,9 +395,6 @@ struct hstate {
 struct huge_bootmem_page {
 	struct list_head list;
 	struct hstate *hstate;
-#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-	pte_t *vmemmap_pte;
-#endif
 };
 
 struct page *alloc_huge_page(struct vm_area_struct *vma,
@@ -762,6 +780,18 @@ static inline void set_huge_swap_pte_at(struct mm_struct *mm, unsigned long addr
 {
 }
 #endif	/* CONFIG_HUGETLB_PAGE */
+
+#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
+DECLARE_STATIC_KEY_MAYBE(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
+			 hugetlb_free_vmemmap_enabled_key);
+#define hugetlb_free_vmemmap_enabled					 \
+	static_key_enabled(&hugetlb_free_vmemmap_enabled_key)
+
+int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
+				   void *buffer, size_t *length, loff_t *ppos);
+#else
+#define hugetlb_free_vmemmap_enabled	false
+#endif
 
 static inline spinlock_t *huge_pte_lock(struct hstate *h,
 					struct mm_struct *mm, pte_t *pte)
