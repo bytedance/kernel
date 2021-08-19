@@ -146,6 +146,7 @@ static struct dentry *nbd_dbg_dir;
 
 #define NBD_DEF_BLKSIZE 1024
 
+static const int nbd_version = 5;
 static unsigned int nbds_max = 16;
 static int max_part = 16;
 static int part_shift;
@@ -821,6 +822,10 @@ static void recv_work(struct work_struct *work)
 static bool nbd_clear_req(struct request *req, void *data, bool reserved)
 {
 	struct nbd_cmd *cmd = blk_mq_rq_to_pdu(req);
+
+	/* don't abort one completed request */
+	if (blk_mq_request_completed(req))
+		return true;
 
 	mutex_lock(&cmd->lock);
 	cmd->status = BLK_STS_IOERR;
@@ -2029,15 +2034,19 @@ static void nbd_disconnect_and_put(struct nbd_device *nbd)
 {
 	mutex_lock(&nbd->config_lock);
 	nbd_disconnect(nbd);
-	nbd_clear_sock(nbd);
-	mutex_unlock(&nbd->config_lock);
+	sock_shutdown(nbd);
 	/*
 	 * Make sure recv thread has finished, so it does not drop the last
 	 * config ref and try to destroy the workqueue from inside the work
-	 * queue.
+	 * queue. And this also ensure that we can safely call nbd_clear_que()
+	 * to cancel the inflight I/Os.
 	 */
 	if (nbd->recv_workq)
 		flush_workqueue(nbd->recv_workq);
+	nbd_clear_que(nbd);
+	nbd->task_setup = NULL;
+	mutex_unlock(&nbd->config_lock);
+
 	if (test_and_clear_bit(NBD_RT_HAS_CONFIG_REF,
 			       &nbd->config->runtime_flags))
 		nbd_config_put(nbd);
@@ -2490,3 +2499,5 @@ module_param(nbds_max, int, 0444);
 MODULE_PARM_DESC(nbds_max, "number of network block devices to initialize (default: 16)");
 module_param(max_part, int, 0444);
 MODULE_PARM_DESC(max_part, "number of partitions per device (default: 16)");
+module_param(nbd_version, int, 0444);
+MODULE_PARM_DESC(nbd_version, "nbd version");
