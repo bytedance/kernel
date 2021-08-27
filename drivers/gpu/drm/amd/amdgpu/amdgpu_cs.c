@@ -979,6 +979,9 @@ static int amdgpu_cs_ib_fill(struct amdgpu_device *adev,
 		if (r)
 			return r;
 
+		if (entity->stopped)
+			return -EINVAL;
+
 		if (chunk_ib->flags & AMDGPU_IB_FLAG_PREAMBLE)
 			parser->job->preamble_status |=
 				AMDGPU_PREAMBLE_IB_PRESENT;
@@ -1038,6 +1041,11 @@ static int amdgpu_cs_process_fence_dep(struct amdgpu_cs_parser *p,
 		if (r) {
 			amdgpu_ctx_put(ctx);
 			return r;
+		}
+
+		if (entity->stopped) {
+			amdgpu_ctx_put(ctx);
+			return -EINVAL;
 		}
 
 		fence = amdgpu_ctx_get_fence(ctx, entity, deps[i].handle);
@@ -1433,6 +1441,11 @@ int amdgpu_cs_wait_ioctl(struct drm_device *dev, void *data,
 		return r;
 	}
 
+	if (entity->stopped) {
+		amdgpu_ctx_put(ctx);
+		return -EINVAL;
+	}
+
 	fence = amdgpu_ctx_get_fence(ctx, entity, wait->in.handle);
 	if (IS_ERR(fence))
 		r = PTR_ERR(fence);
@@ -1479,6 +1492,11 @@ static struct dma_fence *amdgpu_cs_get_fence(struct amdgpu_device *adev,
 	if (r) {
 		amdgpu_ctx_put(ctx);
 		return ERR_PTR(r);
+	}
+
+	if (entity->stopped) {
+		amdgpu_ctx_put(ctx);
+		return -EINVAL;
 	}
 
 	fence = amdgpu_ctx_get_fence(ctx, entity, user->seq_no);
