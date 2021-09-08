@@ -1496,7 +1496,7 @@ static struct dma_fence *amdgpu_cs_get_fence(struct amdgpu_device *adev,
 
 	if (entity->stopped) {
 		amdgpu_ctx_put(ctx);
-		return -EINVAL;
+		return ERR_PTR(-EINVAL);
 	}
 
 	fence = amdgpu_ctx_get_fence(ctx, entity, user->seq_no);
