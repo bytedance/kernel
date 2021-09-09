@@ -1013,6 +1013,11 @@ struct kvm_vcpu_stat {
 	u64 monitor_exits;
 	u64 pml_full_exits;
 	u64 preemption_timer_exits;
+	u64 stgi_exits;
+	u64 clgi_exits;
+	u64 npf_exits;
+	u64 avic_incomplete_ipi_exits;
+	u64 avic_unaccelerated_access_exits;
 	/* wrmsr & apic vm-exit reasons */
 	u64 wrmsr_set_apic_base;
 	u64 wrmsr_set_wall_clock;
@@ -1037,7 +1042,9 @@ struct kvm_vcpu_stat {
 	u64 cr_movetocr3;
 	u64 cr_movetocr4;
 	u64 cr_movetocr8;
+	u64 cr_movefromcr0;
 	u64 cr_movefromcr3;
+	u64 cr_movefromcr4;
 	u64 cr_movefromcr8;
 	u64 cr_clts;
 	u64 cr_lmsw;
