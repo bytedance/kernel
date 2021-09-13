@@ -1286,6 +1286,7 @@ struct task_struct {
 					__mce_reserved : 62;
 
 	struct callback_head		mce_kill_me;
+	int				mce_count;
 #endif
 
 	/*
