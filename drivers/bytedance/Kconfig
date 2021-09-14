@@ -52,6 +52,5 @@ if BYTEDANCE
 
 source "drivers/bytedance/hookbind/Kconfig"
 source "drivers/bytedance/blackholefs/Kconfig"
-source "drivers/bytedance/multi_hook/Kconfig"
 
 endif # BYTEDANCE
