@@ -1521,6 +1521,7 @@ retry_write:
 	ret = i2c_smbus_write_block_data(client,
 					 SSIF_IPMI_MULTI_PART_REQUEST_START,
 					 32, msg);
+	msleep(SSIF_MSG_MSEC);
 	if (ret) {
 		retry_cnt--;
 		if (retry_cnt > 0)
@@ -1535,6 +1536,7 @@ retry_write:
 	ret = i2c_smbus_write_block_data(client,
 					 SSIF_IPMI_MULTI_PART_REQUEST_MIDDLE,
 					 32, msg + 32);
+	msleep(SSIF_MSG_MSEC);
 	if (ret) {
 		dev_err(&client->dev, "Could not write multi-part middle, though the BMC said it could handle it.  Just limit sends to one part.\n");
 		return ret;
