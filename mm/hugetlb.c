@@ -3450,7 +3450,54 @@ out:
 	return ret;
 }
 
+/*
+ * The cpumask is the mask of possible cpus that can be waken
+ * to clean huge pages after releasing them.
+ */
+static struct cpumask hugetlb_background_clr_cpumask;
+static unsigned long *sysctl_hugetlb_background_clr_cpumask_bits =
+	cpumask_bits(&hugetlb_background_clr_cpumask);
+
+static int hugetlb_background_clr_cpumask_handler(struct ctl_table *table,
+						  int write,
+						  void __user *buffer,
+						  size_t *lenp,
+						  loff_t *ppos)
+{
+	int err;
+
+	spin_lock(&hugetlb_lock);
+	err = proc_do_large_bitmap(table, write, buffer, lenp, ppos);
+	if (!err && write)
+		cpumask_and(&hugetlb_background_clr_cpumask,
+			    &hugetlb_background_clr_cpumask,
+			    cpu_possible_mask);
+	spin_unlock(&hugetlb_lock);
+
+	return err;
+}
+
+static struct ctl_table hugetlb_background_clr_cpumask_ctl_table[] = {
+	{
+		.procname	= "hugetlb_clear_hpage_background_cpumask",
+		.data		= &sysctl_hugetlb_background_clr_cpumask_bits,
+		.maxlen		= NR_CPUS,
+		.mode		= 0644,
+		.proc_handler	= hugetlb_background_clr_cpumask_handler,
+	},
+	{ }
+};
+
 #endif /* CONFIG_SYSCTL */
+
+static void __init hugetlb_init_background_clean(void)
+{
+#ifdef CONFIG_SYSCTL
+	if (!register_sysctl("vm", hugetlb_background_clr_cpumask_ctl_table))
+		pr_err("Hugetlb: Unable to register background clean sysctl");
+#endif
+}
+late_initcall(hugetlb_init_background_clean);
 
 void hugetlb_report_meminfo(struct seq_file *m)
 {
