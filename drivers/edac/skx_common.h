@@ -125,6 +125,9 @@ struct res_config {
 	/* Per DDR channel memory-mapped I/O size */
 	int ddr_chan_mmio_sz;
 	bool support_ddr5;
+	/* Offsets of retry_rd_err_log registers */
+	u32 *offsets_scrub;
+	u32 *offsets_demand;
 };
 
 typedef int (*get_dimm_config_f)(struct mem_ctl_info *mci,
