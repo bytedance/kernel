@@ -231,8 +231,7 @@ static int skx_get_dimm_config(struct mem_ctl_info *mci, struct res_config *cfg)
 #define SKX_ILV_TARGET(tgt)	((tgt) & 7)
 
 static void skx_show_retry_rd_err_log(struct decoded_addr *res,
-				      char *msg, int len,
-				      bool scrub_err)
+				      char *msg, int len)
 {
 	u32 log0, log1, log2, log3, log4;
 	u32 corr0, corr1, corr2, corr3;
