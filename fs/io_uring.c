@@ -6043,15 +6043,12 @@ static int io_files_update(struct io_kiocb *req, bool force_nonblock,
 	struct io_uring_files_update up;
 	int ret;
 
-	if (force_nonblock)
-		return -EAGAIN;
-
 	up.offset = req->files_update.offset;
 	up.fds = req->files_update.arg;
 
-	mutex_lock(&ctx->uring_lock);
+	io_ring_submit_lock(ctx, !force_nonblock);
 	ret = __io_sqe_files_update(ctx, &up, req->files_update.nr_args);
-	mutex_unlock(&ctx->uring_lock);
+	io_ring_submit_unlock(ctx, !force_nonblock);
 
 	if (ret < 0)
 		req_set_fail_links(req);
