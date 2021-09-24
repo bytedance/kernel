@@ -3504,14 +3504,29 @@ static int hugetlb_background_clr_cpumask_handler(struct ctl_table *table,
 						  loff_t *ppos)
 {
 	int err;
+	cpumask_var_t tmpmask;
+
+	if (!alloc_cpumask_var(&tmpmask, GFP_KERNEL))
+		return -ENOMEM;
+
+	cpumask_copy(tmpmask, &hugetlb_background_clr_cpumask);
 
 	spin_lock(&hugetlb_lock);
 	err = proc_do_large_bitmap(table, write, buffer, lenp, ppos);
-	if (!err && write)
+	if (!err && write) {
+		int cpu;
+
 		cpumask_and(&hugetlb_background_clr_cpumask,
 			    &hugetlb_background_clr_cpumask,
 			    cpu_possible_mask);
+
+		cpumask_xor(tmpmask, tmpmask, &hugetlb_background_clr_cpumask);
+		for_each_cpu(cpu, tmpmask)
+			cancel_delayed_work(&per_cpu(hugetlb_clean_work, cpu));
+	}
+
 	spin_unlock(&hugetlb_lock);
+	free_cpumask_var(tmpmask);
 
 	return err;
 }
