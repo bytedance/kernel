@@ -19,6 +19,7 @@
  */
 static DEFINE_MUTEX(virtio_fs_mutex);
 static LIST_HEAD(virtio_fs_instances);
+static struct workqueue_struct *virtiofs_wq;
 
 enum {
 	VQ_HIPRIO,
@@ -605,7 +606,7 @@ static void virtio_fs_vq_done(struct virtqueue *vq)
 
 	dev_dbg(&vq->vdev->dev, "%s %s\n", __func__, fsvq->name);
 
-	schedule_work(&fsvq->done_work);
+	queue_work(virtiofs_wq, &fsvq->done_work);
 }
 
 /* Initialize virtqueues */
@@ -1341,6 +1342,14 @@ static int __init virtio_fs_init(void)
 		return ret;
 	}
 
+	virtiofs_wq = alloc_workqueue("virtiofs-wq",
+				      WQ_HIGHPRI | WQ_SYSFS | WQ_UNBOUND, 0);
+	if (!virtiofs_wq) {
+		unregister_filesystem(&virtio_fs_type);
+		unregister_virtio_driver(&virtio_fs_driver);
+		return -ENOMEM;
+	}
+
 	return 0;
 }
 module_init(virtio_fs_init);
@@ -1349,6 +1358,7 @@ static void __exit virtio_fs_exit(void)
 {
 	unregister_filesystem(&virtio_fs_type);
 	unregister_virtio_driver(&virtio_fs_driver);
+	destroy_workqueue(virtiofs_wq);
 }
 module_exit(virtio_fs_exit);
 
