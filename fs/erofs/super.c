@@ -11,6 +11,7 @@
 #include <linux/crc32c.h>
 #include <linux/fs_context.h>
 #include <linux/fs_parser.h>
+#include <linux/blkdev.h>
 #include "xattr.h"
 
 #define CREATE_TRACE_POINTS
@@ -121,6 +122,78 @@ static bool check_layout_compatibility(struct super_block *sb,
 	return true;
 }
 
+static int erofs_init_devices(struct super_block *sb,
+			      struct erofs_super_block *dsb)
+{
+	struct erofs_sb_info *sbi = EROFS_SB(sb);
+	unsigned int ondisk_extradevs;
+	erofs_off_t pos;
+	struct page *page = NULL;
+	struct erofs_device_info *dif;
+	struct erofs_deviceslot *dis;
+	void *ptr;
+	int id, err = 0;
+
+	sbi->total_blocks = sbi->primarydevice_blocks;
+	if (!erofs_sb_has_device_table(sbi))
+		ondisk_extradevs = 0;
+	else
+		ondisk_extradevs = le16_to_cpu(dsb->extra_devices);
+
+	if (ondisk_extradevs != sbi->devs->extra_devices) {
+		erofs_err(sb, "extra devices don't match (ondisk %u, given %u)",
+			  ondisk_extradevs, sbi->devs->extra_devices);
+		return -EINVAL;
+	}
+	if (!ondisk_extradevs)
+		return 0;
+
+	sbi->device_id_mask = roundup_pow_of_two(ondisk_extradevs + 1) - 1;
+	pos = le16_to_cpu(dsb->devt_slotoff) * EROFS_DEVT_SLOT_SIZE;
+	down_read(&sbi->devs->rwsem);
+	idr_for_each_entry(&sbi->devs->tree, dif, id) {
+		erofs_blk_t blk = erofs_blknr(pos);
+		struct block_device *bdev;
+
+		if (!page || page->index != blk) {
+			if (page) {
+				kunmap(page);
+				unlock_page(page);
+				put_page(page);
+			}
+
+			page = erofs_get_meta_page(sb, blk);
+			if (IS_ERR(page)) {
+				up_read(&sbi->devs->rwsem);
+				return PTR_ERR(page);
+			}
+			ptr = kmap(page);
+		}
+		dis = ptr + erofs_blkoff(pos);
+
+		bdev = blkdev_get_by_path(dif->path,
+					  FMODE_READ | FMODE_EXCL,
+					  sb->s_type);
+		if (IS_ERR(bdev)) {
+			err = PTR_ERR(bdev);
+			goto err_out;
+		}
+		dif->bdev = bdev;
+		dif->blocks = le32_to_cpu(dis->blocks);
+		dif->mapped_blkaddr = le32_to_cpu(dis->mapped_blkaddr);
+		sbi->total_blocks += dif->blocks;
+		pos += EROFS_DEVT_SLOT_SIZE;
+	}
+err_out:
+	up_read(&sbi->devs->rwsem);
+	if (page) {
+		kunmap(page);
+		unlock_page(page);
+		put_page(page);
+	}
+	return err;
+}
+
 static int erofs_read_superblock(struct super_block *sb)
 {
 	struct erofs_sb_info *sbi;
@@ -166,7 +239,7 @@ static int erofs_read_superblock(struct super_block *sb)
 	if (!check_layout_compatibility(sb, dsb))
 		goto out;
 
-	sbi->blocks = le32_to_cpu(dsb->blocks);
+	sbi->primarydevice_blocks = le32_to_cpu(dsb->blocks);
 	sbi->meta_blkaddr = le32_to_cpu(dsb->meta_blkaddr);
 #ifdef CONFIG_EROFS_FS_XATTR
 	sbi->xattr_blkaddr = le32_to_cpu(dsb->xattr_blkaddr);
@@ -187,7 +260,9 @@ static int erofs_read_superblock(struct super_block *sb)
 		ret = -EFSCORRUPTED;
 		goto out;
 	}
-	ret = 0;
+
+	/* handle multiple devices */
+	ret = erofs_init_devices(sb, dsb);
 out:
 	kunmap(page);
 	put_page(page);
@@ -215,6 +290,7 @@ enum {
 	Opt_acl,
 	Opt_noacl,
 	Opt_cache_strategy,
+	Opt_device,
 	Opt_err
 };
 
@@ -229,6 +305,7 @@ static const struct fs_parameter_spec erofs_param_specs[] = {
 	fsparam_flag_no("user_xattr",	Opt_user_xattr),
 	fsparam_flag_no("acl",		Opt_acl),
 	fsparam_enum("cache_strategy",	Opt_cache_strategy),
+	fsparam_string("device",	Opt_device),
 	{}
 };
 
@@ -248,9 +325,10 @@ const struct fs_parameter_description erofs_fs_parameters = {
 static int erofs_fc_parse_param(struct fs_context *fc,
 				struct fs_parameter *param)
 {
-	struct erofs_fs_context *ctx __maybe_unused = fc->fs_private;
+	struct erofs_fs_context *ctx = fc->fs_private;
 	struct fs_parse_result result;
-	int opt;
+	struct erofs_device_info *dif;
+	int opt, ret;
 
 	opt = fs_parse(fc, &erofs_fs_parameters, param, &result);
 	if (opt < 0)
@@ -283,6 +361,25 @@ static int erofs_fc_parse_param(struct fs_context *fc,
 #else
 		errorf(fc, "compression not supported, cache_strategy ignored");
 #endif
+		break;
+	case Opt_device:
+		dif = kzalloc(sizeof(*dif), GFP_KERNEL);
+		if (!dif)
+			return -ENOMEM;
+		dif->path = kstrdup(param->string, GFP_KERNEL);
+		if (!dif->path) {
+			kfree(dif);
+			return -ENOMEM;
+		}
+		down_write(&ctx->devs->rwsem);
+		ret = idr_alloc(&ctx->devs->tree, dif, 0, 0, GFP_KERNEL);
+		up_write(&ctx->devs->rwsem);
+		if (ret < 0) {
+			kfree(dif->path);
+			kfree(dif);
+			return ret;
+		}
+		++ctx->devs->extra_devices;
 		break;
 	default:
 		return -ENOPARAM;
@@ -369,6 +466,9 @@ static int erofs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 
 	sb->s_fs_info = sbi;
 	sbi->opt = ctx->opt;
+	sbi->devs = ctx->devs;
+	ctx->devs = NULL;
+
 	err = erofs_read_superblock(sb);
 	if (err)
 		return err;
@@ -439,9 +539,32 @@ static int erofs_fc_reconfigure(struct fs_context *fc)
 	return 0;
 }
 
+static int erofs_release_device_info(int id, void *ptr, void *data)
+{
+	struct erofs_device_info *dif = ptr;
+
+	if (dif->bdev)
+		blkdev_put(dif->bdev, FMODE_READ | FMODE_EXCL);
+	kfree(dif->path);
+	kfree(dif);
+	return 0;
+}
+
+static void erofs_free_dev_context(struct erofs_dev_context *devs)
+{
+	if (!devs)
+		return;
+	idr_for_each(&devs->tree, &erofs_release_device_info, NULL);
+	idr_destroy(&devs->tree);
+	kfree(devs);
+}
+
 static void erofs_fc_free(struct fs_context *fc)
 {
-	kfree(fc->fs_private);
+	struct erofs_fs_context *ctx = fc->fs_private;
+
+	erofs_free_dev_context(ctx->devs);
+	kfree(ctx);
 }
 
 static const struct fs_context_operations erofs_context_ops = {
@@ -453,13 +576,20 @@ static const struct fs_context_operations erofs_context_ops = {
 
 static int erofs_init_fs_context(struct fs_context *fc)
 {
-	fc->fs_private = kzalloc(sizeof(struct erofs_fs_context), GFP_KERNEL);
-	if (!fc->fs_private)
+	struct erofs_fs_context *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+
+	if (!ctx)
 		return -ENOMEM;
+	ctx->devs = kzalloc(sizeof(struct erofs_dev_context), GFP_KERNEL);
+	if (!ctx->devs) {
+		kfree(ctx);
+		return -ENOMEM;
+	}
+	fc->fs_private = ctx;
 
-	/* set default mount options */
-	erofs_default_options(fc->fs_private);
-
+	idr_init(&ctx->devs->tree);
+	init_rwsem(&ctx->devs->rwsem);
+	erofs_default_options(ctx);
 	fc->ops = &erofs_context_ops;
 	return 0;
 }
@@ -479,6 +609,7 @@ static void erofs_kill_sb(struct super_block *sb)
 	sbi = EROFS_SB(sb);
 	if (!sbi)
 		return;
+	erofs_free_dev_context(sbi->devs);
 	kfree(sbi);
 	sb->s_fs_info = NULL;
 }
@@ -565,7 +696,7 @@ static int erofs_statfs(struct dentry *dentry, struct kstatfs *buf)
 
 	buf->f_type = sb->s_magic;
 	buf->f_bsize = EROFS_BLKSIZ;
-	buf->f_blocks = sbi->blocks;
+	buf->f_blocks = sbi->total_blocks;
 	buf->f_bfree = buf->f_bavail = 0;
 
 	buf->f_files = ULLONG_MAX;
