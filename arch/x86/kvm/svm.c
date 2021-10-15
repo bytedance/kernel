@@ -2802,6 +2802,7 @@ static int npf_interception(struct vcpu_svm *svm)
 	u64 fault_address = __sme_clr(svm->vmcb->control.exit_info_2);
 	u64 error_code = svm->vmcb->control.exit_info_1;
 
+	++svm->vcpu.stat.npf_exits;
 	trace_kvm_page_fault(fault_address, error_code);
 	return kvm_mmu_page_fault(&svm->vcpu, fault_address, error_code,
 			static_cpu_has(X86_FEATURE_DECODEASSISTS) ?
@@ -2984,6 +2985,7 @@ static int io_interception(struct vcpu_svm *svm)
 
 static int nmi_interception(struct vcpu_svm *svm)
 {
+	++svm->vcpu.stat.exception_nmi_exits;
 	return 1;
 }
 
@@ -3863,6 +3865,7 @@ static int stgi_interception(struct vcpu_svm *svm)
 	 * If VGIF is enabled, the STGI intercept is only added to
 	 * detect the opening of the SMI/NMI window; remove it now.
 	 */
+	++svm->vcpu.stat.stgi_exits;
 	if (vgif_enabled(svm))
 		clr_intercept(svm, INTERCEPT_STGI);
 
@@ -3886,6 +3889,7 @@ static int clgi_interception(struct vcpu_svm *svm)
 	disable_gif(svm);
 
 	/* After a CLGI no interrupts should come */
+	++svm->vcpu.stat.clgi_exits;
 	if (!kvm_vcpu_apicv_active(&svm->vcpu)) {
 		svm_clear_vintr(svm);
 		svm->vmcb->control.int_ctl &= ~V_IRQ_MASK;
@@ -3926,6 +3930,7 @@ static int xsetbv_interception(struct vcpu_svm *svm)
 	u64 new_bv = kvm_read_edx_eax(&svm->vcpu);
 	u32 index = kvm_rcx_read(&svm->vcpu);
 
+	++svm->vcpu.stat.xsetbv_exits;
 	if (kvm_set_xcr(&svm->vcpu, index, new_bv) == 0) {
 		return kvm_skip_emulated_instruction(&svm->vcpu);
 	}
@@ -3953,6 +3958,7 @@ static int task_switch_interception(struct vcpu_svm *svm)
 	bool has_error_code = false;
 	u32 error_code = 0;
 
+	++svm->vcpu.stat.task_switch_exits;
 	tss_selector = (u16)svm->vmcb->control.exit_info_1;
 
 	if (svm->vmcb->control.exit_info_2 &
@@ -4050,6 +4056,7 @@ static int rdpmc_interception(struct vcpu_svm *svm)
 	if (!nrips)
 		return emulate_on_interception(svm);
 
+	++svm->vcpu.stat.rdpmc_exits;
 	err = kvm_rdpmc(&svm->vcpu);
 	return kvm_complete_insn_gp(&svm->vcpu, err);
 }
@@ -4086,6 +4093,8 @@ static int cr_interception(struct vcpu_svm *svm)
 	unsigned long val;
 	int err;
 
+	++svm->vcpu.stat.cr_exits;
+
 	if (!static_cpu_has(X86_FEATURE_DECODEASSISTS))
 		return emulate_on_interception(svm);
 
@@ -4104,19 +4113,23 @@ static int cr_interception(struct vcpu_svm *svm)
 		val = kvm_register_readl(&svm->vcpu, reg);
 		switch (cr) {
 		case 0:
-			if (!check_selective_cr0_intercepted(svm, val))
+			if (!check_selective_cr0_intercepted(svm, val)) {
+				++svm->vcpu.stat.cr_movetocr0;
 				err = kvm_set_cr0(&svm->vcpu, val);
+			}
 			else
 				return 1;
-
 			break;
 		case 3:
+		    ++svm->vcpu.stat.cr_movetocr3;
 			err = kvm_set_cr3(&svm->vcpu, val);
 			break;
 		case 4:
+		    ++svm->vcpu.stat.cr_movetocr4;
 			err = kvm_set_cr4(&svm->vcpu, val);
 			break;
 		case 8:
+			++svm->vcpu.stat.cr_movetocr8;
 			err = kvm_set_cr8(&svm->vcpu, val);
 			break;
 		default:
@@ -4127,18 +4140,22 @@ static int cr_interception(struct vcpu_svm *svm)
 	} else { /* mov from cr */
 		switch (cr) {
 		case 0:
+		    ++svm->vcpu.stat.cr_movefromcr0;
 			val = kvm_read_cr0(&svm->vcpu);
 			break;
 		case 2:
 			val = svm->vcpu.arch.cr2;
 			break;
 		case 3:
+		    ++svm->vcpu.stat.cr_movefromcr3;
 			val = kvm_read_cr3(&svm->vcpu);
 			break;
 		case 4:
+		    ++svm->vcpu.stat.cr_movefromcr4;
 			val = kvm_read_cr4(&svm->vcpu);
 			break;
 		case 8:
+		    ++svm->vcpu.stat.cr_movefromcr8;
 			val = kvm_get_cr8(&svm->vcpu);
 			break;
 		default:
@@ -4155,6 +4172,8 @@ static int dr_interception(struct vcpu_svm *svm)
 {
 	int reg, dr;
 	unsigned long val;
+
+	++svm->vcpu.stat.dr_exits;
 
 	if (svm->vcpu.guest_debug == 0) {
 		/*
@@ -4324,6 +4343,7 @@ static int svm_get_msr(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 static int rdmsr_interception(struct vcpu_svm *svm)
 {
+	++svm->vcpu.stat.rdmsr_exits;
 	return kvm_emulate_rdmsr(&svm->vcpu);
 }
 
@@ -4510,6 +4530,7 @@ static int svm_set_msr(struct kvm_vcpu *vcpu, struct msr_data *msr)
 
 static int wrmsr_interception(struct vcpu_svm *svm)
 {
+	++svm->vcpu.stat.wrmsr_exits;
 	return kvm_emulate_wrmsr(&svm->vcpu);
 }
 
@@ -4544,6 +4565,7 @@ static int pause_interception(struct vcpu_svm *svm)
 	struct kvm_vcpu *vcpu = &svm->vcpu;
 	bool in_kernel = (svm_get_cpl(vcpu) == 0);
 
+	++svm->vcpu.stat.pause_exits;
 	if (pause_filter_thresh)
 		grow_ple_window(vcpu);
 
@@ -4558,12 +4580,14 @@ static int nop_interception(struct vcpu_svm *svm)
 
 static int monitor_interception(struct vcpu_svm *svm)
 {
+	++svm->vcpu.stat.monitor_exits;
 	printk_once(KERN_WARNING "kvm: MONITOR instruction emulated as NOP!\n");
 	return nop_interception(svm);
 }
 
 static int mwait_interception(struct vcpu_svm *svm)
 {
+	++svm->vcpu.stat.mwait_exits;
 	printk_once(KERN_WARNING "kvm: MWAIT instruction emulated as NOP!\n");
 	return nop_interception(svm);
 }
@@ -4583,6 +4607,7 @@ static int avic_incomplete_ipi_interception(struct vcpu_svm *svm)
 	u32 index = svm->vmcb->control.exit_info_2 & 0xFF;
 	struct kvm_lapic *apic = svm->vcpu.arch.apic;
 
+	++svm->vcpu.stat.avic_incomplete_ipi_exits;
 	trace_kvm_avic_incomplete_ipi(svm->vcpu.vcpu_id, icrh, icrl, id, index);
 
 	switch (id) {
@@ -4824,6 +4849,7 @@ static int avic_unaccelerated_access_interception(struct vcpu_svm *svm)
 		     AVIC_UNACCEL_ACCESS_WRITE_MASK;
 	bool trap = is_avic_unaccelerated_access_trap(offset);
 
+	++svm->vcpu.stat.avic_unaccelerated_access_exits;
 	trace_kvm_avic_unaccelerated_access(svm->vcpu.vcpu_id, offset,
 					    trap, write, vector);
 	if (trap) {
