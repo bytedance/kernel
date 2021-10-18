@@ -1489,6 +1489,7 @@ static int vduse_destroy_dev(char *name)
 
 	list_del(&dev->list);
 	cdev_device_del(&dev->cdev, &dev->dev);
+	vduse_dev_deinit_vqs(dev);
 	put_device(&dev->dev);
 	module_put(THIS_MODULE);
 
@@ -1502,7 +1503,6 @@ static void vduse_release_dev(struct device *device)
 
 	flush_work(&dev->inject);
 	ida_simple_remove(&vduse_ida, dev->minor);
-	vduse_dev_deinit_vqs(dev);
 	vduse_domain_destroy(dev->domain);
 	kfree(dev->name);
 	vduse_dev_destroy(dev);
