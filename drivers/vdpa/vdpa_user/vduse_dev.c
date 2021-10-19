@@ -1664,6 +1664,9 @@ static const struct file_operations vduse_fops = {
 
 static char *vduse_devnode(struct device *dev, umode_t *mode)
 {
+	if (mode)
+		*mode = 0666;
+
 	return kasprintf(GFP_KERNEL, "vduse/%s", dev_name(dev));
 }
 
@@ -1672,6 +1675,7 @@ static struct miscdevice vduse_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "vduse",
 	.nodename = "vduse/control",
+	.mode = 0666,
 };
 
 static void vduse_mgmtdev_release(struct device *dev)
