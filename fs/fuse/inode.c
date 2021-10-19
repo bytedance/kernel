@@ -23,6 +23,7 @@
 #include <linux/exportfs.h>
 #include <linux/posix_acl.h>
 #include <linux/pid_namespace.h>
+#include <linux/fs.h>
 
 MODULE_AUTHOR("Miklos Szeredi <miklos@szeredi.hu>");
 MODULE_DESCRIPTION("Filesystem in Userspace");
@@ -197,11 +198,31 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 	bool is_wb = fc->writeback_cache;
 	loff_t oldsize;
 	struct timespec64 old_mtime;
+	bool try_wb_update = false;
+
+	if (is_wb && fc->wb_trust_server && S_ISREG(inode->i_mode) &&
+	    inode_trylock(inode))
+		try_wb_update = true;
 
 	spin_lock(&fi->lock);
+	/*
+	 * In case of writeback_cache enabled, writes update mtime, ctime and
+	 * may update i_size.  In these cases trust the cached value in the
+	 * inode.
+	 *
+	 * One expection is if the page cache is clean and there is no in-flight
+	 * fuse writeback request. The c/mtime and file size are allowed to be
+	 * updated from server, so clear is_wb in that case.
+	 */
+	if (try_wb_update && !fuse_file_is_writeback_locked(inode) &&
+	    !filemap_range_needs_writeback(inode->i_mapping, 0, LLONG_MAX))
+		is_wb = 0;
+
 	if ((attr_version != 0 && fi->attr_version > attr_version) ||
 	    test_bit(FUSE_I_SIZE_UNSTABLE, &fi->state)) {
 		spin_unlock(&fi->lock);
+		if (try_wb_update)
+			inode_unlock(inode);
 		return;
 	}
 
@@ -242,6 +263,8 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 		if (inval)
 			invalidate_inode_pages2(inode->i_mapping);
 	}
+	if (try_wb_update)
+		inode_unlock(inode);
 }
 
 static void fuse_init_inode(struct inode *inode, struct fuse_attr *attr)
@@ -648,6 +671,7 @@ void fuse_conn_init(struct fuse_conn *fc, struct user_namespace *user_ns,
 	fc->user_ns = get_user_ns(user_ns);
 	fc->max_pages = FUSE_DEFAULT_MAX_PAGES_PER_REQ;
 	fc->readdir_pages = 1;
+	fc->wb_trust_server = 0;
 }
 EXPORT_SYMBOL_GPL(fuse_conn_init);
 
@@ -979,6 +1003,9 @@ static void process_init_reply(struct fuse_conn *fc, struct fuse_args *args,
 						    arg->readdir_pages, 1));
 
 			}
+			if ((arg->flags & FUSE_WB_TRUST_SERVER) &&
+							fc->writeback_cache)
+				fc->wb_trust_server = 1;
 		} else {
 			ra_pages = fc->max_read / PAGE_SIZE;
 			fc->no_lock = 1;
@@ -1017,7 +1044,7 @@ void fuse_send_init(struct fuse_conn *fc)
 		FUSE_PARALLEL_DIROPS | FUSE_HANDLE_KILLPRIV | FUSE_POSIX_ACL |
 		FUSE_ABORT_ERROR | FUSE_MAX_PAGES | FUSE_CACHE_SYMLINKS |
 		FUSE_NO_OPENDIR_SUPPORT | FUSE_EXPLICIT_INVAL_DATA |
-		FUSE_READDIR_PAGES;
+		FUSE_READDIR_PAGES | FUSE_WB_TRUST_SERVER;
 	ia->args.opcode = FUSE_INIT;
 	ia->args.in_numargs = 1;
 	ia->args.in_args[0].size = sizeof(ia->in);
