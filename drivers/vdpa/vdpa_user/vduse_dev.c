@@ -40,6 +40,8 @@
 #define VDUSE_DEV_MAX (1U << MINORBITS)
 #define VDUSE_REQUEST_TIMEOUT 30
 
+struct vduse_dev;
+
 struct vduse_virtqueue {
 	u16 index;
 	bool ready;
@@ -57,9 +59,8 @@ struct vduse_virtqueue {
 	struct vringh vring;
 	struct vringh_kiov in_iov;
 	struct vringh_kiov out_iov;
+	struct vduse_dev *dev;
 };
-
-struct vduse_dev;
 
 struct vduse_vdpa {
 	struct vdpa_device vdpa;
@@ -94,6 +95,7 @@ struct vduse_dev {
 	u32 device_id;
 	u32 vendor_id;
 	u64 features;
+	u8 status;
 	struct delayed_work timeout_work;
 	u16 dead_timeout;
 	void *shm_addr;
@@ -699,6 +701,7 @@ static void vduse_vdpa_set_status(struct vdpa_device *vdpa, u8 status)
 
 	vduse_dev_set_status(dev, status);
 
+	dev->status = status;
 	if (status == 0)
 		vduse_dev_reset(dev);
 }
@@ -892,7 +895,8 @@ static void vduse_dev_irq_inject(struct work_struct *work)
 	struct vduse_dev *dev = container_of(work, struct vduse_dev, inject);
 
 	spin_lock_irq(&dev->irq_lock);
-	if (dev->config_cb.callback)
+	if ((dev->status & VIRTIO_CONFIG_S_DRIVER_OK) &&
+	    dev->config_cb.callback)
 		dev->config_cb.callback(dev->config_cb.private);
 	spin_unlock_irq(&dev->irq_lock);
 }
@@ -901,9 +905,11 @@ static void vduse_vq_irq_inject(struct work_struct *work)
 {
 	struct vduse_virtqueue *vq = container_of(work,
 					struct vduse_virtqueue, inject);
+	struct vduse_dev *dev = vq->dev;
 
 	spin_lock_irq(&vq->irq_lock);
-	if (vq->ready && vq->cb.callback)
+	if (dev && (dev->status & VIRTIO_CONFIG_S_DRIVER_OK) &&
+	    vq->cb.callback)
 		vq->cb.callback(vq->cb.private);
 	spin_unlock_irq(&vq->irq_lock);
 }
@@ -1206,8 +1212,10 @@ static void vduse_dev_deinit_vqs(struct vduse_dev *dev)
 	if (!dev->vqs)
 		return;
 
-	for (i = 0; i < dev->vq_num; i++)
+	for (i = 0; i < dev->vq_num; i++) {
 		kobject_put(&dev->vqs[i]->kobj);
+		dev->vqs[i]->dev = NULL;
+	}
 	kfree(dev->vqs);
 }
 
@@ -1231,6 +1239,7 @@ static int vduse_dev_init_vqs(struct vduse_dev *dev, u32 vq_align,
 			goto err;
 		}
 		dev->vqs[i]->index = i;
+		dev->vqs[i]->dev = dev;
 		dev->vqs[i]->irq_affinity = -1;
 		vringh_set_iotlb(&dev->vqs[i]->vring, dev->domain->iotlb,
 				 &dev->domain->iotlb_lock);
