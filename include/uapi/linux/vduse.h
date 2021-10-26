@@ -128,8 +128,10 @@ struct vduse_dev_config {
 	__u32 vq_num; /* the number of virtqueues */
 	__u32 vq_align; /* the allocation alignment of virtqueue's metadata */
 	__u32 config_size; /* the size of the configuration space */
-	__u32 reserved[6]; /* for future use */
+	__u32 reserved[5]; /* for future use */
 	__u16 reserved2; /* for future use */
+	__u16 dev_shm_size; /* size of device shared memory */
+	__u16 vq_shm_off; /* offset of virtqueue shared memory */
 	__u16 dead_timeout; /* dead timeout */
 };
 
@@ -147,6 +149,24 @@ struct vduse_vq_eventfd {
 	__u32 index; /* virtqueue index */
 #define VDUSE_EVENTFD_DEASSIGN -1
 	int fd; /* eventfd, -1 means de-assigning the eventfd */
+};
+
+#define VDUSE_SHM_ALIGNMENT 64
+
+struct desc_state_split {
+	__u8 inflight;
+	__u8 padding[5];
+	__u8 next;
+	__u8 counter;
+};
+
+struct vduse_vq_inflight {
+	__u64 features;
+	__u16 version;
+	__u16 desc_num;
+	__u16 last_batch_head;
+	__u16 used_idx;
+	struct desc_state_split desc[];
 };
 
 #define VDUSE_BASE	0x81

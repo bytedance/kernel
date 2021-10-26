@@ -40,6 +40,8 @@
 #define VDUSE_DEV_MAX (1U << MINORBITS)
 #define VDUSE_REQUEST_TIMEOUT 30
 
+struct vduse_dev;
+
 struct vduse_virtqueue {
 	u16 index;
 	bool ready;
@@ -57,9 +59,8 @@ struct vduse_virtqueue {
 	struct vringh vring;
 	struct vringh_kiov in_iov;
 	struct vringh_kiov out_iov;
+	struct vduse_dev *dev;
 };
-
-struct vduse_dev;
 
 struct vduse_vdpa {
 	struct vdpa_device vdpa;
@@ -94,8 +95,12 @@ struct vduse_dev {
 	u32 device_id;
 	u32 vendor_id;
 	u64 features;
+	u8 status;
 	struct delayed_work timeout_work;
 	u16 dead_timeout;
+	void *shm_addr;
+	u8 dev_shm_size;
+	u8 vq_shm_off;
 	bool dead;
 };
 
@@ -210,7 +215,7 @@ static u32 vduse_dev_get_request_id(struct vduse_dev *dev)
 
 static u64 vduse_dev_get_features(struct vduse_dev *dev)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_GET_FEATURES;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -223,7 +228,7 @@ static u64 vduse_dev_get_features(struct vduse_dev *dev)
 
 static int vduse_dev_set_features(struct vduse_dev *dev, u64 features)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_SET_FEATURES;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -234,7 +239,7 @@ static int vduse_dev_set_features(struct vduse_dev *dev, u64 features)
 
 static u8 vduse_dev_get_status(struct vduse_dev *dev)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_GET_STATUS;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -247,7 +252,7 @@ static u8 vduse_dev_get_status(struct vduse_dev *dev)
 
 static void vduse_dev_set_status(struct vduse_dev *dev, u8 status)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_SET_STATUS;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -259,7 +264,7 @@ static void vduse_dev_set_status(struct vduse_dev *dev, u8 status)
 static void vduse_dev_get_config(struct vduse_dev *dev, unsigned int offset,
 				 void *buf, unsigned int len)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 	unsigned int sz;
 
 	while (len) {
@@ -281,7 +286,7 @@ static void vduse_dev_get_config(struct vduse_dev *dev, unsigned int offset,
 static void vduse_dev_set_config(struct vduse_dev *dev, unsigned int offset,
 				 const void *buf, unsigned int len)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 	unsigned int sz;
 
 	while (len) {
@@ -303,7 +308,7 @@ static void vduse_dev_set_config(struct vduse_dev *dev, unsigned int offset,
 static void vduse_dev_set_vq_num(struct vduse_dev *dev,
 				 struct vduse_virtqueue *vq, u32 num)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_SET_VQ_NUM;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -317,7 +322,7 @@ static int vduse_dev_set_vq_addr(struct vduse_dev *dev,
 				 struct vduse_virtqueue *vq, u64 desc_addr,
 				 u64 driver_addr, u64 device_addr)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_SET_VQ_ADDR;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -332,7 +337,7 @@ static int vduse_dev_set_vq_addr(struct vduse_dev *dev,
 static void vduse_dev_set_vq_ready(struct vduse_dev *dev,
 				struct vduse_virtqueue *vq, bool ready)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_SET_VQ_READY;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -345,7 +350,7 @@ static void vduse_dev_set_vq_ready(struct vduse_dev *dev,
 static bool vduse_dev_get_vq_ready(struct vduse_dev *dev,
 				   struct vduse_virtqueue *vq)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_GET_VQ_READY;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -360,7 +365,7 @@ static int vduse_dev_get_vq_state(struct vduse_dev *dev,
 				struct vduse_virtqueue *vq,
 				struct vdpa_vq_state *state)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 	int ret;
 
 	msg.req.type = VDUSE_GET_VQ_STATE;
@@ -378,7 +383,7 @@ static int vduse_dev_set_vq_state(struct vduse_dev *dev,
 				struct vduse_virtqueue *vq,
 				const struct vdpa_vq_state *state)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_SET_VQ_STATE;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -391,7 +396,7 @@ static int vduse_dev_set_vq_state(struct vduse_dev *dev,
 static int vduse_dev_update_iotlb(struct vduse_dev *dev,
 				u64 start, u64 last)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	if (last < start)
 		return -EINVAL;
@@ -406,7 +411,7 @@ static int vduse_dev_update_iotlb(struct vduse_dev *dev,
 
 static int vduse_dev_vdpa_disconnect(struct vduse_dev *dev)
 {
-	struct vduse_dev_msg msg = { 0 };
+	struct vduse_dev_msg msg = {{ 0 }};
 
 	msg.req.type = VDUSE_VDPA_DISCONNECT;
 	msg.req.request_id = vduse_dev_get_request_id(dev);
@@ -696,6 +701,7 @@ static void vduse_vdpa_set_status(struct vdpa_device *vdpa, u8 status)
 
 	vduse_dev_set_status(dev, status);
 
+	dev->status = status;
 	if (status == 0)
 		vduse_dev_reset(dev);
 }
@@ -889,7 +895,8 @@ static void vduse_dev_irq_inject(struct work_struct *work)
 	struct vduse_dev *dev = container_of(work, struct vduse_dev, inject);
 
 	spin_lock_irq(&dev->irq_lock);
-	if (dev->config_cb.callback)
+	if ((dev->status & VIRTIO_CONFIG_S_DRIVER_OK) &&
+	    dev->config_cb.callback)
 		dev->config_cb.callback(dev->config_cb.private);
 	spin_unlock_irq(&dev->irq_lock);
 }
@@ -898,9 +905,11 @@ static void vduse_vq_irq_inject(struct work_struct *work)
 {
 	struct vduse_virtqueue *vq = container_of(work,
 					struct vduse_virtqueue, inject);
+	struct vduse_dev *dev = vq->dev;
 
 	spin_lock_irq(&vq->irq_lock);
-	if (vq->ready && vq->cb.callback)
+	if (dev && (dev->status & VIRTIO_CONFIG_S_DRIVER_OK) &&
+	    vq->cb.callback)
 		vq->cb.callback(vq->cb.private);
 	spin_unlock_irq(&vq->irq_lock);
 }
@@ -1010,6 +1019,42 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 	return ret;
 }
 
+static inline unsigned long vduse_vq_inflight_size(struct vduse_dev *dev)
+{
+	return ALIGN(dev->vq_shm_off + sizeof(struct vduse_vq_inflight) +
+		     dev->vq_size_max * sizeof(struct desc_state_split),
+		     VDUSE_SHM_ALIGNMENT);
+}
+
+static inline struct vduse_vq_inflight *
+vduse_get_vq_inflight(struct vduse_dev *dev, int index)
+{
+	return (struct vduse_vq_inflight *)(dev->shm_addr +
+		dev->dev_shm_size + dev->vq_shm_off +
+		vduse_vq_inflight_size(dev) * index);
+}
+
+static int vduse_dev_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	struct vduse_dev *dev = file->private_data;
+	unsigned long size = vma->vm_end - vma->vm_start;
+
+	if (size < dev->dev_shm_size +
+	    vduse_vq_inflight_size(dev) * dev->vq_num)
+		return -EINVAL;
+
+	if (!(vma->vm_flags & VM_SHARED))
+		return -EINVAL;
+
+	if (!dev->shm_addr) {
+		dev->shm_addr = vmalloc_user(size);
+		if (!dev->shm_addr)
+			return -ENOMEM;
+	}
+
+	return remap_vmalloc_range(vma, dev->shm_addr, 0);
+}
+
 static int vduse_dev_release(struct inode *inode, struct file *file)
 {
 	struct vduse_dev *dev = file->private_data;
@@ -1073,6 +1118,7 @@ static const struct file_operations vduse_dev_fops = {
 	.unlocked_ioctl	= vduse_dev_ioctl,
 	.compat_ioctl	= compat_ptr_ioctl,
 	.llseek		= noop_llseek,
+	.mmap		= vduse_dev_mmap,
 };
 
 static ssize_t irq_affinity_show(struct vduse_virtqueue *vq, char *buf)
@@ -1081,7 +1127,7 @@ static ssize_t irq_affinity_show(struct vduse_virtqueue *vq, char *buf)
 }
 
 static ssize_t irq_affinity_store(struct vduse_virtqueue *vq,
-				     const char *buf, size_t count)
+				  const char *buf, size_t count)
 {
 	int val;
 
@@ -1124,7 +1170,7 @@ static ssize_t vq_attr_show(struct kobject *kobj, struct attribute *attr,
 }
 
 static ssize_t vq_attr_store(struct kobject *kobj, struct attribute *attr,
-                            const char *buf, size_t count)
+			     const char *buf, size_t count)
 {
 	struct vduse_virtqueue *vq = container_of(kobj,
 					struct vduse_virtqueue, kobj);
@@ -1166,8 +1212,10 @@ static void vduse_dev_deinit_vqs(struct vduse_dev *dev)
 	if (!dev->vqs)
 		return;
 
-	for (i = 0; i < dev->vq_num; i++)
+	for (i = 0; i < dev->vq_num; i++) {
 		kobject_put(&dev->vqs[i]->kobj);
+		dev->vqs[i]->dev = NULL;
+	}
 	kfree(dev->vqs);
 }
 
@@ -1191,6 +1239,7 @@ static int vduse_dev_init_vqs(struct vduse_dev *dev, u32 vq_align,
 			goto err;
 		}
 		dev->vqs[i]->index = i;
+		dev->vqs[i]->dev = dev;
 		dev->vqs[i]->irq_affinity = -1;
 		vringh_set_iotlb(&dev->vqs[i]->vring, dev->domain->iotlb,
 				 &dev->domain->iotlb_lock);
@@ -1216,7 +1265,7 @@ err:
 }
 
 static int vduse_blk_timeout_handler(struct vduse_dev *dev,
-				      struct vduse_virtqueue *vq)
+				     struct vduse_virtqueue *vq)
 {
 	size_t len = 0;
 	ssize_t bytes;
@@ -1334,7 +1383,7 @@ err:
 
 /* Returns 0 if there was no request, 1 if there was, or -errno. */
 static int vduse_req_timeout_handler(struct vduse_dev *dev,
-				      struct vduse_virtqueue *vq)
+				     struct vduse_virtqueue *vq)
 {
 	int ret;
 	bool do_retry = true;
@@ -1359,12 +1408,32 @@ retry:
 	return ret;
 }
 
+static void vduse_vq_check_inflights(struct vduse_dev *dev, int index)
+{
+	struct vduse_vq_inflight *inflight = vduse_get_vq_inflight(dev, index);
+	struct vduse_virtqueue *vq = dev->vqs[index];
+	uint16_t idx = vq->vring.last_avail_idx;
+	int i, desc_num = dev->vq_size_max;
+
+	if (inflight->desc_num)
+		desc_num = inflight->desc_num;
+
+	if (inflight->used_idx != idx)
+		inflight->desc[inflight->last_batch_head].inflight = 0;
+
+	for (i = 0; i < desc_num; i++) {
+		if (inflight->desc[i].inflight)
+			vringh_recover_desc_iotlb(&vq->vring, idx++, i);
+	}
+}
+
 static void vduse_dev_timeout_work(struct work_struct *work)
 {
 	int i, ret;
 	struct vduse_dev_msg *msg;
 	struct vduse_dev *dev = container_of(to_delayed_work(work),
 					struct vduse_dev, timeout_work);
+	bool check_inflight = false;
 
 	mutex_lock(&dev->lock);
 	if (dev->connected && !dev->aborted)
@@ -1373,6 +1442,7 @@ static void vduse_dev_timeout_work(struct work_struct *work)
 	if (!dev->dead) {
 		pr_warn("VDUSE: dead connection found in %s\n",
 			dev_name(&dev->dev));
+		check_inflight = true;
 		flush_workqueue(vduse_irq_wq);
 		flush_workqueue(vduse_irq_bound_wq);
 	}
@@ -1385,12 +1455,22 @@ static void vduse_dev_timeout_work(struct work_struct *work)
 	}
 	spin_unlock(&dev->msg_lock);
 
+	if (!dev->shm_addr) {
+		dev->dead = false;
+		pr_warn("VDUSE: can't handle dead connection in %s\n",
+			dev_name(&dev->dev));
+		goto unlock;
+	}
+
 	for (i = 0; i < dev->vq_num; i++) {
 		if (!dev->vqs[i]->ready)
 			continue;
 
 		if (vringh_recover_iotlb(&dev->vqs[i]->vring))
 			continue;
+
+		if (check_inflight)
+			vduse_vq_check_inflights(dev, i);
 
 		do {
 			vringh_notify_disable_iotlb(&dev->vqs[i]->vring);
@@ -1455,6 +1535,7 @@ static struct vduse_dev *vduse_dev_create(void)
 
 static void vduse_dev_destroy(struct vduse_dev *dev)
 {
+	vfree(dev->shm_addr);
 	kfree(dev);
 }
 
@@ -1489,6 +1570,7 @@ static int vduse_destroy_dev(char *name)
 
 	list_del(&dev->list);
 	cdev_device_del(&dev->cdev, &dev->dev);
+	vduse_dev_deinit_vqs(dev);
 	put_device(&dev->dev);
 	module_put(THIS_MODULE);
 
@@ -1502,7 +1584,6 @@ static void vduse_release_dev(struct device *device)
 
 	flush_work(&dev->inject);
 	ida_simple_remove(&vduse_ida, dev->minor);
-	vduse_dev_deinit_vqs(dev);
 	vduse_domain_destroy(dev->domain);
 	kfree(dev->name);
 	vduse_dev_destroy(dev);
@@ -1529,6 +1610,8 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	dev->device_id = config->device_id;
 	dev->vendor_id = config->vendor_id;
 	dev->config_size = config->config_size;
+	dev->dev_shm_size = config->dev_shm_size;
+	dev->vq_shm_off = config->vq_shm_off;
 	dev->name = kstrdup(config->name, GFP_KERNEL);
 	if (!dev->name)
 		goto err_str;
@@ -1664,6 +1747,9 @@ static const struct file_operations vduse_fops = {
 
 static char *vduse_devnode(struct device *dev, umode_t *mode)
 {
+	if (mode)
+		*mode = 0666;
+
 	return kasprintf(GFP_KERNEL, "vduse/%s", dev_name(dev));
 }
 
@@ -1672,6 +1758,7 @@ static struct miscdevice vduse_misc = {
 	.minor = MISC_DYNAMIC_MINOR,
 	.name = "vduse",
 	.nodename = "vduse/control",
+	.mode = 0666,
 };
 
 static void vduse_mgmtdev_release(struct device *dev)
