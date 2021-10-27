@@ -3171,8 +3171,11 @@ fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 	}
 
 	if (iov_iter_rw(iter) == WRITE) {
+		struct fuse_conn *fc = get_fuse_conn(inode);
+
 		ret = fuse_direct_io(io, iter, &pos, FUSE_DIO_WRITE);
-		fuse_invalidate_attr(inode);
+		if (!fc->writeback_cache)
+			fuse_invalidate_attr(inode);
 	} else {
 		ret = __fuse_direct_read(io, iter, &pos);
 	}
