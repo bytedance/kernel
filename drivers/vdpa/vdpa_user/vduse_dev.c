@@ -1255,8 +1255,9 @@ static void vduse_dev_deinit_vqs(struct vduse_dev *dev)
 		return;
 
 	for (i = 0; i < dev->vq_num; i++) {
-		kobject_put(&dev->vqs[i]->kobj);
 		dev->vqs[i]->dev = NULL;
+		flush_work(&dev->vqs[i]->inject);
+		kobject_put(&dev->vqs[i]->kobj);
 	}
 	kfree(dev->vqs);
 }
