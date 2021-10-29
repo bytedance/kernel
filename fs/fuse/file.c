@@ -389,6 +389,18 @@ static struct fuse_writepage_args *fuse_find_writeback(struct fuse_inode *fi,
 }
 
 /*
+ * Check if any page of this file is under writeback.
+ *
+ * The fuse_inode lock should be held by the caller.
+ */
+bool fuse_file_is_writeback_locked(struct inode *inode)
+{
+	struct fuse_inode *fi = get_fuse_inode(inode);
+
+	return fuse_find_writeback(fi, 0, ULONG_MAX);
+}
+
+/*
  * Check if any page in a range is under writeback
  *
  * This is currently done by walking the list of writepage requests
@@ -452,8 +464,9 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 	if (fuse_is_bad(inode))
 		return -EIO;
 
+	err = 0;
 	if (fc->no_flush)
-		return 0;
+		goto inval_attr_out;
 
 	err = write_inode_now(inode, 1);
 	if (err)
@@ -482,6 +495,14 @@ static int fuse_flush(struct file *file, fl_owner_t id)
 		fc->no_flush = 1;
 		err = 0;
 	}
+
+inval_attr_out:
+	/*
+	 * In memory i_blocks is not maintained by fuse, if writeback cache is
+	 * enabled, i_blocks from cached attr may not be accurate.
+	 */
+	if (!err && fc->writeback_cache)
+		fuse_invalidate_attr(inode);
 	return err;
 }
 
@@ -1736,6 +1757,14 @@ static void fuse_writepage_end(struct fuse_conn *fc, struct fuse_args *args,
 	struct fuse_inode *fi = get_fuse_inode(inode);
 
 	mapping_set_error(inode->i_mapping, error);
+	/*
+	 * A writeback finished and this might have updated mtime/ctime on
+	 * server making local mtime/ctime stale.  Hence invalidate attrs.
+	 * Do this only if writeback_cache is not enabled.  If writeback_cache
+	 * is enabled, we trust local ctime/mtime.
+	 */
+	if (!fc->writeback_cache)
+		fuse_invalidate_attr(inode);
 	spin_lock(&fi->lock);
 	while (wpa->next) {
 		struct fuse_conn *fc = get_fuse_conn(inode);
@@ -3154,8 +3183,11 @@ fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 	}
 
 	if (iov_iter_rw(iter) == WRITE) {
+		struct fuse_conn *fc = get_fuse_conn(inode);
+
 		ret = fuse_direct_io(io, iter, &pos, FUSE_DIO_WRITE);
-		fuse_invalidate_attr(inode);
+		if (!fc->writeback_cache)
+			fuse_invalidate_attr(inode);
 	} else {
 		ret = __fuse_direct_read(io, iter, &pos);
 	}
@@ -3188,7 +3220,7 @@ fuse_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 
 static int fuse_writeback_range(struct inode *inode, loff_t start, loff_t end)
 {
-	int err = filemap_write_and_wait_range(inode->i_mapping, start, end);
+	int err = filemap_write_and_wait_range(inode->i_mapping, start, LLONG_MAX);
 
 	if (!err)
 		fuse_sync_writes(inode);

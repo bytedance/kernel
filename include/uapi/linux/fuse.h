@@ -343,6 +343,7 @@ struct fuse_file_lock {
 #define FUSE_EXPLICIT_INVAL_DATA (1 << 25)
 #define FUSE_MAP_ALIGNMENT	(1 << 26)
 
+#define FUSE_WB_TRUST_SERVER	(1 << 30)
 #define FUSE_READDIR_PAGES	(1 << 31)
 
 /**

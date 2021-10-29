@@ -610,6 +610,10 @@ struct fuse_conn {
 	/** write-back cache policy (default is write-through) */
 	unsigned writeback_cache:1;
 
+	/** Update c/mtime and size on attribute timeout even in
+	    write-back mode. */
+	unsigned wb_trust_server;
+
 	/** allow parallel lookups and readdir (default is serialized) */
 	unsigned parallel_dirops:1;
 
@@ -1113,5 +1117,6 @@ unsigned int fuse_len_args(unsigned int numargs, struct fuse_arg *args);
  */
 u64 fuse_get_unique(struct fuse_iqueue *fiq);
 void fuse_free_conn(struct fuse_conn *fc);
+bool fuse_file_is_writeback_locked(struct inode *inode);
 
 #endif /* _FS_FUSE_I_H */
