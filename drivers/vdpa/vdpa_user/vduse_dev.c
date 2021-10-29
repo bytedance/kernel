@@ -893,12 +893,18 @@ static int vduse_kickfd_setup(struct vduse_dev *dev,
 static void vduse_dev_irq_inject(struct work_struct *work)
 {
 	struct vduse_dev *dev = container_of(work, struct vduse_dev, inject);
+	bool missed = true;
 
 	spin_lock_irq(&dev->irq_lock);
 	if ((dev->status & VIRTIO_CONFIG_S_DRIVER_OK) &&
-	    dev->config_cb.callback)
+	    dev->config_cb.callback) {
 		dev->config_cb.callback(dev->config_cb.private);
+		missed = false;
+	}
 	spin_unlock_irq(&dev->irq_lock);
+	if (missed)
+		pr_err_ratelimited("Miss vduse [%s] config irq, status: %d\n",
+				   dev->name, dev->status);
 }
 
 static void vduse_vq_irq_inject(struct work_struct *work)
@@ -906,12 +912,18 @@ static void vduse_vq_irq_inject(struct work_struct *work)
 	struct vduse_virtqueue *vq = container_of(work,
 					struct vduse_virtqueue, inject);
 	struct vduse_dev *dev = vq->dev;
+	bool missed = true;
 
 	spin_lock_irq(&vq->irq_lock);
 	if (dev && (dev->status & VIRTIO_CONFIG_S_DRIVER_OK) &&
-	    vq->cb.callback)
+	    vq->cb.callback) {
 		vq->cb.callback(vq->cb.private);
+		missed = false;
+	}
 	spin_unlock_irq(&vq->irq_lock);
+	if (missed && dev)
+		pr_err_ratelimited("Miss vduse [%s] vq%d irq, status: %d\n",
+				   dev->name, vq->index, dev->status);
 }
 
 static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
@@ -1142,6 +1154,30 @@ static ssize_t irq_affinity_store(struct vduse_virtqueue *vq,
 	return count;
 }
 
+static ssize_t irq_inject_store(struct vduse_virtqueue *vq,
+				const char *buf, size_t count)
+{
+	queue_work(vduse_irq_wq, &vq->inject);
+	return count;
+}
+
+static ssize_t kick_store(struct vduse_virtqueue *vq,
+			  const char *buff, size_t count)
+{
+	ssize_t ret = -EPERM;
+
+	spin_lock(&vq->kick_lock);
+	if (!vq->ready || !vq->kickfd)
+		goto unlock;
+
+	ret = count;
+	eventfd_signal(vq->kickfd, 1);
+unlock:
+	spin_unlock(&vq->kick_lock);
+
+	return ret;
+}
+
 struct vq_sysfs_entry {
 	struct attribute attr;
 	ssize_t (*show)(struct vduse_virtqueue *, char *);
@@ -1150,8 +1186,14 @@ struct vq_sysfs_entry {
 
 static struct vq_sysfs_entry irq_affinity_attr = __ATTR_RW(irq_affinity);
 
+static struct vq_sysfs_entry irq_inject_attr = __ATTR_WO(irq_inject);
+
+static struct vq_sysfs_entry kick_attr = __ATTR_WO(kick);
+
 static struct attribute *vq_attrs[] = {
 	&irq_affinity_attr.attr,
+	&irq_inject_attr.attr,
+	&kick_attr.attr,
 	NULL,
 };
 
@@ -1213,8 +1255,9 @@ static void vduse_dev_deinit_vqs(struct vduse_dev *dev)
 		return;
 
 	for (i = 0; i < dev->vq_num; i++) {
-		kobject_put(&dev->vqs[i]->kobj);
 		dev->vqs[i]->dev = NULL;
+		flush_work(&dev->vqs[i]->inject);
+		kobject_put(&dev->vqs[i]->kobj);
 	}
 	kfree(dev->vqs);
 }
