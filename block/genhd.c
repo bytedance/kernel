@@ -938,6 +938,26 @@ struct block_device *bdget_disk(struct gendisk *disk, int partno)
 }
 EXPORT_SYMBOL(bdget_disk);
 
+/**
+ * invalidate_disk - invalidate the disk
+ * @disk: the struct gendisk to invalidate
+ *
+ * A helper to invalidates the disk. It will clean the disk's associated
+ * buffer/page caches and reset its internal states so that the disk
+ * can be reused by the drivers.
+ *
+ * Context: can sleep
+ */
+void invalidate_disk(struct gendisk *disk)
+{
+	struct block_device *bdev = bdget_disk(disk, 0);
+
+	invalidate_bdev(bdev);
+	bdev->bd_inode->i_mapping->wb_err = 0;
+	set_capacity(disk, 0);
+}
+EXPORT_SYMBOL(invalidate_disk);
+
 /*
  * print a full list of all partitions - intended for places where the root
  * filesystem can't be mounted and thus to give the victim some idea of what
