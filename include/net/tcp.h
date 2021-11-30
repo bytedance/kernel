@@ -73,6 +73,7 @@ struct tcp_out_options {
 	u8 ws;                  /* window scale, 0 to disable */
 	u8 num_sack_blocks;     /* number of SACK blocks to include */
 	u8 hash_size;           /* bytes in hash_location */
+	u8 bpf_opt_len;		/* length of BPF hdr option */
 	__u8 *hash_location;    /* temporary pointer, overloaded */
 	__u32 tsval, tsecr;     /* need to include OPTION_TS */
 	struct tcp_fastopen_cookie *fastopen_cookie;    /* Fast open cookie */
@@ -447,7 +448,7 @@ void tcp_metrics_init(void);
 bool tcp_peer_is_proven(struct request_sock *req, struct dst_entry *dst);
 void tcp_close(struct sock *sk, long timeout);
 void tcp_init_sock(struct sock *sk);
-void tcp_init_transfer(struct sock *sk, int bpf_op);
+void tcp_init_transfer(struct sock *sk, int bpf_op, struct sk_buff *skb);
 __poll_t tcp_poll(struct file *file, struct socket *sock,
 		      struct poll_table_struct *wait);
 int tcp_getsockopt(struct sock *sk, int level, int optname,
@@ -511,7 +512,8 @@ enum tcp_synack_type {
 struct sk_buff *tcp_make_synack(const struct sock *sk, struct dst_entry *dst,
 				struct request_sock *req,
 				struct tcp_fastopen_cookie *foc,
-				enum tcp_synack_type synack_type);
+				enum tcp_synack_type synack_type,
+				struct sk_buff *syn_skb);
 int tcp_disconnect(struct sock *sk, int flags);
 
 void tcp_finish_connect(struct sock *sk, struct sk_buff *skb);
@@ -926,7 +928,7 @@ static inline void tcp_fast_path_check(struct sock *sk)
 static inline u32 tcp_rto_min(struct sock *sk)
 {
 	const struct dst_entry *dst = __sk_dst_get(sk);
-	u32 rto_min = TCP_RTO_MIN;
+	u32 rto_min = inet_csk(sk)->icsk_rto_min;
 
 	if (dst && dst_metric_locked(dst, RTAX_RTO_MIN))
 		rto_min = dst_metric_rtt(dst, RTAX_RTO_MIN);
@@ -2275,7 +2277,8 @@ struct tcp_request_sock_ops {
 	int (*send_synack)(const struct sock *sk, struct dst_entry *dst,
 			   struct flowi *fl, struct request_sock *req,
 			   struct tcp_fastopen_cookie *foc,
-			   enum tcp_synack_type synack_type);
+			   enum tcp_synack_type synack_type,
+			   struct sk_buff *syn_skb);
 };
 
 #ifdef CONFIG_SYN_COOKIES
@@ -2457,6 +2460,22 @@ int tcp_bpf_recvmsg(struct sock *sk, struct msghdr *msg, size_t len,
 		    int nonblock, int flags, int *addr_len);
 int __tcp_bpf_recvmsg(struct sock *sk, struct sk_psock *psock,
 		      struct msghdr *msg, int len, int flags);
+
+#ifdef CONFIG_CGROUP_BPF
+static inline void bpf_skops_init_skb(struct bpf_sock_ops_kern *skops,
+				      struct sk_buff *skb,
+				      unsigned int end_offset)
+{
+	skops->skb = skb;
+	skops->skb_data_end = skb->data + end_offset;
+}
+#else
+static inline void bpf_skops_init_skb(struct bpf_sock_ops_kern *skops,
+				      struct sk_buff *skb,
+				      unsigned int end_offset)
+{
+}
+#endif
 
 /* Call BPF_SOCK_OPS program that returns an int. If the return value
  * is < 0, then the BPF op failed (for example if the loaded BPF
