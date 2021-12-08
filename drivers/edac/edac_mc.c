@@ -215,6 +215,8 @@ const char * const edac_mem_types[] = {
 	[MEM_RDDR4]	= "Registered-DDR4",
 	[MEM_LRDDR4]	= "Load-Reduced-DDR4-RAM",
 	[MEM_DDR5]	= "Unbuffered-DDR5",
+	[MEM_RDDR5]	= "Registered-DDR5",
+	[MEM_LRDDR5]	= "Load-Reduced-DDR5-RAM",
 	[MEM_NVDIMM]	= "Non-volatile-RAM",
 };
 EXPORT_SYMBOL_GPL(edac_mem_types);
