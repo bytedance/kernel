@@ -102,6 +102,7 @@ struct vduse_dev {
 	u8 dev_shm_size;
 	u8 vq_shm_off;
 	bool dead;
+	bool hung;
 };
 
 struct vduse_dev_msg {
@@ -184,19 +185,24 @@ static void vduse_enqueue_msg(struct list_head *head,
 static int vduse_dev_msg_sync(struct vduse_dev *dev,
 			      struct vduse_dev_msg *msg)
 {
+	long timeout = dev->dead ? 2 : VDUSE_REQUEST_TIMEOUT;
+
 	init_waitqueue_head(&msg->waitq);
 	spin_lock(&dev->msg_lock);
-	if (dev->dead) {
+	if (dev->dead && (!dev->connected || dev->hung)) {
 		msg->resp.result = VDUSE_REQUEST_FAILED;
 		goto unlock;
 	}
+
 	vduse_enqueue_msg(&dev->send_list, msg);
 	wake_up(&dev->waitq);
 	spin_unlock(&dev->msg_lock);
 	wait_event_killable_timeout(msg->waitq, msg->completed,
-				    VDUSE_REQUEST_TIMEOUT * HZ);
+				    timeout * HZ);
 	spin_lock(&dev->msg_lock);
 	if (!msg->completed) {
+		if (dev->dead)
+			dev->hung = true;
 		list_del(&msg->list);
 		msg->resp.result = VDUSE_REQUEST_FAILED;
 	}
