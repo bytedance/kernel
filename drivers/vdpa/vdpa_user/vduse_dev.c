@@ -52,6 +52,7 @@ struct vduse_virtqueue {
 	struct work_struct inject;
 	struct kobject kobj;
 	int irq_affinity;
+	u16 avail_index;
 	u32 num;
 	u64 desc_addr;
 	u64 device_addr;
@@ -88,13 +89,15 @@ struct vduse_dev {
 	bool connected;
 	bool aborted;
 	int minor;
+	u16 req_cached;
 	u16 vq_size_max;
 	u32 vq_num;
 	u32 vq_align;
 	u32 config_size;
 	u32 device_id;
 	u32 vendor_id;
-	u64 features;
+	u64 device_features;
+	u64 driver_features;
 	u8 status;
 	struct delayed_work timeout_work;
 	u16 dead_timeout;
@@ -103,6 +106,8 @@ struct vduse_dev {
 	u8 vq_shm_off;
 	bool dead;
 	bool hung;
+	spinlock_t config_lock;
+	void *config;
 };
 
 struct vduse_dev_msg {
@@ -523,20 +528,38 @@ static void vduse_dev_reset(struct vduse_dev *dev)
 		vduse_dev_update_iotlb(dev, 0ULL, domain->bounce_size - 1);
 	}
 
+	dev->status = 0;
+	dev->driver_features = 0;
+	dev->device_features = 0;
 	spin_lock(&dev->irq_lock);
 	dev->config_cb.callback = NULL;
 	dev->config_cb.private = NULL;
 	spin_unlock(&dev->irq_lock);
 
+	spin_lock(&dev->config_lock);
+	kfree(dev->config);
+	dev->config = NULL;
+	spin_unlock(&dev->config_lock);
+
 	for (i = 0; i < dev->vq_num; i++) {
 		struct vduse_virtqueue *vq = dev->vqs[i];
 
+		vq->desc_addr = 0;
+		vq->driver_addr = 0;
+		vq->device_addr = 0;
+		vq->avail_index = 0;
+		vq->num = 0;
 		spin_lock(&vq->irq_lock);
 		vq->ready = false;
 		vq->cb.callback = NULL;
 		vq->cb.private = NULL;
 		spin_unlock(&vq->irq_lock);
 	}
+}
+
+static inline bool vduse_dev_req_cached(struct vduse_dev *dev, int req)
+{
+	return !!(dev->req_cached & (1 << req));
 }
 
 static int vduse_vdpa_set_vq_address(struct vdpa_device *vdpa, u16 idx,
@@ -549,8 +572,12 @@ static int vduse_vdpa_set_vq_address(struct vdpa_device *vdpa, u16 idx,
 	vq->desc_addr = desc_area;
 	vq->driver_addr = driver_area;
 	vq->device_addr = device_area;
-	return vduse_dev_set_vq_addr(dev, vq, desc_area,
-					driver_area, device_area);
+
+	if (!vduse_dev_req_cached(dev, VDUSE_SET_VQ_ADDR))
+		return vduse_dev_set_vq_addr(dev, vq, desc_area,
+					     driver_area, device_area);
+
+	return 0;
 }
 
 static void vduse_vdpa_kick_vq(struct vdpa_device *vdpa, u16 idx)
@@ -588,7 +615,8 @@ static void vduse_vdpa_set_vq_num(struct vdpa_device *vdpa, u16 idx, u32 num)
 	struct vduse_virtqueue *vq = dev->vqs[idx];
 
 	vq->num = num;
-	vduse_dev_set_vq_num(dev, vq, num);
+	if (!vduse_dev_req_cached(dev, VDUSE_SET_VQ_NUM))
+		vduse_dev_set_vq_num(dev, vq, num);
 }
 
 static void vduse_vdpa_set_vq_ready(struct vdpa_device *vdpa,
@@ -597,10 +625,12 @@ static void vduse_vdpa_set_vq_ready(struct vdpa_device *vdpa,
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
 	struct vduse_virtqueue *vq = dev->vqs[idx];
 
-	vduse_dev_set_vq_ready(dev, vq, ready);
+	if (!vduse_dev_req_cached(dev, VDUSE_SET_VQ_READY))
+		vduse_dev_set_vq_ready(dev, vq, ready);
+
 	mutex_lock(&dev->lock);
 	if (ready)
-		vringh_init_iotlb(&vq->vring, dev->features,
+		vringh_init_iotlb(&vq->vring, dev->driver_features,
 			vq->num, false,
 			(struct vring_desc *)(uintptr_t)vq->desc_addr,
 			(struct vring_avail *)(uintptr_t)vq->driver_addr,
@@ -614,7 +644,8 @@ static bool vduse_vdpa_get_vq_ready(struct vdpa_device *vdpa, u16 idx)
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
 	struct vduse_virtqueue *vq = dev->vqs[idx];
 
-	vq->ready = vduse_dev_get_vq_ready(dev, vq);
+	if (!vduse_dev_req_cached(dev, VDUSE_GET_VQ_READY))
+		vq->ready = vduse_dev_get_vq_ready(dev, vq);
 
 	return vq->ready;
 }
@@ -625,7 +656,12 @@ static int vduse_vdpa_set_vq_state(struct vdpa_device *vdpa, u16 idx,
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
 	struct vduse_virtqueue *vq = dev->vqs[idx];
 
-	return vduse_dev_set_vq_state(dev, vq, state);
+	if (!vduse_dev_req_cached(dev, VDUSE_SET_VQ_STATE))
+		return vduse_dev_set_vq_state(dev, vq, state);
+
+	vq->avail_index = state->avail_index;
+
+	return 0;
 }
 
 static int vduse_vdpa_get_vq_state(struct vdpa_device *vdpa, u16 idx,
@@ -648,7 +684,11 @@ static u64 vduse_vdpa_get_features(struct vdpa_device *vdpa)
 {
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
 
-	return vduse_dev_get_features(dev);
+	if (!dev->device_features ||
+	    !vduse_dev_req_cached(dev, VDUSE_GET_FEATURES))
+		dev->device_features = vduse_dev_get_features(dev);
+
+	return dev->device_features;
 }
 
 static int vduse_vdpa_set_features(struct vdpa_device *vdpa, u64 features)
@@ -658,9 +698,12 @@ static int vduse_vdpa_set_features(struct vdpa_device *vdpa, u64 features)
 	if (!(features & (1ULL << VIRTIO_F_ACCESS_PLATFORM)))
 		return -EINVAL;
 
-	dev->features = features;
+	dev->driver_features = features;
 
-	return vduse_dev_set_features(dev, features);
+	if (!vduse_dev_req_cached(dev, VDUSE_SET_FEATURES))
+		return vduse_dev_set_features(dev, features);
+
+	return 0;
 }
 
 static void vduse_vdpa_set_config_cb(struct vdpa_device *vdpa,
@@ -699,7 +742,10 @@ static u8 vduse_vdpa_get_status(struct vdpa_device *vdpa)
 {
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
 
-	return vduse_dev_get_status(dev);
+	if (!vduse_dev_req_cached(dev, VDUSE_GET_STATUS))
+		dev->status = vduse_dev_get_status(dev);
+
+	return dev->status;
 }
 
 static void vduse_vdpa_set_status(struct vdpa_device *vdpa, u8 status)
@@ -724,8 +770,28 @@ static void vduse_vdpa_get_config(struct vdpa_device *vdpa, unsigned int offset,
 			     void *buf, unsigned int len)
 {
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
+	void *config = NULL;
 
-	vduse_dev_get_config(dev, offset, buf, len);
+	if (!dev->config && dev->config_size &&
+	    vduse_dev_req_cached(dev, VDUSE_GET_CONFIG)) {
+		config = kmalloc(dev->config_size, GFP_KERNEL);
+		if (config)
+			vduse_dev_get_config(dev, 0, config,
+					     dev->config_size);
+	}
+
+	spin_lock(&dev->config_lock);
+	if (!dev->config)
+		dev->config = config;
+	else if (config)
+		kfree(config);
+
+	if (dev->config)
+		memcpy(buf, dev->config + offset, len);
+	spin_unlock(&dev->config_lock);
+
+	if (!dev->config)
+		vduse_dev_get_config(dev, offset, buf, len);
 }
 
 static void vduse_vdpa_set_config(struct vdpa_device *vdpa, unsigned int offset,
@@ -733,6 +799,10 @@ static void vduse_vdpa_set_config(struct vdpa_device *vdpa, unsigned int offset,
 {
 	struct vduse_dev *dev = vdpa_to_vduse(vdpa);
 
+	spin_lock(&dev->config_lock);
+	kfree(dev->config);
+	dev->config = NULL;
+	spin_lock(&dev->config_lock);
 	vduse_dev_set_config(dev, offset, buf, len);
 }
 
@@ -991,6 +1061,42 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 		fd_install(ret, f);
 		break;
 	}
+	case VDUSE_DEV_GET_FEATURES:
+		/*
+		 * Just mirror what driver wrote here.
+		 * The driver is expected to check FEATURE_OK later.
+		 */
+		ret = put_user(dev->driver_features, (u64 __user *)argp);
+		break;
+	case VDUSE_VQ_GET_INFO: {
+		struct vduse_vq_info vq_info;
+		struct vduse_virtqueue *vq;
+		u32 index;
+
+		ret = -EFAULT;
+		if (copy_from_user(&vq_info, argp, sizeof(vq_info)))
+			break;
+
+		ret = -EINVAL;
+		if (vq_info.index >= dev->vq_num)
+			break;
+
+		index = array_index_nospec(vq_info.index, dev->vq_num);
+		vq = dev->vqs[index];
+		vq_info.desc_addr = vq->desc_addr;
+		vq_info.driver_addr = vq->driver_addr;
+		vq_info.device_addr = vq->device_addr;
+		vq_info.num = vq->num;
+		vq_info.split.avail_index = vq->avail_index;
+		vq_info.ready = vq->ready;
+
+		ret = -EFAULT;
+		if (copy_to_user(argp, &vq_info, sizeof(vq_info)))
+			break;
+
+		ret = 0;
+		break;
+	}
 	case VDUSE_VQ_SETUP_KICKFD: {
 		struct vduse_vq_eventfd eventfd;
 
@@ -1034,6 +1140,10 @@ static long vduse_dev_ioctl(struct file *file, unsigned int cmd,
 	}
 	case VDUSE_INJECT_CONFIG_IRQ:
 		ret = 0;
+		spin_lock(&dev->config_lock);
+		kfree(dev->config);
+		dev->config = NULL;
+		spin_unlock(&dev->config_lock);
 		queue_work(vduse_irq_wq, &dev->inject);
 		break;
 	default:
@@ -1577,6 +1687,7 @@ static struct vduse_dev *vduse_dev_create(void)
 		return NULL;
 
 	mutex_init(&dev->lock);
+	spin_lock_init(&dev->config_lock);
 	spin_lock_init(&dev->msg_lock);
 	INIT_LIST_HEAD(&dev->send_list);
 	INIT_LIST_HEAD(&dev->recv_list);
@@ -1592,6 +1703,7 @@ static struct vduse_dev *vduse_dev_create(void)
 
 static void vduse_dev_destroy(struct vduse_dev *dev)
 {
+	kfree(dev->config);
 	vfree(dev->shm_addr);
 	kfree(dev);
 }
@@ -1669,6 +1781,7 @@ static int vduse_create_dev(struct vduse_dev_config *config,
 	dev->config_size = config->config_size;
 	dev->dev_shm_size = config->dev_shm_size;
 	dev->vq_shm_off = config->vq_shm_off;
+	dev->req_cached = config->req_cached;
 	dev->name = kstrdup(config->name, GFP_KERNEL);
 	if (!dev->name)
 		goto err_str;

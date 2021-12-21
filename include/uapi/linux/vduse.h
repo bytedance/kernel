@@ -129,7 +129,7 @@ struct vduse_dev_config {
 	__u32 vq_align; /* the allocation alignment of virtqueue's metadata */
 	__u32 config_size; /* the size of the configuration space */
 	__u32 reserved[5]; /* for future use */
-	__u16 reserved2; /* for future use */
+	__u16 req_cached; /* cached request mask */
 	__u16 dev_shm_size; /* size of device shared memory */
 	__u16 vq_shm_off; /* offset of virtqueue shared memory */
 	__u16 dead_timeout; /* dead timeout */
@@ -169,6 +169,30 @@ struct vduse_vq_inflight {
 	struct desc_state_split desc[];
 };
 
+struct vduse_vq_state_split {
+	__u16 avail_index;
+};
+
+struct vduse_vq_state_packed {
+	__u16 last_avail_counter;
+	__u16 last_avail_idx;
+	__u16 last_used_counter;
+	__u16 last_used_idx;
+};
+
+struct vduse_vq_info {
+	__u32 index;
+	__u32 num;
+	__u64 desc_addr;
+	__u64 driver_addr;
+	__u64 device_addr;
+	union {
+		struct vduse_vq_state_split split;
+		struct vduse_vq_state_packed packed;
+	};
+	__u8 ready;
+};
+
 #define VDUSE_BASE	0x81
 
 /* Get the version of VDUSE API. This is used for future extension */
@@ -197,5 +221,15 @@ struct vduse_vq_inflight {
 
 /* Inject a config interrupt */
 #define VDUSE_INJECT_CONFIG_IRQ	_IO(VDUSE_BASE, 0x07)
+
+/*
+ * Get the negotiated virtio features. It's a subset of the features in
+ * struct vduse_dev_config which can be accepted by virtio driver. It's
+ * only valid after FEATURES_OK status bit is set.
+ */
+#define VDUSE_DEV_GET_FEATURES	_IOR(VDUSE_BASE, 0x11, __u64)
+
+/* Get the specified virtqueue's information. Caller should set index field. */
+#define VDUSE_VQ_GET_INFO	_IOWR(VDUSE_BASE, 0x15, struct vduse_vq_info)
 
 #endif /* _UAPI_VDUSE_H_ */
