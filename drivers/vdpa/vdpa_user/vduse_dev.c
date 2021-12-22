@@ -593,11 +593,12 @@ static void vduse_vdpa_set_vq_ready(struct vdpa_device *vdpa,
 
 	vduse_dev_set_vq_ready(dev, vq, ready);
 	mutex_lock(&dev->lock);
-	vringh_init_iotlb(&vq->vring, dev->features,
-			  vq->num, false,
-			  (struct vring_desc *)(uintptr_t)vq->desc_addr,
-			  (struct vring_avail *)(uintptr_t)vq->driver_addr,
-			  (struct vring_used *)(uintptr_t)vq->device_addr);
+	if (ready)
+		vringh_init_iotlb(&vq->vring, dev->features,
+			vq->num, false,
+			(struct vring_desc *)(uintptr_t)vq->desc_addr,
+			(struct vring_avail *)(uintptr_t)vq->driver_addr,
+			(struct vring_used *)(uintptr_t)vq->device_addr);
 	vq->ready = ready;
 	mutex_unlock(&dev->lock);
 }
