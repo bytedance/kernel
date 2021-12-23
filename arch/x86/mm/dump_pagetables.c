@@ -411,14 +411,16 @@ static void walk_pmd_level(struct seq_file *m, struct pg_state *st, pud_t addr,
 
 	pmd_start = start = (pmd_t *)pud_page_vaddr(addr);
 	for (i = 0; i < PTRS_PER_PMD; i++) {
+		pmd_t val = READ_ONCE(*start);
+
 		st->current_address = normalize_addr(P + i * PMD_LEVEL_MULT);
-		if (!pmd_none(*start)) {
-			prot = pmd_flags(*start);
+		if (!pmd_none(val)) {
+			prot = pmd_flags(val);
 			eff = effective_prot(eff_in, prot);
-			if (pmd_large(*start) || !pmd_present(*start)) {
+			if (pmd_large(val) || !pmd_present(val)) {
 				note_page(m, st, __pgprot(prot), eff, 4);
 			} else if (!kasan_page_table(m, st, pmd_start)) {
-				walk_pte_level(m, st, *start, eff,
+				walk_pte_level(m, st, val, eff,
 					       P + i * PMD_LEVEL_MULT);
 			}
 		} else
