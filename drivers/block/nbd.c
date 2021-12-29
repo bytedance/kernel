@@ -62,7 +62,6 @@ struct nbd_sock {
 };
 
 struct recv_thread_args {
-	struct work_struct work;
 	struct nbd_device *nbd;
 	int index;
 };
@@ -96,6 +95,7 @@ struct nbd_config {
 
 	atomic_t recv_threads;
 	wait_queue_head_t recv_wq;
+	spinlock_t recv_lock;
 	loff_t blksize;
 	loff_t bytesize;
 #if IS_ENABLED(CONFIG_DEBUG_FS)
@@ -112,7 +112,6 @@ struct nbd_device {
 	struct nbd_config *config;
 	struct mutex config_lock;
 	struct gendisk *disk;
-	struct workqueue_struct *recv_workq;
 
 	struct list_head list;
 	struct task_struct *task_recv;
@@ -783,11 +782,19 @@ out:
 	return ret ? ERR_PTR(ret) : cmd;
 }
 
-static void recv_work(struct work_struct *work)
+static void flush_recv_works(struct nbd_device *nbd)
 {
-	struct recv_thread_args *args = container_of(work,
-						     struct recv_thread_args,
-						     work);
+	wait_event(nbd->config->recv_wq,
+		   atomic_read(&nbd->config->recv_threads) == 0);
+
+	/* Make sure recv threads have no reference to nbd->config */
+	spin_lock(&nbd->config->recv_lock);
+	spin_unlock(&nbd->config->recv_lock);
+}
+
+static int recv_work(void *data)
+{
+	struct recv_thread_args *args = (struct recv_thread_args *)data;
 	struct nbd_device *nbd = args->nbd;
 	struct nbd_config *config = nbd->config;
 	struct nbd_cmd *cmd;
@@ -806,9 +813,13 @@ static void recv_work(struct work_struct *work)
 		blk_mq_complete_request(blk_mq_rq_from_pdu(cmd));
 	}
 	nbd_config_put(nbd);
+	spin_lock(&config->recv_lock);
 	atomic_dec(&config->recv_threads);
 	wake_up(&config->recv_wq);
+	spin_unlock(&config->recv_lock);
 	kfree(args);
+
+	return 0;
 }
 
 static bool nbd_clear_req(struct request *req, void *data, bool reserved)
@@ -1109,6 +1120,7 @@ static int nbd_reconnect_socket(struct nbd_device *nbd, unsigned long arg)
 
 	for (i = 0; i < config->num_connections; i++) {
 		struct nbd_sock *nsock = config->socks[i];
+		struct task_struct *worker;
 
 		if (!nsock->dead)
 			continue;
@@ -1118,6 +1130,14 @@ static int nbd_reconnect_socket(struct nbd_device *nbd, unsigned long arg)
 			mutex_unlock(&nsock->tx_lock);
 			continue;
 		}
+		worker = kthread_create(recv_work, args, "knbd%d.%d-recv",
+					nbd->index, i);
+		if (!worker) {
+			sockfd_put(sock);
+			kfree(args);
+			return -ENOMEM;
+		}
+
 		sk_set_memalloc(sock->sk);
 		if (nbd->tag_set.timeout &&
 		    !test_bit(NBD_RT_WAIT_ON_TIMEOUT, &config->runtime_flags))
@@ -1128,7 +1148,6 @@ static int nbd_reconnect_socket(struct nbd_device *nbd, unsigned long arg)
 		nsock->fallback_index = -1;
 		nsock->sock = sock;
 		nsock->dead = false;
-		INIT_WORK(&args->work, recv_work);
 		args->index = i;
 		args->nbd = nbd;
 		nsock->cookie++;
@@ -1140,7 +1159,7 @@ static int nbd_reconnect_socket(struct nbd_device *nbd, unsigned long arg)
 		/* We take the tx_mutex in an error path in the recv_work, so we
 		 * need to queue_work outside of the tx_mutex.
 		 */
-		queue_work(nbd->recv_workq, &args->work);
+		wake_up_process(worker);
 
 		atomic_inc(&config->live_connections);
 		wake_up(&config->conn_wait);
@@ -1244,10 +1263,6 @@ static void nbd_config_put(struct nbd_device *nbd)
 		kfree(nbd->config);
 		nbd->config = NULL;
 
-		if (nbd->recv_workq)
-			destroy_workqueue(nbd->recv_workq);
-		nbd->recv_workq = NULL;
-
 		nbd->tag_set.timeout = 0;
 		nbd->disk->queue->limits.discard_granularity = 0;
 		nbd->disk->queue->limits.discard_alignment = 0;
@@ -1276,14 +1291,6 @@ static int nbd_start_device(struct nbd_device *nbd)
 		return -EINVAL;
 	}
 
-	nbd->recv_workq = alloc_workqueue("knbd%d-recv",
-					  WQ_MEM_RECLAIM | WQ_HIGHPRI |
-					  WQ_UNBOUND, 0, nbd->index);
-	if (!nbd->recv_workq) {
-		dev_err(disk_to_dev(nbd->disk), "Could not allocate knbd recv work queue.\n");
-		return -ENOMEM;
-	}
-
 	blk_mq_update_nr_hw_queues(&nbd->tag_set, config->num_connections);
 	nbd->task_recv = current;
 
@@ -1299,22 +1306,19 @@ static int nbd_start_device(struct nbd_device *nbd)
 	nbd_dev_dbg_init(nbd);
 	for (i = 0; i < num_connections; i++) {
 		struct recv_thread_args *args;
+		struct task_struct *worker;
 
 		args = kzalloc(sizeof(*args), GFP_KERNEL);
-		if (!args) {
-			sock_shutdown(nbd);
-			/*
-			 * If num_connections is m (2 < m),
-			 * and NO.1 ~ NO.n(1 < n < m) kzallocs are successful.
-			 * But NO.(n + 1) failed. We still have n recv threads.
-			 * So, add flush_workqueue here to prevent recv threads
-			 * dropping the last config_refs and trying to destroy
-			 * the workqueue from inside the workqueue.
-			 */
-			if (i)
-				flush_workqueue(nbd->recv_workq);
-			return -ENOMEM;
+		if (!args)
+			goto err;
+
+		worker = kthread_create(recv_work, args, "knbd%d.%d-recv",
+					nbd->index, i);
+		if (!worker) {
+			kfree(args);
+			goto err;
 		}
+
 		sk_set_memalloc(config->socks[i]->sock->sk);
 		if (nbd->tag_set.timeout &&
 		    !test_bit(NBD_RT_WAIT_ON_TIMEOUT, &config->runtime_flags))
@@ -1322,13 +1326,24 @@ static int nbd_start_device(struct nbd_device *nbd)
 				nbd->tag_set.timeout;
 		atomic_inc(&config->recv_threads);
 		refcount_inc(&nbd->config_refs);
-		INIT_WORK(&args->work, recv_work);
 		args->nbd = nbd;
 		args->index = i;
-		queue_work(nbd->recv_workq, &args->work);
+		wake_up_process(worker);
 	}
 	nbd_size_update(nbd, true);
 	return error;
+err:
+	sock_shutdown(nbd);
+	/*
+	 * If num_connections is m (2 < m),
+	 * and NO.1 ~ NO.n(1 < n < m) connections are successful.
+	 * But NO.(n + 1) failed. We still have n recv threads.
+	 * So, add flush_recv_works here to prevent recv threads
+	 * dropping the last config_refs.
+	 */
+	flush_recv_works(nbd);
+
+	return -ENOMEM;
 }
 
 static int nbd_start_device_ioctl(struct nbd_device *nbd, struct block_device *bdev)
@@ -1347,7 +1362,7 @@ static int nbd_start_device_ioctl(struct nbd_device *nbd, struct block_device *b
 					 atomic_read(&config->recv_threads) == 0);
 	if (ret)
 		sock_shutdown(nbd);
-	flush_workqueue(nbd->recv_workq);
+	flush_recv_works(nbd);
 
 	mutex_lock(&nbd->config_lock);
 	nbd_bdev_reset(bdev);
@@ -1481,6 +1496,7 @@ static struct nbd_config *nbd_alloc_config(void)
 	atomic_set(&config->recv_threads, 0);
 	init_waitqueue_head(&config->recv_wq);
 	init_waitqueue_head(&config->conn_wait);
+	spin_lock_init(&config->recv_lock);
 	config->blksize = NBD_DEF_BLKSIZE;
 	atomic_set(&config->live_connections, 0);
 	try_module_get(THIS_MODULE);
@@ -2041,12 +2057,10 @@ static void nbd_disconnect_and_put(struct nbd_device *nbd)
 	sock_shutdown(nbd);
 	/*
 	 * Make sure recv thread has finished, so it does not drop the last
-	 * config ref and try to destroy the workqueue from inside the work
-	 * queue. And this also ensure that we can safely call nbd_clear_que()
-	 * to cancel the inflight I/Os.
+	 * config ref. And this also ensure that we can safely call
+	 * nbd_clear_que() to cancel the inflight I/Os.
 	 */
-	if (nbd->recv_workq)
-		flush_workqueue(nbd->recv_workq);
+	flush_recv_works(nbd);
 	nbd_clear_que(nbd);
 	nbd->task_setup = NULL;
 	mutex_unlock(&nbd->config_lock);
