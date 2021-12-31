@@ -271,7 +271,7 @@ void free_huge_page_vmemmap(struct hstate *h, struct page *head)
 		SetHPageVmemmapOptimized(head);
 }
 
-void hugetlb_vmemmap_init(struct hstate *h)
+void __init hugetlb_vmemmap_init(struct hstate *h)
 {
 	unsigned int nr_pages = pages_per_huge_page(h);
 	unsigned int vmemmap_pages;
@@ -301,29 +301,4 @@ void hugetlb_vmemmap_init(struct hstate *h)
 
 	pr_info("can free %d vmemmap pages for %s\n", h->nr_free_vmemmap_pages,
 		h->name);
-}
-
-int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
-				   void *buffer, size_t *length, loff_t *ppos)
-{
-	int enable = hugetlb_free_vmemmap_enabled;
-
-	/*
-	 * The vmemmap pages cannot be optimized if a "struct page" crosses page
-	 * boundaries.
-	 */
-	if (write && !is_power_of_2(sizeof(struct page)))
-		return -EPERM;
-
-	if (proc_do_static_key(table, write, buffer, length, ppos))
-		return -EINVAL;
-
-	if (write && !enable) {
-		struct hstate *h;
-
-		for_each_hstate(h)
-			hugetlb_vmemmap_init(h);
-	}
-
-	return 0;
 }

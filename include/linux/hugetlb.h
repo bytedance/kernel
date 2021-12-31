@@ -780,8 +780,6 @@ DECLARE_STATIC_KEY_MAYBE(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
 #define hugetlb_free_vmemmap_enabled					 \
 	static_key_enabled(&hugetlb_free_vmemmap_enabled_key)
 
-int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
-				   void *buffer, size_t *length, loff_t *ppos);
 #else
 #define hugetlb_free_vmemmap_enabled	false
 #endif
