@@ -775,11 +775,7 @@ static inline void set_huge_swap_pte_at(struct mm_struct *mm, unsigned long addr
 #endif	/* CONFIG_HUGETLB_PAGE */
 
 #ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-DECLARE_STATIC_KEY_MAYBE(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
-			 hugetlb_free_vmemmap_enabled_key);
-#define hugetlb_free_vmemmap_enabled					 \
-	static_key_enabled(&hugetlb_free_vmemmap_enabled_key)
-
+extern bool hugetlb_free_vmemmap_enabled;
 #else
 #define hugetlb_free_vmemmap_enabled	false
 #endif
