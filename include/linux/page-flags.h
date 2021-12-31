@@ -169,76 +169,23 @@ enum pageflags {
 
 struct page;	/* forward declaration */
 
-#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-extern bool hugetlb_free_vmemmap_enabled;
-
-/*
- * If the feature of freeing some vmemmap pages associated with each HugeTLB
- * page is enabled, the head vmemmap page frame is reused and all of the tail
- * vmemmap addresses map to the head vmemmap page frame (furture details can
- * refer to the figure at the head of the mm/hugetlb_vmemmap.c).  In other
- * word, there are more than one page struct with PG_head associated with each
- * HugeTLB page.  We __know__ that there is only one head page struct, the tail
- * page structs with PG_head are fake head page structs.  We need an approach
- * to distinguish between those two different types of page structs so that
- * compound_head() can return the real head page struct when the parameter is
- * the tail page struct but with PG_head.
- *
- * The page_head_if_fake() returns the real head page struct iff the @page may
- * be fake, otherwise, returns the @page if it cannot be a fake page struct.
- */
-static __always_inline struct page *page_head_if_fake(struct page *page)
-{
-	if (!hugetlb_free_vmemmap_enabled)
-		return page;
-
-	/*
-	 * Only addresses aligned with PAGE_SIZE of struct page may be fake head
-	 * struct page. The alignment check aims to avoid access the fields (
-	 * e.g. compound_head) of the @page[1]. It can avoid touch a (possibly)
-	 * cold cacheline in some cases.
-	 */
-	if (IS_ALIGNED((unsigned long)page, PAGE_SIZE) &&
-	    test_bit(PG_head, &page->flags)) {
-		/*
-		 * We can safely access the field of the @page[1] with PG_head
-		 * because the @page is a compound page composed with at least
-		 * two contiguous pages.
-		 */
-		unsigned long head = READ_ONCE(page[1].compound_head);
-
-		if (likely(head & 1))
-			return (struct page *)(head - 1);
-	}
-
-	return page;
-}
-#else
-static __always_inline struct page *page_head_if_fake(struct page *page)
-{
-	return page;
-}
-#endif
-
 static inline struct page *compound_head(struct page *page)
 {
 	unsigned long head = READ_ONCE(page->compound_head);
 
 	if (unlikely(head & 1))
 		return (struct page *) (head - 1);
-	return page_head_if_fake(page);
+	return page;
 }
 
 static __always_inline int PageTail(struct page *page)
 {
-	return READ_ONCE(page->compound_head) & 1 ||
-	       page_head_if_fake(page) != page;
+	return READ_ONCE(page->compound_head) & 1;
 }
 
 static __always_inline int PageCompound(struct page *page)
 {
-	return test_bit(PG_head, &page->flags) ||
-	       READ_ONCE(page->compound_head) & 1;
+	return test_bit(PG_head, &page->flags) || PageTail(page);
 }
 
 #define	PAGE_POISON_PATTERN	-1l
@@ -600,16 +547,7 @@ static inline void set_page_writeback_keepwrite(struct page *page)
 	test_set_page_writeback_keepwrite(page);
 }
 
-static __always_inline int PageHead(struct page *page)
-{
-	PF_POISONED_CHECK(page);
-	return test_bit(PG_head, &page->flags) &&
-	       page_head_if_fake(page) == page;
-}
-
-__SETPAGEFLAG(Head, head, PF_ANY)
-__CLEARPAGEFLAG(Head, head, PF_ANY)
-CLEARPAGEFLAG(Head, head, PF_ANY)
+__PAGEFLAG(Head, head, PF_ANY) CLEARPAGEFLAG(Head, head, PF_ANY)
 
 static __always_inline void set_compound_head(struct page *page, struct page *head)
 {
