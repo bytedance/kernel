@@ -2,6 +2,7 @@
 #include <linux/debugfs.h>
 #include <linux/efi.h>
 #include <linux/module.h>
+#include <linux/mmap_lock.h>
 #include <linux/seq_file.h>
 #include <asm/pgtable.h>
 
