@@ -124,7 +124,7 @@
  * page of page structs (page 0) associated with the HugeTLB page contains the 4
  * page structs necessary to describe the HugeTLB. The only use of the remaining
  * pages of page structs (page 1 to page 7) is to point to page->compound_head.
- * Therefore, we can remap pages 1 to 7 to page 0. Only 1 pages of page structs
+ * Therefore, we can remap pages 1 to 7 to page 0. Only 1 page of page structs
  * will be used for each HugeTLB page. This will allow us to free the remaining
  * 7 pages to the buddy allocator.
  *
@@ -166,7 +166,7 @@
  *
  * The contiguous bit is used to increase the mapping size at the pmd and pte
  * (last) level. So this type of HugeTLB page can be optimized only when its
- * size of the struct page structs is greater than 1 pages.
+ * size of the struct page structs is greater than 1 page.
  *
  * Notice: The head vmemmap page is not freed to the buddy allocator and all
  * tail vmemmap pages are mapped to the head vmemmap page frame. So we can see
@@ -195,7 +195,7 @@ EXPORT_SYMBOL(hugetlb_free_vmemmap_enabled_key);
 static int __init early_hugetlb_free_vmemmap_param(char *buf)
 {
 	/* We cannot optimize if a "struct page" crosses page boundaries. */
-	if ((!is_power_of_2(sizeof(struct page)))) {
+	if (!is_power_of_2(sizeof(struct page))) {
 		pr_warn("cannot free vmemmap pages because \"struct page\" crosses page boundaries\n");
 		return 0;
 	}
@@ -271,7 +271,7 @@ void free_huge_page_vmemmap(struct hstate *h, struct page *head)
 		SetHPageVmemmapOptimized(head);
 }
 
-void hugetlb_vmemmap_init(struct hstate *h)
+void __init hugetlb_vmemmap_init(struct hstate *h)
 {
 	unsigned int nr_pages = pages_per_huge_page(h);
 	unsigned int vmemmap_pages;
@@ -284,8 +284,16 @@ void hugetlb_vmemmap_init(struct hstate *h)
 	BUILD_BUG_ON(__NR_USED_SUBPAGE >=
 		     RESERVE_VMEMMAP_SIZE / sizeof(struct page));
 
-	if (!hugetlb_free_vmemmap_enabled)
+	if (!is_power_of_2(sizeof(struct page))) {
+		/*
+		 * The hugetlb_free_vmemmap_enabled_key can be enabled when
+		 * CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON. It should
+		 * be disabled if "struct page" crosses page boundaries.
+		 */
+		if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON))
+			static_branch_disable(&hugetlb_free_vmemmap_enabled_key);
 		return;
+	}
 
 	vmemmap_pages = (nr_pages * sizeof(struct page)) >> PAGE_SHIFT;
 	/*
@@ -306,8 +314,6 @@ void hugetlb_vmemmap_init(struct hstate *h)
 int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
 				   void *buffer, size_t *length, loff_t *ppos)
 {
-	int enable = hugetlb_free_vmemmap_enabled;
-
 	/*
 	 * The vmemmap pages cannot be optimized if a "struct page" crosses page
 	 * boundaries.
@@ -315,15 +321,5 @@ int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
 	if (write && !is_power_of_2(sizeof(struct page)))
 		return -EPERM;
 
-	if (proc_do_static_key(table, write, buffer, length, ppos))
-		return -EINVAL;
-
-	if (write && !enable) {
-		struct hstate *h;
-
-		for_each_hstate(h)
-			hugetlb_vmemmap_init(h);
-	}
-
-	return 0;
+	return proc_do_static_key(table, write, buffer, length, ppos);
 }

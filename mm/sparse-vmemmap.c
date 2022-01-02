@@ -34,6 +34,7 @@
 #include <asm/pgtable.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
 /**
  * struct vmemmap_remap_walk - walk vmemmap page table
  *
@@ -53,19 +54,7 @@ struct vmemmap_remap_walk {
 	struct list_head *vmemmap_pages;
 };
 
-/*
- * How many struct page structs need to be reset. When we reuse the head
- * struct page, the special metadata (e.g. page->flags or page->mapping)
- * cannot copy to the tail struct page structs. The invalid value will be
- * checked in the free_tail_pages_check(). In order to avoid the message
- * of "corrupted mapping in tail page". We need to reset at least 3 (one
- * head struct page struct and two tail struct page structs) struct page
- * structs.
- */
-#define NR_RESET_STRUCT_PAGE		3
-
-static int __split_vmemmap_huge_pmd(pmd_t *pmd, unsigned long start,
-				    struct vmemmap_remap_walk *walk)
+static int __split_vmemmap_huge_pmd(pmd_t *pmd, unsigned long start)
 {
 	pmd_t __pmd;
 	int i;
@@ -93,29 +82,26 @@ static int __split_vmemmap_huge_pmd(pmd_t *pmd, unsigned long start,
 		smp_wmb();
 		pmd_populate_kernel(&init_mm, pmd, pgtable);
 		flush_tlb_kernel_range(start, start + PMD_SIZE);
-		spin_unlock(&init_mm.page_table_lock);
-
-		return 0;
+	} else {
+		pte_free_kernel(&init_mm, pgtable);
 	}
 	spin_unlock(&init_mm.page_table_lock);
-	pte_free_kernel(&init_mm, pgtable);
 
 	return 0;
 }
 
-static int split_vmemmap_huge_pmd(pmd_t *pmd, unsigned long start,
-				  struct vmemmap_remap_walk *walk)
+static int split_vmemmap_huge_pmd(pmd_t *pmd, unsigned long start)
 {
-	int ret;
+	int leaf;
 
 	spin_lock(&init_mm.page_table_lock);
-	ret = pmd_leaf(*pmd);
+	leaf = pmd_leaf(*pmd);
 	spin_unlock(&init_mm.page_table_lock);
 
-	if (ret)
-		ret = __split_vmemmap_huge_pmd(pmd, start, walk);
+	if (!leaf)
+		return 0;
 
-	return ret;
+	return __split_vmemmap_huge_pmd(pmd, start);
 }
 
 static void vmemmap_pte_range(pmd_t *pmd, unsigned long addr,
@@ -156,7 +142,7 @@ static int vmemmap_pmd_range(pud_t *pud, unsigned long addr,
 	do {
 		int ret;
 
-		ret = split_vmemmap_huge_pmd(pmd, addr & PMD_MASK, walk);
+		ret = split_vmemmap_huge_pmd(pmd, addr & PMD_MASK);
 		if (ret)
 			return ret;
 
@@ -276,6 +262,17 @@ static void vmemmap_remap_pte(pte_t *pte, unsigned long addr,
 	list_add_tail(&page->lru, walk->vmemmap_pages);
 	set_pte_at(&init_mm, addr, pte, entry);
 }
+
+/*
+ * How many struct page structs need to be reset. When we reuse the head
+ * struct page, the special metadata (e.g. page->flags or page->mapping)
+ * cannot copy to the tail struct page structs. The invalid value will be
+ * checked in the free_tail_pages_check(). In order to avoid the message
+ * of "corrupted mapping in tail page". We need to reset at least 3 (one
+ * head struct page struct and two tail struct page structs) struct page
+ * structs.
+ */
+#define NR_RESET_STRUCT_PAGE		3
 
 static inline void reset_struct_pages(struct page *start)
 {
@@ -423,6 +420,7 @@ int vmemmap_remap_alloc(unsigned long start, unsigned long end,
 
 	return 0;
 }
+#endif /* CONFIG_HUGETLB_PAGE_FREE_VMEMMAP */
 
 /*
  * Allocate a block of memory to be used to back the virtual memory map

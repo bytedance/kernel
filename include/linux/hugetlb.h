@@ -775,15 +775,8 @@ static inline void set_huge_swap_pte_at(struct mm_struct *mm, unsigned long addr
 #endif	/* CONFIG_HUGETLB_PAGE */
 
 #ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-DECLARE_STATIC_KEY_MAYBE(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
-			 hugetlb_free_vmemmap_enabled_key);
-#define hugetlb_free_vmemmap_enabled					 \
-	static_key_enabled(&hugetlb_free_vmemmap_enabled_key)
-
 int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
 				   void *buffer, size_t *length, loff_t *ppos);
-#else
-#define hugetlb_free_vmemmap_enabled	false
 #endif
 
 static inline spinlock_t *huge_pte_lock(struct hstate *h,

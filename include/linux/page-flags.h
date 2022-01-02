@@ -173,25 +173,31 @@ struct page;	/* forward declaration */
 DECLARE_STATIC_KEY_MAYBE(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
 			 hugetlb_free_vmemmap_enabled_key);
 
+static __always_inline bool hugetlb_free_vmemmap_enabled(void)
+{
+	return static_branch_maybe(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
+				   &hugetlb_free_vmemmap_enabled_key);
+}
+
 /*
  * If the feature of freeing some vmemmap pages associated with each HugeTLB
  * page is enabled, the head vmemmap page frame is reused and all of the tail
  * vmemmap addresses map to the head vmemmap page frame (furture details can
  * refer to the figure at the head of the mm/hugetlb_vmemmap.c).  In other
- * word, there are more than one page struct with PG_head associated with each
+ * words, there are more than one page struct with PG_head associated with each
  * HugeTLB page.  We __know__ that there is only one head page struct, the tail
  * page structs with PG_head are fake head page structs.  We need an approach
  * to distinguish between those two different types of page structs so that
  * compound_head() can return the real head page struct when the parameter is
  * the tail page struct but with PG_head.
  *
- * The page_head_if_fake() returns the real head page struct iff the @page may
- * be fake, otherwise, returns the @page if it cannot be a fake page struct.
+ * The page_fixed_fake_head() returns the real head page struct if the @page is
+ * fake page head, otherwise, returns @page which can either be a true page
+ * head or tail.
  */
-static __always_inline struct page *page_head_if_fake(struct page *page)
+static __always_inline struct page *page_fixed_fake_head(struct page *page)
 {
-	if (!static_branch_maybe(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON,
-				 &hugetlb_free_vmemmap_enabled_key))
+	if (!hugetlb_free_vmemmap_enabled())
 		return page;
 
 	/*
@@ -212,15 +218,24 @@ static __always_inline struct page *page_head_if_fake(struct page *page)
 		if (likely(head & 1))
 			return (struct page *)(head - 1);
 	}
-
 	return page;
 }
 #else
-static __always_inline struct page *page_head_if_fake(struct page *page)
+static inline struct page *page_fixed_fake_head(struct page *page)
 {
 	return page;
 }
+
+static inline bool hugetlb_free_vmemmap_enabled(void)
+{
+	return false;
+}
 #endif
+
+static __always_inline int page_is_fake_head(struct page *page)
+{
+	return page_fixed_fake_head(page) != page;
+}
 
 static inline struct page *compound_head(struct page *page)
 {
@@ -228,13 +243,12 @@ static inline struct page *compound_head(struct page *page)
 
 	if (unlikely(head & 1))
 		return (struct page *) (head - 1);
-	return page_head_if_fake(page);
+	return page_fixed_fake_head(page);
 }
 
 static __always_inline int PageTail(struct page *page)
 {
-	return READ_ONCE(page->compound_head) & 1 ||
-	       page_head_if_fake(page) != page;
+	return READ_ONCE(page->compound_head) & 1 || page_is_fake_head(page);
 }
 
 static __always_inline int PageCompound(struct page *page)
@@ -605,8 +619,7 @@ static inline void set_page_writeback_keepwrite(struct page *page)
 static __always_inline int PageHead(struct page *page)
 {
 	PF_POISONED_CHECK(page);
-	return test_bit(PG_head, &page->flags) &&
-	       page_head_if_fake(page) == page;
+	return test_bit(PG_head, &page->flags) && !page_is_fake_head(page);
 }
 
 __SETPAGEFLAG(Head, head, PF_ANY)

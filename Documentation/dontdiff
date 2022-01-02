@@ -139,6 +139,7 @@ genksyms
 hpet_example
 hugepage-mmap
 hugepage-shm
+hugepage-vmemmap
 ihex2fw
 inat-tables.c
 initramfs_list
