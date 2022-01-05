@@ -272,6 +272,9 @@ int perf_cpu_map__idx(struct perf_cpu_map *cpus, int cpu)
 {
 	int i;
 
+	if (!cpus)
+		return -1;
+
 	for (i = 0; i < cpus->nr; ++i) {
 		if (cpus->map[i] == cpu)
 			return i;
