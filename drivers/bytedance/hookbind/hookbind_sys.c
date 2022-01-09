@@ -8,10 +8,46 @@
 #include <linux/in6.h>
 #include <linux/ctype.h>
 #include <linux/signal.h>
+#include <linux/vmalloc.h>
+#include <linux/highmem.h>
 
-static void **msys_call_table;
-static int make_rw(unsigned long address);
-static int make_ro(unsigned long address);
+#ifdef CONFIG_X86_64
+#define SC_ARCH_REGS_TO_ARGS            SC_X86_64_REGS_TO_ARGS
+#define VIRT_TO_PAGE(addr)		virt_to_page(addr)
+#endif
+
+#ifdef CONFIG_ARM64
+#define SC_ARCH_REGS_TO_ARGS            SC_ARM64_REGS_TO_ARGS
+#define VIRT_TO_PAGE(addr)		phys_to_page(virt_to_phys(addr))
+#endif
+
+#ifndef SC_ARCH_REGS_TO_ARGS
+#error "Unsupported architecture"
+#endif
+
+#define SYS_CALL_HOOK_DEFINE(x, name, ...)					\
+	static inline long __se_hook_##name(const struct pt_regs *regs,		\
+			__MAP(x, __SC_LONG, __VA_ARGS__));			\
+	static inline long __do_hook_##name(const struct pt_regs *regs,		\
+			__MAP(x, __SC_DECL, __VA_ARGS__));			\
+	static asmlinkage long hook_##name##_func(const struct pt_regs *regs)	\
+	{									\
+		return __se_hook_##name(regs,					\
+				SC_ARCH_REGS_TO_ARGS(x, __VA_ARGS__));		\
+	}									\
+										\
+	static inline long __se_hook_##name(const struct pt_regs *regs,		\
+				     __MAP(x, __SC_LONG, __VA_ARGS__))		\
+	{									\
+		long ret = __do_hook_##name(regs,				\
+				__MAP(x, __SC_CAST, __VA_ARGS__));		\
+		__MAP(x, __SC_TEST, __VA_ARGS__);				\
+		return ret;							\
+	}									\
+	static inline long __do_hook_##name(const struct pt_regs *regs,		\
+			__MAP(x, __SC_DECL, __VA_ARGS__))
+
+typedef asmlinkage long (*sys_bind_func)(const struct pt_regs *regs);
 
 struct mapping_rule {
 	int	port;		// mapping from
@@ -25,7 +61,9 @@ struct mapping_rule {
 static LIST_HEAD(rules);
 static DEFINE_SPINLOCK(lock);	// protecting list above
 
-static asmlinkage int (*original_sys_bind)(struct pt_regs *regs);
+static sys_bind_func *sys_bind_ptr;
+static sys_bind_func original_sys_bind;
+static const void **table;
 /* Called _without_ lock on */
 static void add(int port, int mport, struct task_struct *tsk)
 {
@@ -79,22 +117,17 @@ static int my_move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr_
 		return -EFAULT;
 	return 0;
 }
-static asmlinkage int hook_bind_function(struct pt_regs *regs)
+
+SYS_CALL_HOOK_DEFINE(3, bind, int, fd, struct sockaddr __user *, uaddr, int, len)
 {
 	int err, port, mport;
 	bool hit = false;
 	struct pid *group;
-	int fd;
-	struct sockaddr __user *uaddr;
-	int len;
 	struct mapping_rule *t, *tmp;
 	struct sockaddr *kaddr;
 	struct sockaddr_in *addr;
 	struct sockaddr_in6 *addr6;
 	struct sockaddr_storage address;
-	fd = (int)regs->di;
-	uaddr = (struct sockaddr *)regs->si;
-	len = (int)regs->dx;
 
 	if (!try_module_get(THIS_MODULE))
 		goto out;
@@ -146,26 +179,6 @@ end:
 	module_put(THIS_MODULE);
 out:
 	return original_sys_bind(regs);
-}
-/*
-Make the memory page writable
-This is little risky as directly arch level protection bit is changed
-*/
-static int make_rw(unsigned long address)
-{
-	unsigned int level;
-	pte_t *pte = lookup_address(address, &level);
-	if (pte->pte &~ _PAGE_RW)
-		pte->pte |= _PAGE_RW;
-	return 0;
-}
-/* Make the page write protected */
-static int make_ro(unsigned long address)
-{
-	unsigned int level;
-	pte_t *pte = lookup_address(address, &level);
-	pte->pte = pte->pte &~ _PAGE_RW;
-	return 0;
 }
 
 static size_t decode(char *argenv,size_t length)
@@ -258,24 +271,52 @@ out:
 	return res;
 }
 
-bool __init register_hookbind(void) {
-	msys_call_table = (void *) kallsyms_lookup_name("sys_call_table");
-	if (msys_call_table == NULL)
+static int __init sys_bind_replace(const void *addr, sys_bind_func func,
+				   sys_bind_func *old)
+{
+	const char *vaddr;
+	struct page *page;
+
+	page = VIRT_TO_PAGE((void *)addr);
+
+	vaddr = vmap(&page, 1, VM_MAP, PAGE_KERNEL);
+	if (!vaddr)
+		return -EPERM;
+
+	sys_bind_ptr = (void *)(vaddr + ((unsigned long)addr & ~PAGE_MASK));
+	*old = xchg(sys_bind_ptr, func);
+	flush_kernel_vmap_range((void *)vaddr, sizeof(vaddr));
+	invalidate_kernel_vmap_range((void *)addr, sizeof(addr));
+
+	return 0;
+}
+
+static inline void sys_bind_restore(const void *addr, sys_bind_func func)
+{
+	const void *vaddr = (void *)((unsigned long)sys_bind_ptr & PAGE_MASK);
+
+	xchg(sys_bind_ptr, func);
+	vunmap(vaddr);
+	invalidate_kernel_vmap_range((void *)addr, sizeof(addr));
+}
+
+bool __init register_hookbind(void)
+{
+	const char *name = "sys_call_table";
+
+	table = (void *)kallsyms_lookup_name(name);
+	if (table == NULL)
 		return false;
-	original_sys_bind=msys_call_table[__NR_bind];
-	make_rw((unsigned long)msys_call_table);
-	rcu_assign_pointer(msys_call_table[__NR_bind],hook_bind_function);
-	make_ro((unsigned long)msys_call_table);
-	return true;
+
+	return !sys_bind_replace(&table[__NR_bind], hook_bind_func,
+				 &original_sys_bind);
 }
 
 void __exit unregister_hookbind(void)
 {
 	struct mapping_rule *t, *tmp;
-	make_rw((unsigned long)msys_call_table);
-	RCU_INIT_POINTER(msys_call_table[__NR_bind],original_sys_bind);
-	make_ro((unsigned long)msys_call_table);
 
+	sys_bind_restore(&table[__NR_bind], original_sys_bind);
 	spin_lock(&lock);
 	list_for_each_entry_safe(t, tmp, &rules, list) {
 		delete(t);
