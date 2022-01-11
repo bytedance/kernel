@@ -1039,7 +1039,6 @@ static int add_nr_metric_event(struct cpu_hw_events *cpuc,
 		if (cpuc->n_metric == INTEL_TD_METRIC_NUM)
 			return -EINVAL;
 		cpuc->n_metric++;
-		cpuc->n_txn_metric++;
 	}
 
 	return 0;
@@ -1063,8 +1062,10 @@ static int collect_event(struct cpu_hw_events *cpuc, struct perf_event *event,
 		return -EINVAL;
 
 	cpuc->event_list[n] = event;
-	if (is_counter_pair(&event->hw))
+	if (is_counter_pair(&event->hw)) {
 		cpuc->n_pair++;
+		cpuc->n_txn_pair++;
+	}
 
 	return 0;
 }
@@ -1328,11 +1329,11 @@ int x86_perf_event_set_period(struct perf_event *event)
 	wrmsrl(hwc->event_base, (u64)(-left) & x86_pmu.cntval_mask);
 
 	/*
-	 * Clear the Merge event counter's upper 16 bits since
+	 * Sign extend the Merge event counter's upper 16 bits since
 	 * we currently declare a 48-bit counter width
 	 */
 	if (is_counter_pair(hwc))
-		wrmsrl(x86_pmu_event_addr(idx + 1), 0);
+		wrmsrl(x86_pmu_event_addr(idx + 1), 0xffff);
 
 	/*
 	 * Due to erratum on certan cpu we need
@@ -2004,7 +2005,7 @@ static void x86_pmu_start_txn(struct pmu *pmu, unsigned int txn_flags)
 
 	perf_pmu_disable(pmu);
 	__this_cpu_write(cpu_hw_events.n_txn, 0);
-	__this_cpu_write(cpu_hw_events.n_txn_metric, 0);
+	__this_cpu_write(cpu_hw_events.n_txn_pair, 0);
 }
 
 /*
@@ -2030,7 +2031,7 @@ static void x86_pmu_cancel_txn(struct pmu *pmu)
 	 */
 	__this_cpu_sub(cpu_hw_events.n_added, __this_cpu_read(cpu_hw_events.n_txn));
 	__this_cpu_sub(cpu_hw_events.n_events, __this_cpu_read(cpu_hw_events.n_txn));
-	__this_cpu_sub(cpu_hw_events.n_metric, __this_cpu_read(cpu_hw_events.n_txn_metric));
+	__this_cpu_sub(cpu_hw_events.n_pair, __this_cpu_read(cpu_hw_events.n_txn_pair));
 	perf_pmu_enable(pmu);
 }
 
