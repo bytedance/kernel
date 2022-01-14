@@ -185,7 +185,7 @@ static ssize_t dbgfs_target_ids_write(struct file *file,
 		const char __user *buf, size_t count, loff_t *ppos)
 {
 	struct damon_ctx *ctx = file->private_data;
-	char *kbuf, *nrs;
+	char *kbuf;
 	unsigned long *targets;
 	ssize_t nr_targets;
 	ssize_t ret = count;
@@ -196,9 +196,8 @@ static ssize_t dbgfs_target_ids_write(struct file *file,
 	if (IS_ERR(kbuf))
 		return PTR_ERR(kbuf);
 
-	nrs = kbuf;
 
-	targets = str_to_target_ids(nrs, ret, &nr_targets);
+	targets = str_to_target_ids(kbuf, ret, &nr_targets);
 	if (!targets) {
 		ret = -ENOMEM;
 		goto out;
