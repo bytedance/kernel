@@ -496,10 +496,6 @@ then
 		output="O=$output/tools/perf"
 	fi
 	$MAKE -C $srctree/tools/perf $output LDFLAGS= srctree=$KBUILD_SRC prefix=$tools_dest/usr install
-	mkdir -p $tools_dir/usr/sbin
-	mkdir -p $tools_dir/usr/share/bash-completion/completions
-	cp $srctree/tools/bpf/bpftool/bpftool $tools_dir/usr/sbin
-	cp $srctree/tools/bpf/bpftool/bash-completion/bpftool $tools_dir/usr/share/bash-completion/completions
 	cat <<EOF >> debian/control
 
 Package: $tools_packagename
