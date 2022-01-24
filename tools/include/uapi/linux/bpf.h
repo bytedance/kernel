@@ -10,6 +10,7 @@
 
 #include <linux/types.h>
 #include <linux/bpf_common.h>
+#include <linux/limits.h>
 
 /* Extended instruction set based on top of classic BPF */
 
@@ -3737,13 +3738,11 @@ union bpf_attr {
 	FN(bpf_per_cpu_ptr),            \
 	FN(bpf_this_cpu_ptr),		\
 	FN(redirect_peer),		\
-	FN(unsafe_helper),              \
-	/*
-	 * unsafe_helper is the helper functions we implement
-	 * ourselves. In order to ensure that the order of the new helper
-	 * functions which backported from community kernel is consistent, the
-	 * unsafe_helper need to be be placed last.
-	 */
+	/* */
+
+#ifndef INT_MAX
+#define INT_MAX 0x7fffffff
+#endif
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
  * function eBPF program intends to call
@@ -3752,6 +3751,10 @@ union bpf_attr {
 enum bpf_func_id {
 	__BPF_FUNC_MAPPER(__BPF_ENUM_FN)
 	__BPF_FUNC_MAX_ID,
+
+	__BPF_BYTEDANCE_FUNC_MIN_ID = INT_MAX / 2,
+	__BPF_ENUM_FN(unsafe_helper),
+	__BPF_BYTEDANCE_FUNC_MAX_ID,
 };
 #undef __BPF_ENUM_FN
 
@@ -4043,15 +4046,6 @@ struct bpf_sock_tuple {
 	};
 };
 
-struct bpf_unsafe_ctx {
-        void *ctx;
-        __u16 mod;
-        __u16 cmd;
-        __u16 flags;
-        __u16 data_len;
-        char data[];
-};
-
 struct bpf_xdp_sock {
 	__u32 queue_id;
 };
@@ -4069,6 +4063,15 @@ enum xdp_action {
 	XDP_PASS,
 	XDP_TX,
 	XDP_REDIRECT,
+};
+
+struct bpf_unsafe_ctx {
+	void *ctx;
+	__u16 mod;
+	__u16 cmd;
+	__u16 flags;
+	__u16 data_len;
+	char data[];
 };
 
 /* user accessible metadata for XDP packet hook
