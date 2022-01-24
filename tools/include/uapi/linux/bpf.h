@@ -3737,13 +3737,12 @@ union bpf_attr {
 	FN(bpf_per_cpu_ptr),            \
 	FN(bpf_this_cpu_ptr),		\
 	FN(redirect_peer),		\
-	FN(biggest_bits),		\
 	FN(unsafe_helper),              \
 	/*
-	 * biggest_bits and unsafe_helper are the helper functions we implement
+	 * unsafe_helper is the helper functions we implement
 	 * ourselves. In order to ensure that the order of the new helper
 	 * functions which backported from community kernel is consistent, the
-	 * biggest_bits and unsafe_helper need to be be placed last.
+	 * unsafe_helper need to be be placed last.
 	 */
 
 /* integer value in 'imm' field of BPF_CALL instruction selects which helper
