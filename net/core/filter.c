@@ -7114,38 +7114,6 @@ tc_cls_act_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 	}
 }
 
-BPF_CALL_3(bpf_biggest_bits, u64, bits, u16 *, bits_array, u32, array_size)
-{
-    int i, pos = -1;
-    u16 max = 0;
-
-    for (i = 0; bits && i < array_size; i++) {
-        int ffsi = __builtin_ffsll(bits) - 1;
-
-        if (unlikely(ffsi < 0 || ffsi > array_size - 1)) {
-            pos = -1;
-            break;
-        }
-
-        if (max < bits_array[ffsi]) {
-            max = bits_array[ffsi];
-            pos = ffsi;
-        }
-
-        bits &= ~(1ULL << ffsi);
-    }
-    return pos;
-}
-
-static const struct bpf_func_proto bpf_biggest_bits_proto = {
-	.func           = bpf_biggest_bits,
-	.gpl_only       = false,
-	.ret_type       = RET_INTEGER,
-	.arg1_type      = ARG_ANYTHING,
-	.arg2_type      = ARG_PTR_TO_MEM_OR_NULL,
-	.arg3_type      = ARG_CONST_SIZE_OR_ZERO,
-};
-
 static const struct bpf_func_proto *
 xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
@@ -7155,8 +7123,6 @@ xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 			!capable(CAP_SYS_ADMIN))
 			return NULL;
 		return &bpf_unsafe_helper_proto;
-	case BPF_FUNC_biggest_bits:
-		return &bpf_biggest_bits_proto;
 	case BPF_FUNC_perf_event_output:
 		return &bpf_xdp_event_output_proto;
 	case BPF_FUNC_get_smp_processor_id:
