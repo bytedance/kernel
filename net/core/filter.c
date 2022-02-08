@@ -6838,6 +6838,10 @@ bpf_base_func_proto(enum bpf_func_id func_id)
 		return &bpf_spin_unlock_proto;
 	case BPF_FUNC_trace_printk:
 		return bpf_get_trace_printk_proto();
+	case BPF_FUNC_unsafe_helper:
+		if (!sysctl_bpf_unsafe_helper_enable)
+			return NULL;
+		return &bpf_unsafe_helper_proto;
 	default:
 		return NULL;
 	}
@@ -7000,11 +7004,6 @@ static const struct bpf_func_proto *
 tc_cls_act_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
-	case BPF_FUNC_unsafe_helper:
-		if (!sysctl_bpf_unsafe_helper_enable ||
-			!capable(CAP_SYS_ADMIN))
-			return NULL;
-		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_skb_store_bytes:
 		return &bpf_skb_store_bytes_proto;
 	case BPF_FUNC_skb_load_bytes:
@@ -7118,11 +7117,6 @@ static const struct bpf_func_proto *
 xdp_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
-	case BPF_FUNC_unsafe_helper:
-		if (!sysctl_bpf_unsafe_helper_enable ||
-			!capable(CAP_SYS_ADMIN))
-			return NULL;
-		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_perf_event_output:
 		return &bpf_xdp_event_output_proto;
 	case BPF_FUNC_get_smp_processor_id:
@@ -7285,11 +7279,6 @@ static const struct bpf_func_proto *
 lwt_out_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
-	case BPF_FUNC_unsafe_helper:
-		if (!sysctl_bpf_unsafe_helper_enable ||
-			!capable(CAP_SYS_ADMIN))
-			return NULL;
-		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_skb_load_bytes:
 		return &bpf_skb_load_bytes_proto;
 	case BPF_FUNC_skb_pull_data:
@@ -7317,11 +7306,6 @@ static const struct bpf_func_proto *
 lwt_in_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
-	case BPF_FUNC_unsafe_helper:
-		if (!sysctl_bpf_unsafe_helper_enable ||
-			!capable(CAP_SYS_ADMIN))
-			return NULL;
-		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_lwt_push_encap:
 		return &bpf_lwt_in_push_encap_proto;
 	default:
@@ -7333,11 +7317,6 @@ static const struct bpf_func_proto *
 lwt_xmit_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
 	switch (func_id) {
-	case BPF_FUNC_unsafe_helper:
-		if (!sysctl_bpf_unsafe_helper_enable ||
-			!capable(CAP_SYS_ADMIN))
-			return NULL;
-		return &bpf_unsafe_helper_proto;
 	case BPF_FUNC_skb_get_tunnel_key:
 		return &bpf_skb_get_tunnel_key_proto;
 	case BPF_FUNC_skb_set_tunnel_key:
