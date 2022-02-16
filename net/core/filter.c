@@ -132,6 +132,7 @@ BPF_CALL_1(bpf_skb_get_pay_offset, struct sk_buff *, skb)
 	return skb_get_poff(skb);
 }
 
+#ifdef CONFIG_BPF_UNSAFE_HELPER
 static bpf_unsafe_handler_t bpf_unsafe_mod_array[BPF_UNSAFE_ARRAY_MAX_LENGTH];
 
 static inline bool valid_unsafe_index(int mod)
@@ -203,6 +204,7 @@ const struct bpf_func_proto bpf_unsafe_helper_proto = {
 	.ret_type       = RET_INTEGER,
 	.arg1_type      = ARG_ANYTHING,
 };
+#endif
 
 BPF_CALL_3(bpf_skb_get_nlattr, struct sk_buff *, skb, u32, a, u32, x)
 {
@@ -6838,10 +6840,12 @@ bpf_base_func_proto(enum bpf_func_id func_id)
 		return &bpf_spin_unlock_proto;
 	case BPF_FUNC_trace_printk:
 		return bpf_get_trace_printk_proto();
+#ifdef CONFIG_BPF_UNSAFE_HELPER
 	case BPF_FUNC_unsafe_helper:
 		if (!sysctl_bpf_unsafe_helper_enable)
 			return NULL;
 		return &bpf_unsafe_helper_proto;
+#endif
 	default:
 		return NULL;
 	}
