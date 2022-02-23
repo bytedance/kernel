@@ -1,10 +1,12 @@
 #
 # Bytedance module configuration
 #
+menu "ByteDance drivers support"
+
 config BYTEDANCE
 	bool "bytedance private kernel module"
-	default y
-	---help---
+	default n
+	help
 	  If you want some module which belong to bytedance 
 	  say Y.
 
@@ -36,7 +38,7 @@ config BYTEDANCE_HOT_INSPECTOR
 	tristate "bytedance hot component inspector"
 	depends on BYTEDANCE
 	default n
-	---help---
+	help
 	  Bytedance IDC workload hot component inspector. This option launches
 	  percpu timer to record hotpot in low freq.
 
@@ -49,8 +51,9 @@ config BYTEDANCE_HOT_INSPECTOR
 	      /sys/kernel/debug/hot_inspector/cpu/[N]
 
 if BYTEDANCE
-
 source "drivers/bytedance/hookbind/Kconfig"
 source "drivers/bytedance/blackholefs/Kconfig"
+endif
 
-endif # BYTEDANCE
+endmenu
+
