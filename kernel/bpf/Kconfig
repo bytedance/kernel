@@ -60,4 +60,11 @@ config BPF_UNPRIV_DEFAULT_OFF
 	  disable it by setting it to 1 (from which no other transition to
 	  0 is possible anymore).
 
+config BPF_UNSAFE_HELPER
+	bool "Enable using bpf_unsafe_helper"
+	depends on BPF_SYSCALL
+	help
+	  Enable using bpf_unsafe_helper which can call modules functions in
+	  bpf prog.
+
 endmenu # "BPF subsystem"

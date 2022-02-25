@@ -681,7 +681,6 @@ void bpf_map_area_free(void *base);
 void bpf_map_init_from_attr(struct bpf_map *map, union bpf_attr *attr);
 
 extern int sysctl_unprivileged_bpf_disabled;
-extern int sysctl_bpf_unsafe_helper_enable;
 
 int bpf_map_new_fd(struct bpf_map *map, int flags);
 int bpf_prog_new_fd(struct bpf_prog *prog);
@@ -725,6 +724,7 @@ static inline void bpf_long_memcpy(void *dst, const void *src, u32 size)
 		*ldst++ = *lsrc++;
 }
 
+#ifdef CONFIG_BPF_UNSAFE_HELPER
 /* BPF unsafe general helper definitions */
 enum{
 	BPF_UNSAFE_MOD_XHIDS = 0,
@@ -735,6 +735,8 @@ typedef int (*bpf_unsafe_handler_t)(struct bpf_unsafe_ctx *);
 int bpf_unsafe_mod_register(int mod, bpf_unsafe_handler_t fp);
 void bpf_unsafe_mod_unregister(int mod);
 
+extern int sysctl_bpf_unsafe_helper_enable;
+#endif
 
 /* verify correctness of eBPF program */
 int bpf_check(struct bpf_prog **fp, union bpf_attr *attr,
@@ -1095,7 +1097,9 @@ extern const struct bpf_func_proto bpf_get_local_storage_proto;
 extern const struct bpf_func_proto bpf_strtol_proto;
 extern const struct bpf_func_proto bpf_strtoul_proto;
 extern const struct bpf_func_proto bpf_tcp_sock_proto;
+#ifdef CONFIG_BPF_UNSAFE_HELPER
 extern const struct bpf_func_proto bpf_unsafe_helper_proto;
+#endif
 
 /* Shared helpers among cBPF and eBPF. */
 void bpf_user_rnd_init_once(void);

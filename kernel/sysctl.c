@@ -1281,6 +1281,7 @@ static struct ctl_table kern_table[] = {
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= &two,
 	},
+#ifdef CONFIG_BPF_UNSAFE_HELPER
 	{
 		.procname	= "bpf_unsafe_helper_enable",
 		.data		= &sysctl_bpf_unsafe_helper_enable,
@@ -1290,6 +1291,7 @@ static struct ctl_table kern_table[] = {
 		.extra1		= SYSCTL_ZERO,
 		.extra2		= SYSCTL_ONE,
 	},
+#endif
 	{
 		.procname	= "bpf_stats_enabled",
 		.data		= &bpf_stats_enabled_key.key,
