@@ -621,7 +621,7 @@ static struct virtio_crypto_algo virtio_crypto_algs[] = { {
 	},
 } };
 
-int virtio_crypto_algs_register(struct virtio_crypto *vcrypto)
+int virtio_crypto_skcipher_algs_register(struct virtio_crypto *vcrypto)
 {
 	int ret = 0;
 	int i = 0;
@@ -652,7 +652,7 @@ unlock:
 	return ret;
 }
 
-void virtio_crypto_algs_unregister(struct virtio_crypto *vcrypto)
+void virtio_crypto_skcipher_algs_unregister(struct virtio_crypto *vcrypto)
 {
 	int i = 0;
 
