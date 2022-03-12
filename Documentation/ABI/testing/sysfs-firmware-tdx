@@ -44,6 +44,22 @@ Description:
 				   * "shutdown": the TDX module is shutdown due
 				     to error during initialization.
 
+		attributes         32-bit flags of the TDX module attributes as
+				   a hexadecimal number with the "0x" prefix.
+
+				   * Bits 31 - a production module(0) or
+				     a debug module(1).
+				   * Bits 0-30 - Reserved - set to 0.
+
+		vendor_id          vendor ID as a hexadecimal number with the
+				   "0x" prefix.
+		build_date         build date in yyyymmdd BCD format.
+		build_num          build number as a hexadecimal number with
+				   the "0x" prefix.
+		minor_version      minor version as a hexadecimal number with
+				   the "0x" prefix.
+		major_version      major version as a hexadecimal number with
+				   the "0x" prefix.
 		================== ============================================
 
 What:		/sys/firmware/tdx/tdx_module/metadata/
