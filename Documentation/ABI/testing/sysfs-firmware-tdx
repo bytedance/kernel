@@ -1,3 +1,51 @@
+What:		/sys/firmware/tdx/
+Date:		December 2023
+KernelVersion:	6.7
+Contact:	Isaku Yamahata <isaku.yamahata@intel.com>, kvm@vger.kernel.org
+Users:		libvirt
+Description:
+		Intel's Trust Domain Extensions (TDX) protect guest VMs from
+		malicious hosts and some physical attacks.  This directory
+		represents the entry point directory for the TDX.
+
+		This feature requires the TDX firmware to load into an isolated
+		memory region.  It uses two-step loading process; the first
+		phase is NP-SEAMLDR loader that loads the next one and the
+		second phase is P-SEAMLDR loader that loads the TDX firmware
+		(a.k.a the "TDX module").
+
+		=============== ================================================
+		keyid_num       the number of SEAM keyid as an hexadecimal
+				number with the "0x" prefix.
+		=============== ================================================
+
+What:		/sys/firmware/tdx/tdx_module/
+Date:		December 2023
+KernelVersion:	6.7
+Contact:	Isaku Yamahata <isaku.yamahata@intel.com>, kvm@vger.kernel.org
+Users:		libvirt
+Description:
+		The TDX feature requires a firmware that is known as the TDX
+		module. The module exposes its information in the following
+		read-only files. The information corresponds to the data
+		structure named TDSYSINFO_STRUCT. Administrators or VMM
+		managers like libvirt can refer to it to determine if TDX is
+		supported and identify the loaded module.
+
+		================== ============================================
+		status             string of the TDX module status.
+
+				   * "unknown", "none": the TDX module is not
+				     loaded
+				   * "loaded": The TDX module is loaded, but
+				     not initialized
+				   * "initialized": the TDX module is fully
+				     initialized
+				   * "shutdown": the TDX module is shutdown due
+				     to error during initialization.
+
+		================== ============================================
+
 What:		/sys/firmware/tdx/tdx_module/metadata/
 Date:		December 2023
 KernelVersion:	6.7

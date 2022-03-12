@@ -1926,6 +1926,45 @@ static struct kobject *tdx_kobj;
 static struct kobject *tdx_module_kobj;
 static struct kobject *tdx_metadata_kobj;
 
+static ssize_t tdx_nr_guest_keyids_show(struct kobject *kobj,
+					struct kobj_attribute *attr, char *buf)
+{
+	return sprintf(buf, "0x%08x", tdx_nr_guest_keyids);
+}
+
+static struct kobj_attribute tdx_nr_guest_keyids_attr = {
+	.attr = {
+		.name = "nr_guest_keyids",
+		.mode = 0444
+	},
+	.show = tdx_nr_guest_keyids_show,
+};
+
+static ssize_t tdx_module_status_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+{
+	static const char * const names[] = {
+		[TDX_MODULE_UNINITIALIZED] = "uninitialized",
+		[TDX_MODULE_INITIALIZED] = "initialized",
+		[TDX_MODULE_ERROR] = "error",
+	};
+	const char *status = "unknown";
+
+	tdx_module_lock();
+	if (tdx_module_status < ARRAY_SIZE(names))
+		status = names[tdx_module_status];
+	tdx_module_unlock();
+
+	return sprintf(buf, "%s", status);
+}
+
+static struct kobj_attribute tdx_module_status_attr = {
+	.attr = {
+		.name = "status",
+		.mode = 0444
+	},
+	.show = tdx_module_status_show,
+};
+
 #define TDX_METADATA_ATTR(_name, field_id_name, _size)		\
 static struct bin_attribute tdx_metadata_ ## _name = {		\
 	.attr = {						\
@@ -2047,11 +2086,24 @@ int tdx_sysfs_init(void)
 		return -EINVAL;
 	}
 
+	ret = sysfs_create_file(tdx_kobj, &tdx_nr_guest_keyids_attr.attr);
+	if (ret) {
+		pr_err("Sysfs exporting seam nr_keyids failed %d\n", ret);
+		return ret;
+	}
+
 	tdx_module_kobj = kobject_create_and_add("tdx_module", tdx_kobj);
 	if (!tdx_module_kobj) {
 		pr_err("kobject_create_and_add tdx_module failed\n");
 		return -EINVAL;
 	}
+
+	ret = sysfs_create_file(tdx_module_kobj, &tdx_module_status_attr.attr);
+	if (ret) {
+		pr_err("Sysfs exporting tdx module status failed %d\n", ret);
+		return ret;
+	}
+
 	tdx_metadata_kobj = kobject_create_and_add("metadata", tdx_module_kobj);
 	if (!tdx_metadata_kobj) {
 		pr_err("Sysfs exporting tdx global metadata failed %d\n", ret);
