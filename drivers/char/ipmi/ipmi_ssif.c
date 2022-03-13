@@ -1725,7 +1725,6 @@ static int ssif_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		client->addr, client->adapter->name, slave_addr);
 
 	ssif_info->client = client;
-	ssif_info->client->adapter->timeout = 10*HZ; /* Set to 10 seconds in this case */
 	i2c_set_clientdata(client, ssif_info);
 
 	/* Now check for system interface capabilities */
