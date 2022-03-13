@@ -1727,6 +1727,7 @@ static int ssif_probe(struct i2c_client *client, const struct i2c_device_id *id)
 		}
 	}
 
+	ssif_info->client->adapter->timeout = 10 * HZ;
 	ssif_info->client = client;
 	i2c_set_clientdata(client, ssif_info);
 
