@@ -50,6 +50,17 @@ config BYTEDANCE_HOT_INSPECTOR
 
 	      /sys/kernel/debug/hot_inspector/cpu/[N]
 
+config BYTEDANCE_TOA
+	tristate "bytedance toa module"
+	depends on BYTEDANCE
+	default n
+	help
+	  This module is used to expose the real ip of the client to the server.
+	  Need option field in the tcp packet configured by load balancing
+	  server.
+	  
+	  project website: https://github.com/bytedance/toa
+
 if BYTEDANCE
 source "drivers/bytedance/hookbind/Kconfig"
 source "drivers/bytedance/blackholefs/Kconfig"
