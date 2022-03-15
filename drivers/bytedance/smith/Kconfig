@@ -1,0 +1,9 @@
+#
+# Bytedance module configuration
+#
+config BYTEDANCE_SMITH
+	tristate "bytedance HIDS module - smith"
+        depends on KPROBES && KRETPROBES
+	---help---
+	  ByteDance HIDS kernel module
+          Project: https://github.com/bytedance/elkeid
