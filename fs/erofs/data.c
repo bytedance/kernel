@@ -61,8 +61,8 @@ void erofs_put_metabuf(struct erofs_buf *buf)
 	buf->page = NULL;
 }
 
-void *erofs_read_metabuf(struct erofs_buf *buf, struct super_block *sb,
-			erofs_blk_t blkaddr, enum erofs_kmap_type type)
+void *erofs_bread(struct erofs_buf *buf, struct inode *inode,
+		  erofs_blk_t blkaddr, enum erofs_kmap_type type)
 {
 	erofs_off_t offset = blknr_to_addr(blkaddr);
 	pgoff_t index = offset >> PAGE_SHIFT;
@@ -70,7 +70,7 @@ void *erofs_read_metabuf(struct erofs_buf *buf, struct super_block *sb,
 
 	if (!page || page->index != index) {
 		erofs_put_metabuf(buf);
-		page = erofs_read_meta_page(sb, index);
+		page = erofs_read_meta_page(inode->i_sb, index);
 		if (IS_ERR(page))
 			return page;
 		/* should already be PageUptodate, no need to lock page */
@@ -89,6 +89,12 @@ void *erofs_read_metabuf(struct erofs_buf *buf, struct super_block *sb,
 	if (type == EROFS_NO_KMAP)
 		return NULL;
 	return buf->base + (offset & ~PAGE_MASK);
+}
+
+void *erofs_read_metabuf(struct erofs_buf *buf, struct super_block *sb,
+			 erofs_blk_t blkaddr, enum erofs_kmap_type type)
+{
+	return erofs_bread(buf, sb->s_bdev->bd_inode, blkaddr, type);
 }
 
 static int erofs_map_blocks_flatmode(struct inode *inode,
