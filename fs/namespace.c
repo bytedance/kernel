@@ -2567,6 +2567,7 @@ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *
 	struct super_block *sb = mnt->mnt_sb;
 
 	if (!__mnt_is_readonly(mnt) &&
+	   (!(sb->s_iflags & SB_I_TS_EXPIRY_WARNED)) &&
 	   (ktime_get_real_seconds() + TIME_UPTIME_SEC_MAX > sb->s_time_max)) {
 		char *buf, *mntpath;
 		struct tm tm;
@@ -2586,6 +2587,8 @@ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *
 			is_mounted(mnt) ? "remounted" : "mounted",
 			mntpath,
 			tm.tm_year+1900, (unsigned long long)sb->s_time_max);
+
+		sb->s_iflags |= SB_I_TS_EXPIRY_WARNED;
 		if (buf)
 			free_page((unsigned long)buf);
 	}
