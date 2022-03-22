@@ -919,6 +919,8 @@ static int madvise_inject_error(int behavior,
 		 */
 		put_page(page);
 		ret = memory_failure(pfn, 0);
+		if (ret == -EOPNOTSUPP)
+			ret = 0;
 		if (ret)
 			return ret;
 	}
