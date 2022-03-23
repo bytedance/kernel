@@ -849,7 +849,9 @@ struct task_struct {
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
 	struct vtime			vtime;
 #endif
-
+#ifdef CONFIG_BYTEDANCE_BURST_SCHED
+	void				*burst_credit;
+#endif
 #ifdef CONFIG_NO_HZ_FULL
 	atomic_t			tick_dep_mask;
 #endif

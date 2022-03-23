@@ -133,6 +133,7 @@ CONFIG_HAVE_UNSTABLE_SCHED_CLOCK=y
 #
 # Scheduler features
 #
+CONFIG_BYTEDANCE_BURST_SCHED=y
 # CONFIG_UCLAMP_TASK is not set
 # end of Scheduler features
 

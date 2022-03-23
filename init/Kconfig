@@ -686,6 +686,16 @@ config GENERIC_SCHED_CLOCK
 
 menu "Scheduler features"
 
+config BYTEDANCE_BURST_SCHED
+	bool "Enable burst instance scheduling"
+	default n
+	help
+	  This feature enables the scheduler to calculate and modify the credit value
+	  of burst instance tasks, and schedule tasks according to the credit value.
+
+	  The specific details of the burst instance scheduler are implemented
+	  in the module.
+
 config UCLAMP_TASK
 	bool "Enable utilization clamping for RT/FAIR tasks"
 	depends on CPU_FREQ_GOV_SCHEDUTIL
