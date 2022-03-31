@@ -2232,40 +2232,87 @@ static int fuse_device_clone(struct fuse_conn *fc, struct file *new)
 	return 0;
 }
 
-static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
-			   unsigned long arg)
+static int fuse_dev_ioc_clone(struct file *file, unsigned long arg)
 {
-	int err = -ENOTTY;
+	int err = -EFAULT;
+	int oldfd;
 
-	if (cmd == FUSE_DEV_IOC_CLONE) {
-		int oldfd;
+	if (!get_user(oldfd, (__u32 __user *) arg)) {
+		struct file *old = fget(oldfd);
 
-		err = -EFAULT;
-		if (!get_user(oldfd, (__u32 __user *) arg)) {
-			struct file *old = fget(oldfd);
+		err = -EINVAL;
+		if (old) {
+			struct fuse_dev *fud = NULL;
 
-			err = -EINVAL;
-			if (old) {
-				struct fuse_dev *fud = NULL;
+			/*
+			 * Check against file->f_op because CUSE
+			 * uses the same ioctl handler.
+			 */
+			if (old->f_op == file->f_op &&
+			    old->f_cred->user_ns == file->f_cred->user_ns)
+				fud = fuse_get_dev(old);
 
-				/*
-				 * Check against file->f_op because CUSE
-				 * uses the same ioctl handler.
-				 */
-				if (old->f_op == file->f_op &&
-				    old->f_cred->user_ns == file->f_cred->user_ns)
-					fud = fuse_get_dev(old);
-
-				if (fud) {
-					mutex_lock(&fuse_mutex);
-					err = fuse_device_clone(fud->fc, file);
-					mutex_unlock(&fuse_mutex);
-				}
-				fput(old);
+			if (fud) {
+				mutex_lock(&fuse_mutex);
+				err = fuse_device_clone(fud->fc, file);
+				mutex_unlock(&fuse_mutex);
 			}
+			fput(old);
 		}
 	}
 	return err;
+}
+
+static int fuse_dev_ioc_restore_req(struct file *file)
+{
+	unsigned int i;
+	LIST_HEAD(to_restore);
+	struct fuse_req *req, *next;
+	struct fuse_dev *fud = fuse_get_dev(file);
+	struct fuse_pqueue *fpq = &fud->pq;
+	struct fuse_conn *fc = fud->fc;
+	struct fuse_iqueue *fiq = &fc->iq;
+
+	if (fc->sb && !sb_rdonly(fc->sb))
+		return -EOPNOTSUPP;
+
+	spin_lock(&fpq->lock);
+	list_for_each_entry_safe(req, next, &fpq->io, list) {
+		spin_lock(&req->waitq.lock);
+		if (!test_bit(FR_LOCKED, &req->flags)) {
+			set_bit(FR_PRIVATE, &req->flags);
+			__fuse_get_request(req);
+			list_move_tail(&req->list, &to_restore);
+		}
+		spin_unlock(&req->waitq.lock);
+	}
+	for (i = 0; i < FUSE_PQ_HASH_SIZE; i++)
+		list_splice_init(&fpq->processing[i], &to_restore);
+	spin_unlock(&fpq->lock);
+
+	list_for_each_entry(req, &to_restore, list) {
+		clear_bit(FR_SENT, &req->flags);
+		set_bit(FR_PENDING, &req->flags);
+	}
+
+	spin_lock(&fiq->lock);
+	list_splice(&to_restore, &fiq->pending);
+	spin_unlock(&fiq->lock);
+
+	return 0;
+}
+
+static long fuse_dev_ioctl(struct file *file, unsigned int cmd,
+			   unsigned long arg)
+{
+	switch (cmd) {
+	case FUSE_DEV_IOC_CLONE:
+		return fuse_dev_ioc_clone(file, arg);
+	case FUSE_DEV_IOC_RESTORE_REQ:
+		return fuse_dev_ioc_restore_req(file);
+	default:
+		return -ENOTTY;
+	}
 }
 
 const struct file_operations fuse_dev_operations = {
