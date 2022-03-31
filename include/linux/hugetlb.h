@@ -389,7 +389,6 @@ struct hstate {
 	struct cftype cgroup_files[5];
 #endif
 	char name[HSTATE_NAME_LEN];
-	struct delayed_work clear_work;
 };
 
 struct huge_bootmem_page {

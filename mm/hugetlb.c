@@ -906,36 +906,83 @@ static bool vma_has_reserves(struct vm_area_struct *vma, long chg)
 
 static void kthread_clear_huge_pages(struct work_struct *work)
 {
-	struct hstate *h = container_of(work, struct hstate, clear_work.work);
-	unsigned int order = huge_page_order(h);
-	unsigned long i, nr_pages = 1 << order;
+	unsigned long i, nr_pages;
 	struct page *page, *iter;
+	unsigned int order;
+	struct hstate *h;
 	int nid;
 
 	spin_lock(&hugetlb_lock);
-	for (nid = 0; nid < MAX_NUMNODES; nid++) {
-		while (!list_empty(&h->hugepage_wait_for_clean[nid])) {
-			page = list_entry(
-				h->hugepage_wait_for_clean[nid].next,
-				struct page,
-				lru);
-			list_del(&page->lru);
-			spin_unlock(&hugetlb_lock);
+	for_each_hstate(h) {
+		order = huge_page_order(h);
+		nr_pages = 1 << order;
 
-			for (i = 0, iter = page;
-			     i < nr_pages;
-			     i++, iter = mem_map_next(iter, page, i)) {
-				clear_highpage(iter);
-				cond_resched();
+		for (nid = 0; nid < MAX_NUMNODES; nid++) {
+			while (!list_empty(&h->hugepage_wait_for_clean[nid])) {
+				page = list_entry(
+					h->hugepage_wait_for_clean[nid].next,
+					struct page,
+					lru);
+				list_del(&page->lru);
+				spin_unlock(&hugetlb_lock);
+
+				for (i = 0, iter = page;
+				     i < nr_pages;
+				     i++, iter = mem_map_next(iter, page, i)) {
+					clear_highpage(iter);
+					cond_resched();
+				}
+
+				spin_lock(&hugetlb_lock);
+				list_add(&page->lru,
+					 &h->hugepage_freelists[nid]);
+
+				cond_resched_lock(&hugetlb_lock);
 			}
-
-			spin_lock(&hugetlb_lock);
-			list_add(&page->lru, &h->hugepage_freelists[nid]);
-
-			cond_resched_lock(&hugetlb_lock);
 		}
 	}
 	spin_unlock(&hugetlb_lock);
+}
+
+/*
+ * The cpumask is the mask of possible cpus that can be waken
+ * to clean huge pages after releasing them.
+ */
+static struct cpumask hugetlb_background_clr_cpumask;
+
+static DEFINE_PER_CPU(struct delayed_work, hugetlb_clean_work);
+
+static void wakeup_background_clean_work(void)
+{
+	struct delayed_work *work;
+	int cpu;
+
+	if (cpumask_empty(&hugetlb_background_clr_cpumask)) {
+		cpu = raw_smp_processor_id();
+		work = &per_cpu(hugetlb_clean_work, cpu);
+		schedule_delayed_work_on(cpu, work, msecs_to_jiffies(5));
+		return;
+	}
+
+	for_each_cpu_and(cpu,
+			 &hugetlb_background_clr_cpumask,
+			 cpu_online_mask) {
+		work = &per_cpu(hugetlb_clean_work, cpu);
+		schedule_delayed_work_on(cpu, work, msecs_to_jiffies(5));
+	}
+}
+
+static void flush_background_clean_work(void)
+{
+	struct delayed_work *work;
+	int cpu;
+
+	for_each_cpu_and(cpu,
+			 &hugetlb_background_clr_cpumask,
+			 cpu_online_mask) {
+		work = &per_cpu(hugetlb_clean_work, cpu);
+		flush_delayed_work(work);
+	}
 }
 
 static void enqueue_huge_page(struct hstate *h, struct page *page)
@@ -943,9 +990,7 @@ static void enqueue_huge_page(struct hstate *h, struct page *page)
 	int nid = page_to_nid(page);
 	if (hugetlb_clear_hpage_background) {
 		list_move(&page->lru, &h->hugepage_wait_for_clean[nid]);
-		schedule_delayed_work_on(raw_smp_processor_id(),
-					 &h->clear_work,
-					 msecs_to_jiffies(5));
+		wakeup_background_clean_work();
 	} else {
 		list_move(&page->lru, &h->hugepage_freelists[nid]);
 	}
@@ -965,7 +1010,7 @@ static struct page *dequeue_huge_page_node_exact(struct hstate *h, int nid)
 	if (hugetlb_clear_hpage_background &&
 	    &h->hugepage_freelists[nid] == &page->lru) {
 		spin_unlock(&hugetlb_lock);
-		flush_delayed_work(&h->clear_work);
+		flush_background_clean_work();
 		spin_lock(&hugetlb_lock);
 
 		list_for_each_entry(page, &h->hugepage_freelists[nid], lru)
@@ -3288,7 +3333,6 @@ void __init hugetlb_add_hstate(unsigned int order)
 	h->mask = ~((1ULL << (order + PAGE_SHIFT)) - 1);
 	h->nr_huge_pages = 0;
 	h->free_huge_pages = 0;
-	INIT_DELAYED_WORK(&h->clear_work, kthread_clear_huge_pages);
 	for (i = 0; i < MAX_NUMNODES; ++i) {
 		INIT_LIST_HEAD(&h->hugepage_freelists[i]);
 		INIT_LIST_HEAD(&h->hugepage_wait_for_clean[i]);
@@ -3450,11 +3494,6 @@ out:
 	return ret;
 }
 
-/*
- * The cpumask is the mask of possible cpus that can be waken
- * to clean huge pages after releasing them.
- */
-static struct cpumask hugetlb_background_clr_cpumask;
 static unsigned long *sysctl_hugetlb_background_clr_cpumask_bits =
 	cpumask_bits(&hugetlb_background_clr_cpumask);
 
@@ -3492,10 +3531,16 @@ static struct ctl_table hugetlb_background_clr_cpumask_ctl_table[] = {
 
 static void __init hugetlb_init_background_clean(void)
 {
+	int cpu;
+
 #ifdef CONFIG_SYSCTL
 	if (!register_sysctl("vm", hugetlb_background_clr_cpumask_ctl_table))
 		pr_err("Hugetlb: Unable to register background clean sysctl");
 #endif
+
+	for_each_possible_cpu(cpu)
+		INIT_DELAYED_WORK(per_cpu_ptr(&hugetlb_clean_work, cpu),
+				  kthread_clear_huge_pages);
 }
 late_initcall(hugetlb_init_background_clean);
 
