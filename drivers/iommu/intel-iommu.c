@@ -366,6 +366,7 @@ static int dmar_map_gfx = 1;
 static int dmar_forcedac;
 static int intel_iommu_strict;
 static int intel_iommu_superpage = 1;
+static int cx6_2M_limitation __ro_after_init;
 static int iommu_identity_mapping;
 static int intel_no_bounce;
 
@@ -472,6 +473,9 @@ static int __init intel_iommu_setup(char *str)
 		} else if (!strncmp(str, "mpt3sas_pt", 10)) {
 			pr_info("Intel-IOMMU: Enable mpt3sas device passthrough\n");
 			dmar_mpt3sas_pt = 1;
+		} else if (!strncmp(str, "cx6_2M_limitation", 17)) {
+			pr_info("Intel-IOMMU: enable cx6_2M_limitation\n");
+			cx6_2M_limitation = 1;
 		}
 
 		str += strcspn(str, ",");
@@ -685,7 +689,7 @@ static int domain_update_iommu_superpage(struct intel_iommu *skip)
 	rcu_read_lock();
 	for_each_active_iommu(iommu, drhd) {
 		if (iommu != skip) {
-			mask &= cap_super_page_val(iommu->cap);
+			mask &= cap_super_page_val(iommu->cap) & (cx6_2M_limitation ? 1 : ~0);
 			if (!mask)
 				break;
 		}
@@ -1898,7 +1902,7 @@ static int domain_init(struct dmar_domain *domain, struct intel_iommu *iommu,
 		domain->iommu_snooping = 0;
 
 	if (intel_iommu_superpage)
-		domain->iommu_superpage = fls(cap_super_page_val(iommu->cap));
+		domain->iommu_superpage = fls(cap_super_page_val(iommu->cap) & (cx6_2M_limitation ? 1 : ~0));
 	else
 		domain->iommu_superpage = 0;
 
