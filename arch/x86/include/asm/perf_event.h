@@ -142,6 +142,18 @@ union cpuid10_edx {
 	unsigned int full;
 };
 
+/*
+ * AMD "Extended Performance Monitoring and Debug" CPUID
+ * detection/enumeration details:
+ */
+union cpuid_0x80000022_ebx {
+	struct {
+		/* Number of Core Performance Counters */
+		unsigned int	num_core_pmc:4;
+	} split;
+	unsigned int		full;
+};
+
 struct x86_pmu_capability {
 	int		version;
 	int		num_counters_gp;
@@ -320,6 +332,11 @@ struct pebs_lbr_entry {
 struct pebs_lbr {
 	struct pebs_lbr_entry lbr[0]; /* Variable length */
 };
+
+/*
+ * AMD Extended Performance Monitoring and Debug cpuid feature detection
+ */
+#define EXT_PERFMON_DEBUG_FEATURES		0x80000022
 
 /*
  * IBS cpuid feature detection
