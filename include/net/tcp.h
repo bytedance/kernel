@@ -805,6 +805,7 @@ bool tcp_in_quickack_mode(struct sock *sk);
 void tcp_check_space(struct sock *sk);
 void tcp_skb_mark_lost_uncond_verify(struct tcp_sock *tp, struct sk_buff *skb);
 void tcp_skb_mark_lost(struct tcp_sock *tp, struct sk_buff *skb);
+void tcp_check_space(struct sock *sk);
 
 /* tcp_minisocks.c */
 void smc_check_reset_syn_req(struct tcp_sock *oldtp,
