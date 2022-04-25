@@ -87,7 +87,32 @@ out:
 	return ret;
 }
 
+static int erofs_fscache_meta_readpage(struct file *data, struct page *page)
+{
+	int ret;
+	struct super_block *sb = page_mapping(page)->host->i_sb;
+	struct erofs_map_dev mdev = {
+		.m_deviceid = 0,
+		.m_pa = page_offset(page),
+	};
+
+	ret = erofs_map_dev(sb, &mdev);
+	if (ret)
+		goto out;
+
+	ret = erofs_fscache_data_read(mdev.m_fscache->cookie,
+	               page_mapping(page), page_offset(page),
+	               page_size(page), mdev.m_pa);
+	if (!ret)
+		SetPageUptodate(page);
+	out:
+	unlock_page(page);
+	return ret;
+}
+
+
 static const struct address_space_operations erofs_fscache_meta_aops = {
+	.readpage = erofs_fscache_meta_readpage,
 };
 
 int erofs_fscache_register_cookie(struct super_block *sb,
