@@ -38,3 +38,15 @@ config CACHEFILES_HISTOGRAM
 
 	  See Documentation/filesystems/caching/cachefiles.txt for more
 	  information.
+
+config CACHEFILES_ONDEMAND
+	bool "Support for on-demand read"
+	depends on CACHEFILES
+	default n
+	help
+	  This permits userspace to enable the cachefiles on-demand read mode.
+	  In this mode, when a cache miss occurs, responsibility for fetching
+	  the data lies with the cachefiles backend instead of with the netfs
+	  and is delegated to userspace.
+
+	  If unsure, say N.

@@ -21,6 +21,8 @@
 enum cachefiles_obj_ref_trace {
 	cachefiles_obj_put_wait_retry = fscache_obj_ref__nr_traces,
 	cachefiles_obj_put_wait_timeo,
+	cachefiles_obj_get_ondemand_fd,
+	cachefiles_obj_put_ondemand_fd,
 	cachefiles_obj_ref__nr_traces
 };
 

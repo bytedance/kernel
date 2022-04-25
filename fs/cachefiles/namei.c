@@ -592,6 +592,10 @@ lookup_again:
 			if (ret < 0)
 				goto no_space_error;
 
+			ret = cachefiles_ondemand_init_object(object);
+			if (ret < 0)
+				goto create_error;
+
 			path.dentry = dir;
 			ret = security_path_mknod(&path, next, S_IFREG, 0);
 			if (ret < 0)
@@ -635,6 +639,12 @@ lookup_again:
 	 * check its attributes and delete it if it's out of date */
 	if (!object->new) {
 		_debug("validate '%pd'", next);
+
+		ret = cachefiles_ondemand_init_object(object);
+		if (ret < 0) {
+			object->dentry = NULL;
+			goto error;
+		}
 
 		ret = cachefiles_check_object_xattr(object, auxdata);
 		if (ret == -ESTALE) {
@@ -694,6 +704,20 @@ lookup_again:
 				goto check_error;
 			if (object->dentry->d_sb->s_blocksize > PAGE_SIZE)
 				goto check_error;
+
+			if (cachefiles_in_ondemand_mode(cache)) {
+				struct path path;
+				struct file *file;
+
+				path.mnt = cache->mnt;
+				path.dentry = object->dentry;
+				file = dentry_open(&path, O_RDWR | O_LARGEFILE | O_DIRECT,
+										cache->cache_cred);
+				if (IS_ERR(file))
+					goto check_error;
+
+				object->file = file;
+			}
 
 			object->backer = object->dentry;
 		} else {
