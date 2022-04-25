@@ -179,15 +179,15 @@ static void cachefiles_write_complete(struct kiocb *iocb, long ret, long ret2)
 /*
  * Initiate a write to the cache.
  */
-static int cachefiles_write(struct netfs_cache_resources *cres,
-			    loff_t start_pos,
-			    struct iov_iter *iter,
-			    netfs_io_terminated_t term_func,
-			    void *term_func_priv)
+int __cachefiles_write(struct cachefiles_object *object,
+		       struct file *file,
+		       loff_t start_pos,
+		       struct iov_iter *iter,
+		       netfs_io_terminated_t term_func,
+		       void *term_func_priv)
 {
 	struct cachefiles_kiocb *ki;
 	struct inode *inode;
-	struct file *file = cres->cache_priv2;
 	unsigned int old_nofs;
 	ssize_t ret = -ENOBUFS;
 	size_t len = iov_iter_count(iter);
@@ -259,6 +259,20 @@ presubmission_error:
 	if (term_func)
 		term_func(term_func_priv, -ENOMEM, false);
 	return -ENOMEM;
+}
+
+static int cachefiles_write(struct netfs_cache_resources *cres,
+			    loff_t start_pos,
+			    struct iov_iter *iter,
+			    netfs_io_terminated_t term_func,
+			    void *term_func_priv)
+{
+	struct fscache_retrieval *op = cres->cache_priv;
+	struct cachefiles_object *object = container_of(op->op.object,
+						struct cachefiles_object, fscache);
+
+	return __cachefiles_write(object, cres->cache_priv2, start_pos, iter,
+							  term_func, term_func_priv);
 }
 
 /*
@@ -333,7 +347,7 @@ cache_fail_nosec:
 /*
  * Prepare for a write to occur.
  */
-static int cachefiles_prepare_write(struct netfs_cache_resources *cres,
+int cachefiles_prepare_write(struct netfs_cache_resources *cres,
 				    loff_t *_start, size_t *_len, loff_t i_size)
 {
 	loff_t start = *_start;

@@ -18,6 +18,7 @@
 #include <linux/cred.h>
 #include <linux/workqueue.h>
 #include <linux/security.h>
+#include <linux/netfs.h>
 
 struct cachefiles_cache;
 struct cachefiles_object;
@@ -152,6 +153,19 @@ extern const struct fscache_cache_ops cachefiles_cache_ops;
 
 void cachefiles_put_object(struct fscache_object *_object,
 			   enum fscache_obj_ref_trace why);
+
+/*
+ * io.c
+ */
+extern int __cachefiles_write(struct cachefiles_object *object,
+						struct file *file,
+						loff_t start_pos,
+						struct iov_iter *iter,
+						netfs_io_terminated_t term_func,
+						void *term_func_priv);
+
+extern int cachefiles_prepare_write(struct netfs_cache_resources *cres,
+				loff_t *_start, size_t *_len, loff_t i_size);
 
 /*
  * key.c
