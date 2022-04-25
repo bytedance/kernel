@@ -288,6 +288,7 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 	const struct cred *saved_cred;
 	struct file *file = subreq->rreq->cache_resources.cache_priv2;
 	loff_t off, to;
+	int rc;
 
 	_enter("%zx @%llx/%llx", subreq->len, subreq->start, i_size);
 
@@ -303,7 +304,7 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 		return NETFS_FILL_WITH_ZEROES;
 
 	cachefiles_begin_secure(cache, &saved_cred);
-
+retry:
 	off = vfs_llseek(file, subreq->start, SEEK_DATA);
 	if (off < 0 && off >= (loff_t)-MAX_ERRNO) {
 		if (off == (loff_t)-ENXIO)
@@ -336,8 +337,19 @@ static enum netfs_read_source cachefiles_prepare_read(struct netfs_read_subreque
 	return NETFS_READ_FROM_CACHE;
 
 download_and_store:
-	if (cachefiles_has_space(cache, 0, (subreq->len + PAGE_SIZE - 1) / PAGE_SIZE) == 0)
+	if (cachefiles_has_space(cache, 0, (subreq->len + PAGE_SIZE - 1) / PAGE_SIZE) == 0) {
 		__set_bit(NETFS_SREQ_WRITE_TO_CACHE, &subreq->flags);
+		if (test_bit(NETFS_SREQ_ONDEMAND, &subreq->flags)) {
+			rc = cachefiles_ondemand_read(object, subreq->start,
+											subreq->len);
+			if (!rc) {
+				__clear_bit(NETFS_SREQ_ONDEMAND, &subreq->flags);
+				goto retry;
+			}
+			cachefiles_end_secure(cache, saved_cred);
+			return NETFS_INVALID_READ;
+		}
+	}
 cache_fail:
 	cachefiles_end_secure(cache, saved_cred);
 cache_fail_nosec:
@@ -406,18 +418,22 @@ int cachefiles_begin_read_operation(struct netfs_read_request *rreq,
 	cache = container_of(object->fscache.cache,
 			     struct cachefiles_cache, cache);
 
-	path.mnt = cache->mnt;
-	path.dentry = object->backer;
-	file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE | O_DIRECT,
-				   d_inode(object->backer), cache->cache_cred);
-	if (IS_ERR(file))
-		return PTR_ERR(file);
-	if (!S_ISREG(file_inode(file)->i_mode))
-		goto error_file;
-	if (unlikely(!file->f_op->read_iter) ||
-	    unlikely(!file->f_op->write_iter)) {
-		pr_notice("Cache does not support read_iter and write_iter\n");
-		goto error_file;
+	if (cachefiles_in_ondemand_mode(cache) && object->file) {
+		file = get_file(object->file);
+	} else {
+		path.mnt = cache->mnt;
+		path.dentry = object->backer;
+		file = open_with_fake_path(&path, O_RDWR | O_LARGEFILE | O_DIRECT,
+					   d_inode(object->backer), cache->cache_cred);
+		if (IS_ERR(file))
+			return PTR_ERR(file);
+		if (!S_ISREG(file_inode(file)->i_mode))
+			goto error_file;
+		if (unlikely(!file->f_op->read_iter) ||
+		    unlikely(!file->f_op->write_iter)) {
+			pr_notice("Cache does not support read_iter and write_iter\n");
+			goto error_file;
+		}
 	}
 
 	fscache_get_retrieval(op);

@@ -52,6 +52,7 @@ struct netfs_read_subrequest {
 #define NETFS_SREQ_SHORT_READ		2	/* Set if there was a short read from the cache */
 #define NETFS_SREQ_SEEK_DATA_READ	3	/* Set if ->read() should SEEK_DATA first */
 #define NETFS_SREQ_NO_PROGRESS		4	/* Set if we didn't manage to read any data */
+#define NETFS_SREQ_ONDEMAND			5	 /* Set if it's from on-demand read mode */
 };
 
 /*

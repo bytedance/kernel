@@ -282,6 +282,8 @@ extern int cachefiles_ondemand_copen(struct cachefiles_cache *cache,
 extern int cachefiles_ondemand_init_object(struct cachefiles_object *object);
 extern void cachefiles_ondemand_clean_object(struct cachefiles_object *object);
 
+extern int cachefiles_ondemand_read(struct cachefiles_object *object,
+											loff_t pos, size_t len);
 #else
 static inline ssize_t cachefiles_ondemand_daemon_read(struct cachefiles_cache *cache,
 				char __user *_buffer, size_t buflen, loff_t *pos)
@@ -296,6 +298,11 @@ static inline int cachefiles_ondemand_init_object(struct cachefiles_object *obje
 
 static inline void cachefiles_ondemand_clean_object(struct cachefiles_object *object)
 {
+}
+static inline int cachefiles_ondemand_read(struct cachefiles_object *object,
+											loff_t pos, size_t len)
+{
+	return -EOPNOTSUPP;
 }
 #endif
 
