@@ -110,6 +110,34 @@ static int erofs_fscache_meta_readpage(struct file *data, struct page *page)
 	return ret;
 }
 
+static int erofs_fscache_readpage_inline(struct page *page,
+                                        struct erofs_map_blocks *map)
+{
+	struct super_block *sb = page_mapping(page)->host->i_sb;
+	struct erofs_buf buf = __EROFS_BUF_INITIALIZER;
+	erofs_blk_t blknr;
+	size_t offset, len;
+	void *src, *dst;
+
+	/* For tail packing layout, the offset may be non-zero. */
+	offset = erofs_blkoff(map->m_pa);
+	blknr = erofs_blknr(map->m_pa);
+	len = map->m_llen;
+
+	src = erofs_read_metabuf(&buf, sb, blknr, EROFS_KMAP);
+	if (IS_ERR(src))
+		return PTR_ERR(src);
+
+	dst = kmap_atomic(page);
+	memcpy(dst, src + offset, len);
+	memset(dst + len, 0, PAGE_SIZE - len);
+	kunmap_atomic(dst);
+
+	erofs_put_metabuf(&buf);
+	return 0;
+}
+
+
 static int erofs_fscache_readpage(struct file *file, struct page *page)
 {
 	struct inode *inode = page->mapping->host;
@@ -131,6 +159,11 @@ static int erofs_fscache_readpage(struct file *file, struct page *page)
 
 	if (!(map.m_flags & EROFS_MAP_MAPPED)) {
 		zero_user_segments(page, 0, page_size(page), 0, 0);
+		goto out_uptodate;
+	}
+
+	if (map.m_flags & EROFS_MAP_META) {
+		ret = erofs_fscache_readpage_inline(page, &map);
 		goto out_uptodate;
 	}
 
