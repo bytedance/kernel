@@ -470,6 +470,10 @@ static int erofs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 						    sbi->opt.fsid, true);
 		if (err)
 			return err;
+                err = super_setup_bdi(sb);
+                if (err)
+			return err;
+                sb->s_bdi->ra_pages = VM_READAHEAD_PAGES;
 	} else {
 		if (!sb_set_blocksize(sb, EROFS_BLKSIZ)) {
 			erofs_err(sb, "failed to set erofs blksize");
