@@ -1391,7 +1391,7 @@ static void hpage_free_vmemmap_workfn(struct work_struct *work)
 		 */
 		h = size_to_hstate(page_size(page));
 
-		if (alloc_huge_page_vmemmap(h, page)) {
+		if (hugetlb_vmemmap_alloc(h, page)) {
 			spin_lock(&hugetlb_lock);
 			add_hugetlb_page(h, page);
 			spin_unlock(&hugetlb_lock);
@@ -1409,7 +1409,7 @@ static DECLARE_WORK(hpage_free_vmemmap_work, hpage_free_vmemmap_workfn);
 
 static inline void flush_free_hpage_work(struct hstate *h)
 {
-	if (free_vmemmap_pages_per_hpage(h))
+	if (hugetlb_optimize_vmemmap_pages(h))
 		flush_work(&hpage_free_vmemmap_work);
 }
 
@@ -1603,7 +1603,7 @@ void free_huge_page(struct page *page)
 static void prep_new_huge_page(struct hstate *h, struct page *page, int nid)
 {
 	ClearHPageVmemmapOptimized(page);
-	free_huge_page_vmemmap(h, page);
+	hugetlb_vmemmap_free(h, page);
 	INIT_LIST_HEAD(&page->lru);
 	set_compound_page_dtor(page, HUGETLB_PAGE_DTOR);
 	spin_lock(&hugetlb_lock);
@@ -1902,7 +1902,7 @@ retry:
 		 * Attempt to allocate vmemmmap here so that we can take
 		 * appropriate action on failure.
 		 */
-		rc = alloc_huge_page_vmemmap(h, head);
+		rc = hugetlb_vmemmap_alloc(h, head);
 		spin_lock(&hugetlb_lock);
 		if (!rc) {
 			/*
