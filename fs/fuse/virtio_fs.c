@@ -14,6 +14,12 @@
 #include <linux/highmem.h>
 #include "fuse_i.h"
 
+/* Disabled by default */
+#define IO_TIMEOUT_MS_DEFAULT 0
+
+static unsigned long io_timeout_ms = IO_TIMEOUT_MS_DEFAULT;
+module_param(io_timeout_ms, ulong, 0644);
+
 /* List of virtio-fs device instances and a lock for the list. Also provides
  * mutual exclusion in device removal and mounting path
  */
@@ -167,12 +173,23 @@ static void virtio_fs_fiq_release(struct fuse_iqueue *fiq)
 	mutex_unlock(&virtio_fs_mutex);
 }
 
+static void virtio_fs_forgot_requests_abort(struct virtio_fs_vq *fsvq);
+static void virtio_fs_requests_abort(struct virtio_fs_vq *fsvq);
+
 static void virtio_fs_drain_queue(struct virtio_fs_vq *fsvq)
 {
+	ktime_t start = ktime_get();
+	u64 timeout_ms;
+
 	WARN_ON(fsvq->in_flight < 0);
 
 	/* Wait for in flight requests to finish.*/
 	while (1) {
+		timeout_ms = READ_ONCE(io_timeout_ms);
+		if (timeout_ms &&
+		    ktime_after(ktime_sub_ms(ktime_get(), timeout_ms), start))
+			break;
+
 		spin_lock(&fsvq->lock);
 		if (!fsvq->in_flight) {
 			spin_unlock(&fsvq->lock);
@@ -182,7 +199,12 @@ static void virtio_fs_drain_queue(struct virtio_fs_vq *fsvq)
 		/* TODO use completion instead of timeout */
 		usleep_range(1000, 2000);
 	}
-
+	if (fsvq->in_flight) {
+		if (fsvq->vq->index == VQ_HIPRIO)
+			virtio_fs_forgot_requests_abort(fsvq);
+		else
+			virtio_fs_requests_abort(fsvq);
+	}
 	flush_work(&fsvq->done_work);
 	flush_delayed_work(&fsvq->dispatch_work);
 }
@@ -596,6 +618,44 @@ static void virtio_fs_requests_done_work(struct work_struct *work)
 		} else {
 			virtio_fs_request_complete(req, fsvq);
 		}
+	}
+}
+
+static void virtio_fs_forgot_requests_abort(struct virtio_fs_vq *fsvq)
+{
+	struct virtqueue *vq = fsvq->vq;
+	void *req;
+
+	/* Free completed FUSE_FORGET requests */
+	spin_lock(&fsvq->lock);
+	while ((req = virtqueue_detach_unused_buf(vq)) != NULL) {
+		kfree(req);
+		dec_in_flight_req(fsvq);
+	}
+	spin_unlock(&fsvq->lock);
+}
+
+static void virtio_fs_requests_abort(struct virtio_fs_vq *fsvq)
+{
+	struct fuse_pqueue *fpq = &fsvq->fud->pq;
+	struct virtqueue *vq = fsvq->vq;
+	struct fuse_req *req;
+	struct fuse_req *next;
+	LIST_HEAD(reqs);
+
+	spin_lock(&fsvq->lock);
+	while ((req = virtqueue_detach_unused_buf(vq)) != NULL) {
+		spin_lock(&fpq->lock);
+		list_move_tail(&req->list, &reqs);
+		spin_unlock(&fpq->lock);
+	}
+	spin_unlock(&fsvq->lock);
+
+	list_for_each_entry_safe(req, next, &reqs, list) {
+		pr_err("Abort virtiofs request: %u\n", req->in.h.opcode);
+		list_del_init(&req->list);
+		req->out.h.error = -ECONNABORTED;
+		virtio_fs_request_complete(req, fsvq);
 	}
 }
 
