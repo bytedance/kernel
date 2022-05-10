@@ -18,7 +18,6 @@ typedef struct {
 	.dep_map = {					\
 		.name = #lockname,			\
 		.wait_type_inner = LD_WAIT_CONFIG,	\
-		.lock_type = LD_LOCK_PERCPU,		\
 	},						\
 	.owner = NULL,
 
