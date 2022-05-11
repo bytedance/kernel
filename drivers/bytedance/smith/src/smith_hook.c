@@ -1788,9 +1788,6 @@ int udp_recvmsg_entry_handler(struct kretprobe_instance *ri,
     struct msghdr *msg;
     struct udp_recvmsg_data *data;
 
-    /* counting udpv4_recvmsg callings */
-    smith_count_dnsv4_kretprobe();
-
     data = (struct udp_recvmsg_data *) ri->data;
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(4, 0, 9)
@@ -1871,6 +1868,10 @@ int udp_recvmsg_entry_handler(struct kretprobe_instance *ri,
     return -EINVAL;
 
 do_kretprobe:
+
+    /* counting dns requests */
+    smith_count_dnsv4_kretprobe();
+
     return 0;
 }
 
@@ -1886,9 +1887,6 @@ int udpv6_recvmsg_entry_handler(struct kretprobe_instance *ri,
 	void *tmp_msg;
 	void *tmp_sk;
 	int flags;
-
-    /* counting udpv6_recvmsg callings */
-    smith_count_dnsv6_kretprobe();
 
 	data = (struct udp_recvmsg_data *)ri->data;
 
@@ -1985,6 +1983,10 @@ int udpv6_recvmsg_entry_handler(struct kretprobe_instance *ri,
 	return -EINVAL;
 
 do_kretprobe:
+
+    /* counting dns requests */
+    smith_count_dnsv6_kretprobe();
+
     return 0;
 }
 #endif
@@ -1994,8 +1996,8 @@ void unregister_udp_recvmsg_kprobe(void);
 int register_udpv6_recvmsg_kprobe(void);
 void unregister_udpv6_recvmsg_kprobe(void);
 
-#define SMITH_DNS_THRESHOLD      (5000) /* DNS threshold */
-#define SMITH_UDP_THRESHOLD      (28000 * num_online_cpus()) /* UDP threshold */
+#define SMITH_DNS_THRESHOLD      (800) /* DNS threshold: ops/s */
+#define SMITH_UDP_THRESHOLD      (80000) /* UDP threshold: ops/s */
 #define SMITH_DNS_KRP_INTERVAL   (10) /* 10 seconds */
 #define SMITH_DNS_NET_INTERVAL   (20) /* 20 seconds, WARNING: atomic_t may overflow */
 
@@ -2004,7 +2006,6 @@ struct smith_dns_switch {
     atomic_t krp ____cacheline_aligned_in_smp;    /* udp_recvmsg kretprobe handling count */
     atomic_t ops ____cacheline_aligned_in_smp;    /* udp in traffic count */
     uint64_t start ____cacheline_aligned_in_smp;  /* start time stamp of counting */
-    uint64_t anchor ____cacheline_aligned_in_smp; /* anchor time stamp */
     int     *regs;                                /* kretprobe registration result */
     int (*enable)(void);
     void (*disable)(void);
@@ -2017,43 +2018,45 @@ static void smith_count_dnsv4_kretprobe(void)
     atomic_inc(&g_dns_v4_switch.krp);
 }
 
+/* turn off kretprobe if dns requests exceed threshold */
 static void smith_dns_kretprobe(struct smith_dns_switch *ds)
 {
-    uint64_t now = smith_get_seconds();
+    uint64_t now = smith_get_seconds(), delta;
 
-    if (ds->start + SMITH_DNS_KRP_INTERVAL < now) {
-        if (atomic_read(&ds->krp) > SMITH_DNS_THRESHOLD * (now - ds->start)) {
+    delta = now - ds->start;
+    if (delta > SMITH_DNS_KRP_INTERVAL) {
+        if (atomic_read(&ds->krp) > delta * SMITH_DNS_THRESHOLD ||
+            atomic_read(&ds->ops) > delta * SMITH_UDP_THRESHOLD ){
             /* trying to avoid concurrent issue */
-            if (atomic_cmpxchg(&ds->armed, 1, 0) == 1) {
-                atomic_set(&ds->ops, 0);
-                ds->anchor = smith_get_seconds();
+            if (atomic_cmpxchg(&ds->armed, 1, 0) == 1)
                 ds->disable();
-            }
         }
-        atomic_set(&ds->krp, 0);  /* inaccurate for SMP, but acceptable */
+        atomic_set(&ds->krp, 0);
+        atomic_set(&ds->ops, 0);
         ds->start = smith_get_seconds();
     }
 }
 
+/* try to trun on kretprobe for udp_recvmsg */
 static void smith_dns_try_switch(struct smith_dns_switch *ds)
 {
-    uint64_t now = smith_get_seconds();
+    uint64_t now = smith_get_seconds(), delta;
 
     if (0 == DNS_HOOK || atomic_read(&ds->armed) || *(ds->regs))
         return;
 
-    if (ds->anchor + SMITH_DNS_NET_INTERVAL < now) {
-        if (atomic_read(&ds->ops) < SMITH_UDP_THRESHOLD * (now - ds->anchor)) {
+    delta = now - ds->start;
+    if (delta > SMITH_DNS_NET_INTERVAL) {
+        if (atomic_read(&ds->ops) < delta * SMITH_UDP_THRESHOLD) {
             /* trying to avoid concurrent issue */
             if (atomic_cmpxchg(&ds->armed, 0, 1) == 0) {
-                atomic_set(&ds->krp, 0);
-                ds->start = smith_get_seconds();
                 if (ds->enable())
                     atomic_set(&ds->armed, 0);
             }
         }
-        atomic_set(&ds->ops, 0);  /* inaccurate for SMP, but acceptable */
-        ds->anchor = smith_get_seconds();
+        atomic_set(&ds->krp, 0);
+        atomic_set(&ds->ops, 0);
+        ds->start = smith_get_seconds();
     }
 }
 
@@ -2081,7 +2084,11 @@ static unsigned int smith_nf_udp_v4_handler(
 #endif
     )
 {
-    atomic_inc(&g_dns_v4_switch.ops);
+    struct iphdr *iph = ip_hdr(skb);
+
+    /* only counting udp packets */
+    if (iph->protocol == IPPROTO_UDP)
+        atomic_inc(&g_dns_v4_switch.ops);
     return NF_ACCEPT;
 }
 
@@ -2119,7 +2126,11 @@ static unsigned int smith_nf_udp_v6_handler(
 #endif
     )
 {
-    atomic_inc(&g_dns_v6_switch.ops);
+    struct iphdr *iph = ip_hdr(skb);
+
+    /* only counting udp packets */
+    if (iph->protocol == IPPROTO_UDP)
+        atomic_inc(&g_dns_v6_switch.ops);
     return NF_ACCEPT;
 }
 #endif
@@ -2184,10 +2195,10 @@ static int smith_dns_work_handler(void *argu)
 {
     unsigned long timeout = msecs_to_jiffies(1000);
 
-    /* reset anchor timestamp */
-    g_dns_v4_switch.anchor = smith_get_seconds();
+    /* reset start timestamp */
+    g_dns_v4_switch.start = smith_get_seconds();
 #if IS_ENABLED(CONFIG_IPV6)
-    g_dns_v6_switch.anchor = smith_get_seconds();
+    g_dns_v6_switch.start = smith_get_seconds();
 #endif
 
     do {
