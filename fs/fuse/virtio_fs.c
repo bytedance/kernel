@@ -186,8 +186,8 @@ static void virtio_fs_drain_queue(struct virtio_fs_vq *fsvq)
 	/* Wait for in flight requests to finish.*/
 	while (1) {
 		timeout_ms = READ_ONCE(io_timeout_ms);
-		if (timeout_ms &&
-		    ktime_after(ktime_sub_ms(ktime_get(), timeout_ms), start))
+		if (virtqueue_is_broken(fsvq->vq) || (timeout_ms &&
+		    ktime_after(ktime_sub_ms(ktime_get(), timeout_ms), start)))
 			break;
 
 		spin_lock(&fsvq->lock);
