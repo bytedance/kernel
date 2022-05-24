@@ -1132,7 +1132,7 @@ static inline void virtio_fs_ctx_set_defaults(struct fuse_fs_context *ctx)
 	ctx->max_read = UINT_MAX;
 	ctx->blksize = 512;
 	ctx->destroy = true;
-	ctx->no_control = true;
+	ctx->no_abort_control = true;
 }
 
 static int virtio_fs_fill_super(struct super_block *sb, struct fs_context *fsc)

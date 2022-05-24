@@ -1298,7 +1298,7 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 	fc->group_id = ctx->group_id;
 	fc->max_read = max_t(unsigned, 4096, ctx->max_read);
 	fc->destroy = ctx->destroy;
-	fc->no_control = ctx->no_control;
+	fc->no_abort_control = ctx->no_abort_control;
 	fc->no_force_umount = ctx->no_force_umount;
 	fc->no_mount_options = ctx->no_mount_options;
 
