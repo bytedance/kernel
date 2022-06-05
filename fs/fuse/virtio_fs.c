@@ -23,6 +23,9 @@ module_param(io_timeout_ms, ulong, 0644);
 static bool irq_use_wq = true;
 module_param(irq_use_wq, bool, 0644);
 
+static bool enable_dma_premap;
+module_param(enable_dma_premap, bool, 0444);
+
 /* List of virtio-fs device instances and a lock for the list. Also provides
  * mutual exclusion in device removal and mounting path
  */
@@ -528,6 +531,62 @@ static void copy_args_from_argbuf(struct fuse_args *args, struct fuse_req *req)
 	req->argbuf = NULL;
 }
 
+static int virtio_fs_request_map(struct fuse_req *req,
+				 struct virtio_fs_vq *fsvq,
+				 struct scatterlist *sg,
+				 unsigned int out_sgs,
+				 unsigned int in_sgs)
+{
+	dma_addr_t addr;
+	unsigned int i, total_sgs = out_sgs + in_sgs;
+
+	req->sg = kmalloc_array(total_sgs, sizeof(*sg), GFP_ATOMIC);
+	if (!req->sg)
+		return -ENOMEM;
+
+	for (i = 0; i < total_sgs; i++) {
+		addr = virtio_dma_map_sg(fsvq->vq->vdev, &sg[i],
+					 i < out_sgs ? DMA_TO_DEVICE :
+					 DMA_FROM_DEVICE);
+		if (virtio_dma_mapping_error(fsvq->vq->vdev, addr))
+			goto err;
+
+		sg[i].dma_address = addr;
+	}
+	req->out_sgs = out_sgs;
+	req->in_sgs = in_sgs;
+	memcpy(req->sg, sg, sizeof(*sg) * total_sgs);
+
+	return 0;
+err:
+	while (i--)
+		virtio_dma_unmap(fsvq->vq->vdev, sg[i].dma_address,
+				 sg[i].length,  i < out_sgs ?
+				 DMA_TO_DEVICE : DMA_FROM_DEVICE);
+	kfree(req->sg);
+	req->sg = NULL;
+	return -ENOMEM;
+}
+
+static void virtio_fs_request_unmap(struct fuse_req *req,
+				    struct virtio_fs_vq *fsvq)
+{
+	unsigned int i, total_sgs = req->out_sgs + req->in_sgs;
+
+	if (!req->sg)
+		return;
+
+	for (i = 0; i < total_sgs; i++) {
+		virtio_dma_unmap(fsvq->vq->vdev,
+				 req->sg[i].dma_address,
+				 req->sg[i].length,
+				 i < req->out_sgs ? DMA_TO_DEVICE :
+				 DMA_FROM_DEVICE);
+	}
+	kfree(req->sg);
+	req->sg = NULL;
+}
+
 /* Work function for request completion */
 static void virtio_fs_request_complete(struct fuse_req *req,
 				       struct virtio_fs_vq *fsvq)
@@ -538,6 +597,8 @@ static void virtio_fs_request_complete(struct fuse_req *req,
 	struct fuse_args_pages *ap;
 	unsigned int len, i, thislen;
 	struct page *page;
+
+	virtio_fs_request_unmap(req, fsvq);
 
 	/*
 	 * TODO verify that server properly follows FUSE protocol
@@ -581,6 +642,19 @@ static void virtio_fs_complete_req_work(struct work_struct *work)
 	kfree(w);
 }
 
+static struct fuse_req *virtio_fs_get_buf(struct virtqueue *vq)
+{
+	struct fuse_req *req;
+	unsigned int len;
+
+	if (enable_dma_premap)
+		req = virtqueue_get_mapped_buf_split(vq, &len, NULL);
+	else
+		req = virtqueue_get_buf(vq, &len);
+
+	return req;
+}
+
 static void virtio_fs_requests_done_work(struct work_struct *work)
 {
 	struct virtio_fs_vq *fsvq = container_of(work, struct virtio_fs_vq,
@@ -589,7 +663,6 @@ static void virtio_fs_requests_done_work(struct work_struct *work)
 	struct virtqueue *vq = fsvq->vq;
 	struct fuse_req *req;
 	struct fuse_req *next;
-	unsigned int len;
 	LIST_HEAD(reqs);
 
 	/* Collect completed requests off the virtqueue */
@@ -597,7 +670,7 @@ static void virtio_fs_requests_done_work(struct work_struct *work)
 	do {
 		virtqueue_disable_cb(vq);
 
-		while ((req = virtqueue_get_buf(vq, &len)) != NULL) {
+		while ((req = virtio_fs_get_buf(vq)) != NULL) {
 			spin_lock(&fpq->lock);
 			list_move_tail(&req->list, &reqs);
 			spin_unlock(&fpq->lock);
@@ -638,6 +711,18 @@ static void virtio_fs_forgot_requests_abort(struct virtio_fs_vq *fsvq)
 	spin_unlock(&fsvq->lock);
 }
 
+static struct fuse_req *virtio_fs_detach_buf(struct virtqueue *vq)
+{
+	struct fuse_req *req;
+
+	if (enable_dma_premap)
+		req = virtqueue_detach_unused_mapped_buf_split(vq);
+	else
+		req = virtqueue_detach_unused_buf(vq);
+
+	return req;
+}
+
 static void virtio_fs_requests_abort(struct virtio_fs_vq *fsvq)
 {
 	struct fuse_pqueue *fpq = &fsvq->fud->pq;
@@ -647,7 +732,7 @@ static void virtio_fs_requests_abort(struct virtio_fs_vq *fsvq)
 	LIST_HEAD(reqs);
 
 	spin_lock(&fsvq->lock);
-	while ((req = virtqueue_detach_unused_buf(vq)) != NULL) {
+	while ((req = virtio_fs_detach_buf(vq)) != NULL) {
 		spin_lock(&fpq->lock);
 		list_move_tail(&req->list, &reqs);
 		spin_unlock(&fpq->lock);
@@ -657,6 +742,7 @@ static void virtio_fs_requests_abort(struct virtio_fs_vq *fsvq)
 	list_for_each_entry_safe(req, next, &reqs, list) {
 		pr_err("Abort virtiofs request: %u\n", req->in.h.opcode);
 		list_del_init(&req->list);
+		virtio_fs_request_unmap(req, fsvq);
 		req->out.h.error = -ECONNABORTED;
 		virtio_fs_request_complete(req, fsvq);
 	}
@@ -667,11 +753,10 @@ static void virtio_fs_requests_done(struct virtio_fs_vq *fsvq)
 	struct fuse_pqueue *fpq = &fsvq->fud->pq;
 	struct virtqueue *vq = fsvq->vq;
 	struct fuse_req *req;
-	unsigned int len;
 
 	do {
 		spin_lock(&fsvq->lock);
-		req = virtqueue_get_buf(vq, &len);
+		req = virtio_fs_get_buf(vq);
 		spin_unlock(&fsvq->lock);
 
 		if (!req)
@@ -1071,6 +1156,7 @@ static int virtio_fs_enqueue_req(struct virtio_fs_vq *fsvq,
 	bool notify;
 	struct fuse_pqueue *fpq;
 
+	req->sg = NULL;
 	/* Does the sglist fit on the stack? */
 	total_sgs = sg_count_fuse_req(req);
 	if (total_sgs > ARRAY_SIZE(stack_sgs)) {
@@ -1118,7 +1204,18 @@ static int virtio_fs_enqueue_req(struct virtio_fs_vq *fsvq,
 	}
 
 	vq = fsvq->vq;
-	ret = virtqueue_add_sgs(vq, sgs, out_sgs, in_sgs, req, GFP_ATOMIC);
+	if (enable_dma_premap) {
+		ret = virtio_fs_request_map(req, fsvq, sg, out_sgs, in_sgs);
+		if (ret) {
+			spin_unlock(&fsvq->lock);
+			goto out;
+		}
+		ret = virtqueue_add_mapped_buf_split(vq, sgs, total_sgs,
+						     out_sgs, in_sgs, req,
+						     NULL, GFP_ATOMIC);
+	} else
+		ret = virtqueue_add_sgs(vq, sgs, out_sgs, in_sgs,
+					req, GFP_ATOMIC);
 	if (ret < 0) {
 		spin_unlock(&fsvq->lock);
 		goto out;
@@ -1143,6 +1240,9 @@ static int virtio_fs_enqueue_req(struct virtio_fs_vq *fsvq,
 		virtqueue_notify(vq);
 
 out:
+	if (ret < 0 && req->sg)
+		virtio_fs_request_unmap(req, fsvq);
+
 	if (ret < 0 && req->argbuf) {
 		kfree(req->argbuf);
 		req->argbuf = NULL;

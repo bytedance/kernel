@@ -364,6 +364,12 @@ struct fuse_req {
 #if IS_ENABLED(CONFIG_VIRTIO_FS)
 	/** virtio-fs's physically contiguous buffer for in and out args */
 	void *argbuf;
+	/** dma sg list */
+	struct scatterlist *sg;
+	/** number of out sg list */
+	unsigned int out_sgs;
+	/** number of in sg list */
+	unsigned int in_sgs;
 #endif
 };
 
