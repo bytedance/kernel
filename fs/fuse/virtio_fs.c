@@ -20,6 +20,9 @@
 static unsigned long io_timeout_ms = IO_TIMEOUT_MS_DEFAULT;
 module_param(io_timeout_ms, ulong, 0644);
 
+static bool irq_use_wq = true;
+module_param(irq_use_wq, bool, 0644);
+
 /* List of virtio-fs device instances and a lock for the list. Also provides
  * mutual exclusion in device removal and mounting path
  */
@@ -659,6 +662,28 @@ static void virtio_fs_requests_abort(struct virtio_fs_vq *fsvq)
 	}
 }
 
+static void virtio_fs_requests_done(struct virtio_fs_vq *fsvq)
+{
+	struct fuse_pqueue *fpq = &fsvq->fud->pq;
+	struct virtqueue *vq = fsvq->vq;
+	struct fuse_req *req;
+	unsigned int len;
+
+	do {
+		spin_lock(&fsvq->lock);
+		req = virtqueue_get_buf(vq, &len);
+		spin_unlock(&fsvq->lock);
+
+		if (!req)
+			break;
+
+		spin_lock(&fpq->lock);
+		list_del_init(&req->list);
+		spin_unlock(&fpq->lock);
+		virtio_fs_request_complete(req, fsvq);
+	} while (likely(!virtqueue_is_broken(vq)));
+}
+
 /* Virtqueue interrupt handler */
 static void virtio_fs_vq_done(struct virtqueue *vq)
 {
@@ -666,7 +691,10 @@ static void virtio_fs_vq_done(struct virtqueue *vq)
 
 	dev_dbg(&vq->vdev->dev, "%s %s\n", __func__, fsvq->name);
 
-	queue_work(virtiofs_wq, &fsvq->done_work);
+	if (irq_use_wq || in_interrupt() || vq->index == VQ_HIPRIO)
+		queue_work(virtiofs_wq, &fsvq->done_work);
+	else
+		virtio_fs_requests_done(fsvq);
 }
 
 /* Initialize virtqueues */
