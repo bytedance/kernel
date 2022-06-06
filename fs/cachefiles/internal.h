@@ -98,6 +98,7 @@ struct cachefiles_cache {
 	char				*tag;		/* cache binding tag */
 	struct xarray		reqs;		/* xarray of pending on-demand requests */
 	struct xarray		ondemand_ids;	/* xarray for ondemand_id allocation */
+	refcount_t			unbind_pincount;/* refcount to do daemon unbind */
 	u32				ondemand_id_next;
 };
 
@@ -168,6 +169,8 @@ extern void cachefiles_daemon_unbind(struct cachefiles_cache *cache);
  * daemon.c
  */
 extern const struct file_operations cachefiles_daemon_fops;
+extern void cachefiles_get_unbind_pincount(struct cachefiles_cache *cache);
+extern void cachefiles_put_unbind_pincount(struct cachefiles_cache *cache);
 
 extern int cachefiles_has_space(struct cachefiles_cache *cache,
 				unsigned fnr, unsigned bnr);
