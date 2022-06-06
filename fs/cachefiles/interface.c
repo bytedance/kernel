@@ -281,6 +281,8 @@ static void cachefiles_drop_object(struct fscache_object *_object)
 	ASSERT((atomic_read(&object->usage) & 0xffff0000) != 0x6b6b0000);
 #endif
 
+	cachefiles_ondemand_clean_object(object);
+
 	/* We need to tidy the object up if we did in fact manage to open it.
 	 * It's possible for us to get here before the object is fully
 	 * initialised if the parent goes away or the object gets retired
