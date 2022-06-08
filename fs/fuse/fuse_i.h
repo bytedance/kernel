@@ -923,7 +923,7 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 			    u64 attr_valid, u64 attr_version);
 
 void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
-				   u64 attr_valid);
+				   u64 attr_valid, bool update_cmtime);
 
 /**
  * Initialize the client device
@@ -1117,6 +1117,5 @@ unsigned int fuse_len_args(unsigned int numargs, struct fuse_arg *args);
  */
 u64 fuse_get_unique(struct fuse_iqueue *fiq);
 void fuse_free_conn(struct fuse_conn *fc);
-bool fuse_file_is_writeback_locked(struct inode *inode);
 
 #endif /* _FS_FUSE_I_H */

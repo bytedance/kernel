@@ -231,7 +231,8 @@ struct fuse_attr {
 	uint32_t	gid;
 	uint32_t	rdev;
 	uint32_t	blksize;
-	uint32_t	padding;
+	uint32_t	padding:31;
+	uint32_t	should_inval:1;
 };
 
 struct fuse_kstatfs {

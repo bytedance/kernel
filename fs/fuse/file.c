@@ -395,18 +395,6 @@ static struct fuse_writepage_args *fuse_find_writeback(struct fuse_inode *fi,
 }
 
 /*
- * Check if any page of this file is under writeback.
- *
- * The fuse_inode lock should be held by the caller.
- */
-bool fuse_file_is_writeback_locked(struct inode *inode)
-{
-	struct fuse_inode *fi = get_fuse_inode(inode);
-
-	return fuse_find_writeback(fi, 0, ULONG_MAX);
-}
-
-/*
  * Check if any page in a range is under writeback
  *
  * This is currently done by walking the list of writepage requests
@@ -1844,6 +1832,15 @@ static void fuse_writepage_end(struct fuse_conn *fc, struct fuse_args *args,
 		 */
 		fuse_send_writepage(fc, next, inarg->offset + inarg->size);
 	}
+
+	if (fc->wb_trust_server)
+		fi->attr_version = atomic64_inc_return(&fc->attr_version);
+	/*
+	 * Ensure attr_version increases before the page is move out of the
+	 * writepages rb-tree.
+	 */
+	smp_mb();
+
 	fi->writectr--;
 	fuse_writepage_finish(fc, wpa);
 	spin_unlock(&fi->lock);
@@ -1880,6 +1877,9 @@ int fuse_write_inode(struct inode *inode, struct writeback_control *wbc)
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	struct fuse_file *ff;
 	int err;
+
+	if (fc->wb_trust_server)
+		return 0;
 
 	ff = __fuse_write_file_get(fc, fi);
 	err = fuse_flush_times(inode, ff);
