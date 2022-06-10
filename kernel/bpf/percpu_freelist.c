@@ -30,7 +30,7 @@ static inline void ___pcpu_freelist_push(struct pcpu_freelist_head *head,
 {
 	raw_spin_lock(&head->lock);
 	node->next = head->first;
-	head->first = node;
+	WRITE_ONCE(head->first, node);
 	raw_spin_unlock(&head->lock);
 }
 
@@ -90,14 +90,17 @@ struct pcpu_freelist_node *__pcpu_freelist_pop(struct pcpu_freelist *s)
 	orig_cpu = cpu = raw_smp_processor_id();
 	while (1) {
 		head = per_cpu_ptr(s->freelist, cpu);
+		if (!READ_ONCE(head->first))
+			goto next_cpu;
 		raw_spin_lock(&head->lock);
 		node = head->first;
 		if (node) {
-			head->first = node->next;
+			WRITE_ONCE(head->first, node->next);
 			raw_spin_unlock(&head->lock);
 			return node;
 		}
 		raw_spin_unlock(&head->lock);
+next_cpu:
 		cpu = cpumask_next(cpu, cpu_possible_mask);
 		if (cpu >= nr_cpu_ids)
 			cpu = 0;
