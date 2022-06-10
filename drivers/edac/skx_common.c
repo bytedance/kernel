@@ -40,6 +40,7 @@ static skx_decode_f skx_decode;
 static skx_show_retry_log_f skx_show_retry_rd_err_log;
 static u64 skx_tolm, skx_tohm;
 static LIST_HEAD(dev_edac_list);
+static int skx_skip_dsm_bias;
 
 int __init skx_adxl_get(void)
 {
@@ -157,15 +158,22 @@ void skx_set_decode(skx_decode_f decode, skx_show_retry_log_f show_retry_log)
 	skx_show_retry_rd_err_log = show_retry_log;
 }
 
+void skx_set_skip_dsm(int skip_dsm_bias)
+{
+	skx_skip_dsm_bias = skip_dsm_bias;
+}
+
 /*
  * Return true when:
- * 1) Icelake CPU triggered error event.
- * 2) Error event triggered on memory controller.
+ * 1) Skip _DSM bias is set.
+ * 2) Icelake CPU triggered error event.
+ * 3) Error event triggered on memory controller.
  */
 static bool is_skip_dsm(const struct mce *mce)
 {
-	return (((mce->cpuid & MCE_CPUID_FM_MASK) == ICX_MCE_CPUID_FM) &&
-		((1 << mce->bank) & ICX_IMCx_CHy));
+	return (skx_skip_dsm_bias &&
+		((mce->cpuid & MCE_CPUID_FM_MASK) == ICX_MCE_CPUID_FM) &&
+		((mce->bank << 1) & ICX_IMCx_CHy));
 }
 
 int skx_get_src_id(struct skx_dev *d, int off, u8 *id)

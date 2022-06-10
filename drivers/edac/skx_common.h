@@ -142,6 +142,7 @@ typedef void (*skx_show_retry_log_f)(struct decoded_addr *res, char *msg, int le
 int __init skx_adxl_get(void);
 void __exit skx_adxl_put(void);
 void skx_set_decode(skx_decode_f decode, skx_show_retry_log_f show_retry_log);
+void skx_set_skip_dsm(int skip_dsm);
 
 int skx_get_src_id(struct skx_dev *d, int off, u8 *id);
 int skx_get_node_id(struct skx_dev *d, u8 *id);

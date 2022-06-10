@@ -54,6 +54,7 @@ static struct list_head *i10nm_edac_list;
 
 static struct res_config *res_cfg;
 static int retry_rd_err_log;
+static int skip_dsm_bias;
 
 static u32 offsets_scrub_icx[]  = {0x22c60, 0x22c54, 0x22c5c, 0x22c58, 0x22c28, 0x20ed8};
 static u32 offsets_scrub_spr[]  = {0x22c60, 0x22c54, 0x22f08, 0x22c58, 0x22c28, 0x20ed8};
@@ -505,6 +506,27 @@ static void __exit i10nm_exit(void)
 module_init(i10nm_init);
 module_exit(i10nm_exit);
 
+static int set_skip_dsm_bias(const char *buf, const struct kernel_param *kp)
+{
+	unsigned long val;
+	int ret;
+	int prev = skip_dsm_bias;
+
+	ret = kstrtoul(buf, 0, &val);
+
+	if (ret || val > 1)
+		return -EINVAL;
+
+	ret = param_set_int(buf, kp);
+	if (ret || prev == skip_dsm_bias)
+		return ret;
+	skx_set_skip_dsm(skip_dsm_bias);
+
+	return ret;
+}
+
+module_param_call(skip_dsm_bias, set_skip_dsm_bias, param_get_int, &skip_dsm_bias, 0644);
+MODULE_PARM_DESC(skip_dsm_bias, "skip_dsm_bias: 0=off(default), 1=enable(skip _DSM calling bias)");
 module_param(retry_rd_err_log, int, 0444);
 MODULE_PARM_DESC(retry_rd_err_log, "retry_rd_err_log: 0=off(default), 1=bios(Linux doesn't reset any control bits, but just reports values.), 2=linux(Linux tries to take control and resets mode bits, clear valid/UC bits after reading.)");
 
