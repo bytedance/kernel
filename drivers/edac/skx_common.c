@@ -157,6 +157,17 @@ void skx_set_decode(skx_decode_f decode, skx_show_retry_log_f show_retry_log)
 	skx_show_retry_rd_err_log = show_retry_log;
 }
 
+/*
+ * Return true when:
+ * 1) Icelake CPU triggered error event.
+ * 2) Error event triggered on memory controller.
+ */
+static bool is_skip_dsm(const struct mce *mce)
+{
+	return (((mce->cpuid & MCE_CPUID_FM_MASK) == ICX_MCE_CPUID_FM) &&
+		((1 << mce->bank) & ICX_IMCx_CHy));
+}
+
 int skx_get_src_id(struct skx_dev *d, int off, u8 *id)
 {
 	u32 reg;
@@ -553,7 +564,7 @@ static void skx_mce_output_error(struct mem_ctl_info *mci,
 			break;
 		}
 	}
-	if (adxl_component_count) {
+	if (adxl_component_count && !is_skip_dsm(m)) {
 		len = snprintf(skx_msg, MSG_SIZE, "%s%s err_code:0x%04x:0x%04x %s",
 			 overflow ? " OVERFLOW" : "",
 			 (uncorrected_error && recoverable) ? " recoverable" : "",
@@ -584,9 +595,11 @@ int skx_mce_check_error(struct notifier_block *nb, unsigned long val,
 			void *data)
 {
 	struct mce *mce = (struct mce *)data;
+	struct skx_dev *d;
 	struct decoded_addr res;
 	struct mem_ctl_info *mci;
 	char *type;
+	int imc = 0, chan = 0, skipped = 0;
 
 	if (edac_get_report_status() == EDAC_REPORTING_DISABLED)
 		return NOTIFY_DONE;
@@ -602,10 +615,40 @@ int skx_mce_check_error(struct notifier_block *nb, unsigned long val,
 	res.addr = mce->addr;
 
 	if (adxl_component_count) {
-		if (!skx_adxl_decode(&res))
+		if (is_skip_dsm(mce)) {
+			/* Icelake MCE IMCx_CHy Banks: 13,14;17,18;21,22;25,26 */
+			imc = (mce->bank - 12) / 4;
+			chan = (mce->bank + 1) % 2;
+			skipped = 1;
+		} else if (!skx_adxl_decode(&res))
 			return NOTIFY_DONE;
 	} else if (!skx_decode || !skx_decode(&res)) {
 		return NOTIFY_DONE;
+	}
+
+	if (skipped) {
+		int found = 0;
+
+		list_for_each_entry(d, &dev_edac_list, list) {
+			if (d->imc[0].src_id == mce->socketid) {
+				res.dev = d;
+				found = 1;
+				break;
+			}
+		}
+		if (!found)
+			return NOTIFY_DONE;
+
+		res.imc = imc;
+		res.channel = chan;
+		res.row = GET_BITFIELD(mce->misc, 19, 39);
+		res.column = GET_BITFIELD(mce->misc, 9, 18) << 2;
+		res.bank_address = GET_BITFIELD(mce->misc, 42, 43);
+		res.bank_group = GET_BITFIELD(mce->misc, 40, 41) |
+				(GET_BITFIELD(mce->misc, 44, 44) << 2);
+		res.rank = GET_BITFIELD(mce->misc, 56, 58);
+		res.dimm = res.rank >> 2;
+		res.rank = res.rank % 4;
 	}
 
 	mci = res.dev->imc[res.imc].mci;

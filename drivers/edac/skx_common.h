@@ -33,6 +33,10 @@
 #define I10NM_NUM_IMC		4
 #define I10NM_NUM_CHANNELS	2
 #define I10NM_NUM_DIMMS		2
+/* Icelake MCE IMCx_CHy Banks: 13,14,17,18,21,22,25,26 */
+#define ICX_IMCx_CHy		0x6666000
+#define MCE_CPUID_FM_MASK	0xFFFF0
+#define ICX_MCE_CPUID_FM	0x606a0  /* Icelake Family:6 Model:6a */
 
 #define MAX(a, b)	((a) > (b) ? (a) : (b))
 #define NUM_IMC		MAX(SKX_NUM_IMC, I10NM_NUM_IMC)
