@@ -96,3 +96,12 @@ config EROFS_FS_CLUSTER_PAGE_LIMIT
 	  less than 2. Otherwise, the image will be refused
 	  to mount on this kernel.
 
+config EROFS_FS_ONDEMAND
+	bool "EROFS fscache-based on-demand read support"
+	depends on CACHEFILES_ONDEMAND && (EROFS_FS=m && FSCACHE || EROFS_FS=y && FSCACHE=y)
+	default n
+	help
+	  This permits EROFS to use fscache-backed data blobs with on-demand
+	  read support.
+
+	  If unsure, say N.

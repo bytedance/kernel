@@ -454,6 +454,10 @@ static int erofs_fc_fill_super(struct super_block *sb, struct fs_context *fc)
 	if (erofs_is_fscache_mode(sb)) {
 		sb->s_blocksize = EROFS_BLKSIZ;
 		sb->s_blocksize_bits = LOG_BLOCK_SIZE;
+
+		err = erofs_fscache_register_fs(sb);
+		if (err)
+			return err;
 	} else {
 		if (!sb_set_blocksize(sb, EROFS_BLKSIZ)) {
 			erofs_err(sb, "failed to set erofs blksize");
@@ -602,6 +606,7 @@ static void erofs_kill_sb(struct super_block *sb)
 	if (!sbi)
 		return;
 	erofs_free_dev_context(sbi->devs);
+	erofs_fscache_unregister_fs(sb);
 	kfree(sbi);
 	sb->s_fs_info = NULL;
 }
@@ -652,6 +657,10 @@ static int __init erofs_module_init(void)
 	if (err)
 		goto zip_err;
 
+	err = erofs_fscache_register();
+	if (err)
+		goto fscache_err;
+
 	err = register_filesystem(&erofs_fs_type);
 	if (err)
 		goto fs_err;
@@ -659,6 +668,8 @@ static int __init erofs_module_init(void)
 	return 0;
 
 fs_err:
+	erofs_fscache_unregister();
+fscache_err:
 	z_erofs_exit_zip_subsystem();
 zip_err:
 	erofs_exit_shrinker();
@@ -671,6 +682,7 @@ icache_err:
 static void __exit erofs_module_exit(void)
 {
 	unregister_filesystem(&erofs_fs_type);
+	erofs_fscache_unregister();
 	z_erofs_exit_zip_subsystem();
 	erofs_exit_shrinker();
 
