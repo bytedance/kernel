@@ -46,11 +46,6 @@ int cachefiles_daemon_bind(struct cachefiles_cache *cache, char *args)
 	       cache->bcull_percent < cache->brun_percent &&
 	       cache->brun_percent  < 100);
 
-	if (*args) {
-		pr_err("'bind' command doesn't take an argument\n");
-		return -EINVAL;
-	}
-
 	if (!cache->rootdirname) {
 		pr_err("No cache directory specified\n");
 		return -EINVAL;
@@ -60,6 +55,18 @@ int cachefiles_daemon_bind(struct cachefiles_cache *cache, char *args)
 	if (test_bit(CACHEFILES_READY, &cache->flags)) {
 		pr_err("Cache already bound\n");
 		return -EBUSY;
+	}
+
+	if (IS_ENABLED(CONFIG_CACHEFILES_ONDEMAND)) {
+		if (!strcmp(args, "ondemand")) {
+			set_bit(CACHEFILES_ONDEMAND_MODE, &cache->flags);
+		} else if (*args) {
+			pr_err("Invalid argument to the 'bind' command\n");
+			return -EINVAL;
+		}
+	} else if (*args) {
+		pr_err("'bind' command doesn't take an argument\n");
+		return -EINVAL;
 	}
 
 	/* make sure we have copies of the tag and dirname strings */
