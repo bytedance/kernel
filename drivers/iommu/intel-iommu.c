@@ -361,6 +361,7 @@ int intel_iommu_sm;
 int intel_iommu_enabled = 0;
 EXPORT_SYMBOL_GPL(intel_iommu_enabled);
 
+static int dmar_mpt3sas_pt;
 static int dmar_map_gfx = 1;
 static int dmar_forcedac;
 static int intel_iommu_strict;
@@ -468,6 +469,9 @@ static int __init intel_iommu_setup(char *str)
 		} else if (!strncmp(str, "nobounce", 8)) {
 			pr_info("Intel-IOMMU: No bounce buffer. This could expose security risks of DMA attacks\n");
 			intel_no_bounce = 1;
+		} else if (!strncmp(str, "mpt3sas_pt", 10)) {
+			pr_info("Intel-IOMMU: Enable mpt3sas device passthrough\n");
+			dmar_mpt3sas_pt = 1;
 		}
 
 		str += strcspn(str, ",");
@@ -4139,6 +4143,13 @@ static void quirk_ioat_snb_local_iommu(struct pci_dev *pdev)
 	}
 }
 DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_INTEL, PCI_DEVICE_ID_INTEL_IOAT_SNB, quirk_ioat_snb_local_iommu);
+
+static void mpt3sas_force_bypass_iommu(struct pci_dev *pdev)
+{
+	if (dmar_mpt3sas_pt)
+		pdev->dev.archdata.iommu = DUMMY_DEVICE_DOMAIN_INFO;
+}
+DECLARE_PCI_FIXUP_ENABLE(PCI_VENDOR_ID_NCR, 0x0097, mpt3sas_force_bypass_iommu);
 
 static void __init init_no_remapping_devices(void)
 {
