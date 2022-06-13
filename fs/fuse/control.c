@@ -191,6 +191,45 @@ out:
 	return ret;
 }
 
+static ssize_t fuse_conn_invalidate_inode_write(struct file *file,
+						const char __user *buf,
+						size_t count, loff_t *ppos)
+{
+	char tmp[64];
+	struct fuse_conn *fc;
+	uint64_t ino;
+	int64_t	off, len;
+	int ret;
+
+	if (*ppos != 0)
+		return -EINVAL;
+
+	if (count >= sizeof(tmp))
+		return -ENOSPC;
+
+	ret = simple_write_to_buffer(tmp, sizeof(tmp) - 1, ppos, buf, count);
+	if (ret != count)
+		return ret < 0 ? ret : -EIO;
+
+	tmp[ret] = '\0';
+	ret = sscanf(tmp, "%llu:%lld:%lld", &ino, &off, &len);
+	if (ret != 3)
+		return -EINVAL;
+
+	fc = fuse_ctl_file_conn_get(file);
+	if (!fc)
+		return -ENODEV;
+
+	down_read(&fc->killsb);
+	ret = -ENOENT;
+	if (fc->sb)
+		ret = fuse_reverse_inval_inode(fc->sb, ino, off, len);
+	up_read(&fc->killsb);
+	fuse_conn_put(fc);
+
+	return ret < 0 ? ret : count;
+}
+
 static const struct file_operations fuse_ctl_abort_ops = {
 	.open = nonseekable_open,
 	.write = fuse_conn_abort_write,
@@ -214,6 +253,12 @@ static const struct file_operations fuse_conn_congestion_threshold_ops = {
 	.open = nonseekable_open,
 	.read = fuse_conn_congestion_threshold_read,
 	.write = fuse_conn_congestion_threshold_write,
+	.llseek = no_llseek,
+};
+
+static const struct file_operations fuse_ctl_invalidate_inode_ops = {
+	.open = nonseekable_open,
+	.write = fuse_conn_invalidate_inode_write,
 	.llseek = no_llseek,
 };
 
@@ -285,7 +330,10 @@ int fuse_ctl_add_conn(struct fuse_conn *fc)
 				 1, NULL, &fuse_conn_max_background_ops) ||
 	    !fuse_ctl_add_dentry(parent, fc, "congestion_threshold",
 				 S_IFREG | 0600, 1, NULL,
-				 &fuse_conn_congestion_threshold_ops))
+				 &fuse_conn_congestion_threshold_ops) ||
+	    !fuse_ctl_add_dentry(parent, fc, "invalidate_inode",
+				 S_IFREG | 0200, 1, NULL,
+				 &fuse_ctl_invalidate_inode_ops))
 		goto err;
 
 	return 0;
