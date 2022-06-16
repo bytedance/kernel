@@ -150,6 +150,17 @@ config BLK_CGROUP_IOCOST
 	distributes IO capacity between different groups based on
 	their share of the overall weight distribution.
 
+config BYTEDANCE_BLK_CGROUP_IOTRACE
+	default n
+	bool "Enable support for io stat trace for cgroup IO controller"
+	depends on BLK_CGROUP=y
+	help
+	  Enabling this option enable iotrace interface for iotrace.
+	  The iotrace collects io metrics for io cgroup which can
+	  be a complement to current io stat traces.
+
+	  The code of iotrace is in block/blk-iotrace.c.
+
 config BLK_WBT_MQ
 	bool "Multiqueue writeback throttling"
 	default y

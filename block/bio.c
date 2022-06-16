@@ -1907,6 +1907,9 @@ struct bio *bio_split(struct bio *bio, int sectors,
 		bio_integrity_trim(split);
 
 	bio_advance(bio, split->bi_iter.bi_size);
+#ifdef CONFIG_BYTEDANCE_BLK_CGROUP_IOTRACE
+	bio_issue_init_sector(&split->bi_issue, bio_sectors(split));
+#endif
 
 	if (bio_flagged(bio, BIO_TRACE_COMPLETION))
 		bio_set_flag(split, BIO_TRACE_COMPLETION);

@@ -136,7 +136,22 @@ static inline void bio_issue_init(struct bio_issue *issue,
 			(ktime_get_ns() & BIO_ISSUE_TIME_MASK) |
 			((u64)size << BIO_ISSUE_SIZE_SHIFT));
 }
+#ifdef CONFIG_BYTEDANCE_BLK_CGROUP_IOTRACE
+static inline void bio_issue_init_sector(struct bio_issue *issue,
+						sector_t size)
+{
+	size &= (1UL << BIO_ISSUE_SIZE_BITS) - 1;
+	issue->value = ((issue->value & BIO_ISSUE_RES_MASK) |
+			((u64)size << BIO_ISSUE_SIZE_SHIFT) |
+			(issue->value & BIO_ISSUE_TIME_MASK));
+}
 
+static inline void bio_issue_init_time(struct bio_issue *issue,
+					u64 time)
+{
+	issue->value = time & BIO_ISSUE_TIME_MASK;
+}
+#endif
 /*
  * main unit of I/O for the block layer and lower layers (ie drivers and
  * stacking drivers)
@@ -169,6 +184,9 @@ struct bio {
 	 */
 	struct blkcg_gq		*bi_blkg;
 	struct bio_issue	bi_issue;
+#ifdef CONFIG_BYTEDANCE_BLK_CGROUP_IOTRACE
+	struct bio_issue	bi_start;
+#endif
 #ifdef CONFIG_BLK_CGROUP_IOCOST
 	u64			bi_iocost_cost;
 #endif

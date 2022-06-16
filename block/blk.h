@@ -173,6 +173,12 @@ static inline void bio_integrity_free(struct bio *bio)
 }
 #endif /* CONFIG_BLK_DEV_INTEGRITY */
 
+#ifdef CONFIG_BYTEDANCE_BLK_CGROUP_IOTRACE
+int blk_iotrace_init(struct request_queue *q);
+#else
+static inline int blk_iotrace_init(struct request_queue *q) { return 0; }
+#endif
+
 unsigned long blk_rq_timeout(unsigned long timeout);
 void blk_add_timer(struct request *req);
 
