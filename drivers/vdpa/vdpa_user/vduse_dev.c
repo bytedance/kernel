@@ -1721,9 +1721,35 @@ static ssize_t enable_dead_handler_store(struct device *device,
 
 static DEVICE_ATTR_RW(enable_dead_handler);
 
+static ssize_t dead_timeout_show(struct device *device,
+				 struct device_attribute *attr,
+				 char *buf)
+{
+	struct vduse_dev *dev = container_of(device, struct vduse_dev, dev);
+
+	return sprintf(buf, "%u\n", dev->dead_timeout);
+}
+
+static ssize_t dead_timeout_store(struct device *device,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct vduse_dev *dev = container_of(device, struct vduse_dev, dev);
+	int ret;
+
+	ret = kstrtou16(buf, 0, &dev->dead_timeout);
+	if (ret)
+		return ret;
+
+	return count;
+}
+
+static DEVICE_ATTR_RW(dead_timeout);
+
 static struct attribute *vduse_dev_attrs[] = {
 	&dev_attr_abort_conn.attr,
 	&dev_attr_enable_dead_handler.attr,
+	&dev_attr_dead_timeout.attr,
 	NULL
 };
 
