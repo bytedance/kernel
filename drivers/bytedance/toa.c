@@ -686,7 +686,10 @@ static int ip_option_to_four_tuple(int outside, struct ip_option* src, struct fo
     int inside = -1;
     
     if  (outside == 0){
-        inside = src->header.ipv4.operation;
+        if  (src->header.ipv4.operation == 0 && src->header.ipv4.length == IP_OPTION_IPV4_LEN)
+            inside = 0;
+        else if  (src->header.ipv4.operation == 1 && src->header.ipv4.length == IP_OPTION_IPV6_LEN )
+            inside = 1;
     }
     else if  (outside == 1){
         if  (src->header.ipv6.optlen == IPV6_HEADER_OPTION_IPV4_LEN)
