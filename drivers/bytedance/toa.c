@@ -695,8 +695,9 @@ static int ip_option_to_four_tuple(int outside, struct ip_option* src, struct fo
             inside = 1;
     }
 
+    memset(dst, 0, sizeof(*dst));
+
     if  (inside == 0){
-        memset(dst, 0, sizeof(struct four_tuple));
         memcpy(dst, src, IP_OPTION_IPV4_LEN);
         dst->type = 0;
 
