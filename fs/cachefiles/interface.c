@@ -346,8 +346,11 @@ void cachefiles_put_object(struct fscache_object *_object,
 	ASSERT((atomic_read(&object->usage) & 0xffff0000) != 0x6b6b0000);
 #endif
 
-	ASSERTIFCMP(object->fscache.parent,
-		    object->fscache.parent->n_children, >, 0);
+	if (!cachefiles_in_ondemand_mode(container_of(object->fscache.cache,
+					struct cachefiles_cache, cache))) {
+		ASSERTIFCMP(object->fscache.parent,
+			    object->fscache.parent->n_children, >, 0);
+	}
 
 	u = atomic_dec_return(&object->usage);
 	trace_cachefiles_ref(object, _object->cookie,
