@@ -213,6 +213,9 @@ void fuse_finish_open(struct inode *inode, struct file *file)
 		invalidate_inode_pages2(inode->i_mapping);
 	}
 
+	if (ff->open_flags & FOPEN_INVAL_ATTR)
+		fuse_invalidate_attr(inode);
+
 	if ((file->f_mode & FMODE_WRITE) && fc->writeback_cache)
 		fuse_link_write_file(file);
 }
