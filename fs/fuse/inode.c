@@ -191,7 +191,8 @@ void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 }
 
 void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
-			    u64 attr_valid, u64 attr_version)
+			    u64 attr_valid, u64 attr_version,
+			    enum inode_lock_state lock_state)
 {
 	struct fuse_conn *fc = get_fuse_conn(inode);
 	struct fuse_inode *fi = get_fuse_inode(inode);
@@ -202,10 +203,32 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 	bool wb_update = false;
 	bool inval = false;
 	bool update_cmtime = !is_wb;
+	int res = 0;
+	bool attr_is_inval = false;
+	bool should_unlock_inode = false;
 
-	if (is_wb && fc->wb_trust_server && S_ISREG(inode->i_mode)) {
-		inode_lock(inode);
+	if (fc->wb_trust_server && S_ISREG(inode->i_mode)) {
 		try_wb_update = true;
+		switch (lock_state) {
+		case FUSE_INODE_LOCKED:
+			break;
+		case FUSE_INODE_MAY_LOCKED:
+			if (!inode_trylock(inode))
+				try_wb_update = false;
+			else
+				should_unlock_inode = true;
+			break;
+		case FUSE_INODE_UNLOCKED:
+			res = down_write_killable(&inode->i_rwsem);
+			if (res)
+				try_wb_update = false;
+			else
+				should_unlock_inode = true;
+			break;
+		default:
+			WARN_ON(1);
+			try_wb_update = false;
+		}
 	}
 
 	spin_lock(&fi->lock);
@@ -238,9 +261,7 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 	if ((attr_version != 0 && fi->attr_version > attr_version) ||
 	    test_bit(FUSE_I_SIZE_UNSTABLE, &fi->state)) {
 		spin_unlock(&fi->lock);
-		if (try_wb_update)
-			inode_unlock(inode);
-		return;
+		goto out_unlock_inode;
 	}
 
 	if (fc->wb_trust_server && attr->should_inval) {
@@ -250,8 +271,17 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 	}
 
 	old_mtime = inode->i_mtime;
+	attr_is_inval = !!(STATX_BASIC_STATS & ~STATX_ATIME &
+			READ_ONCE(fi->inval_mask));
 	fuse_change_attributes_common(inode, attr, attr_valid,
 				      update_cmtime);
+	/*
+	 * If we did not get the inode lock in this function, then we should
+	 * re-invalidate the attributes and try it later.
+	 */
+	if (fc->wb_trust_server && S_ISREG(inode->i_mode) && !wb_update &&
+	    attr_is_inval)
+		fuse_invalidate_attr(inode);
 
 	oldsize = inode->i_size;
 	/*
@@ -292,7 +322,8 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 	if (inval)
 		invalidate_inode_pages2(inode->i_mapping);
 
-	if (try_wb_update)
+out_unlock_inode:
+	if (should_unlock_inode)
 		inode_unlock(inode);
 }
 
@@ -367,7 +398,8 @@ struct inode *fuse_iget(struct super_block *sb, u64 nodeid,
 	spin_lock(&fi->lock);
 	fi->nlookup++;
 	spin_unlock(&fi->lock);
-	fuse_change_attributes(inode, attr, attr_valid, attr_version);
+	fuse_change_attributes(inode, attr, attr_valid, attr_version,
+			       FUSE_INODE_UNLOCKED);
 
 	return inode;
 }

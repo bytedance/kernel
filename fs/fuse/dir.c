@@ -255,7 +255,7 @@ static int fuse_dentry_revalidate(struct dentry *entry, unsigned int flags)
 		forget_all_cached_acls(inode);
 		fuse_change_attributes(inode, &outarg.attr,
 				       entry_attr_timeout(&outarg),
-				       attr_version);
+				       attr_version, FUSE_INODE_UNLOCKED);
 		fuse_change_entry_timeout(entry, &outarg);
 	} else if (inode) {
 		fi = get_fuse_inode(inode);
@@ -939,7 +939,7 @@ static void fuse_fillattr(struct inode *inode, struct fuse_attr *attr,
 }
 
 static int fuse_do_getattr(struct inode *inode, struct kstat *stat,
-			   struct file *file)
+			   struct file *file, enum inode_lock_state lock_state)
 {
 	int err;
 	struct fuse_getattr_in inarg;
@@ -976,7 +976,8 @@ static int fuse_do_getattr(struct inode *inode, struct kstat *stat,
 		} else {
 			fuse_change_attributes(inode, &outarg.attr,
 					       attr_timeout(&outarg),
-					       attr_version);
+					       attr_version,
+					       lock_state);
 			if (stat)
 				fuse_fillattr(inode, &outarg.attr, stat);
 		}
@@ -986,7 +987,8 @@ static int fuse_do_getattr(struct inode *inode, struct kstat *stat,
 
 static int fuse_update_get_attr(struct inode *inode, struct file *file,
 				struct kstat *stat, u32 request_mask,
-				unsigned int flags)
+				unsigned int flags,
+				enum inode_lock_state lock_state)
 {
 	struct fuse_inode *fi = get_fuse_inode(inode);
 	int err = 0;
@@ -1003,7 +1005,7 @@ static int fuse_update_get_attr(struct inode *inode, struct file *file,
 
 	if (sync) {
 		forget_all_cached_acls(inode);
-		err = fuse_do_getattr(inode, stat, file);
+		err = fuse_do_getattr(inode, stat, file, lock_state);
 	} else if (stat) {
 		generic_fillattr(inode, stat);
 		stat->mode = fi->orig_i_mode;
@@ -1013,11 +1015,13 @@ static int fuse_update_get_attr(struct inode *inode, struct file *file,
 	return err;
 }
 
-int fuse_update_attributes(struct inode *inode, struct file *file)
+int fuse_update_attributes(struct inode *inode, struct file *file,
+			   enum inode_lock_state lock_state)
 {
 	/* Do *not* need to get atime for internal purposes */
 	return fuse_update_get_attr(inode, file, NULL,
-				    STATX_BASIC_STATS & ~STATX_ATIME, 0);
+				    STATX_BASIC_STATS & ~STATX_ATIME, 0,
+				    lock_state);
 }
 
 int fuse_reverse_inval_entry(struct super_block *sb, u64 parent_nodeid,
@@ -1151,7 +1155,7 @@ static int fuse_perm_getattr(struct inode *inode, int mask)
 		return -ECHILD;
 
 	forget_all_cached_acls(inode);
-	return fuse_do_getattr(inode, NULL, NULL);
+	return fuse_do_getattr(inode, NULL, NULL, FUSE_INODE_MAY_LOCKED);
 }
 
 /*
@@ -1674,7 +1678,7 @@ static int fuse_setattr(struct dentry *entry, struct iattr *attr)
 			 * ia_mode calculation may have used stale i_mode.
 			 * Refresh and recalculate.
 			 */
-			ret = fuse_do_getattr(inode, NULL, file);
+			ret = fuse_do_getattr(inode, NULL, file, FUSE_INODE_LOCKED);
 			if (ret)
 				return ret;
 
@@ -1720,7 +1724,8 @@ static int fuse_getattr(const struct path *path, struct kstat *stat,
 	if (!fuse_allow_current_process(fc))
 		return -EACCES;
 
-	return fuse_update_get_attr(inode, NULL, stat, request_mask, flags);
+	return fuse_update_get_attr(inode, NULL, stat, request_mask, flags,
+				    FUSE_INODE_UNLOCKED);
 }
 
 static const struct inode_operations fuse_dir_inode_operations = {

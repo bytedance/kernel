@@ -916,11 +916,18 @@ void fuse_init_dir(struct inode *inode);
  */
 void fuse_init_symlink(struct inode *inode);
 
+enum inode_lock_state {
+	FUSE_INODE_LOCKED,
+	FUSE_INODE_MAY_LOCKED,
+	FUSE_INODE_UNLOCKED,
+};
+
 /**
  * Change attributes of an inode
  */
 void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
-			    u64 attr_valid, u64 attr_version);
+			    u64 attr_valid, u64 attr_version,
+			    enum inode_lock_state lock_state);
 
 void fuse_change_attributes_common(struct inode *inode, struct fuse_attr *attr,
 				   u64 attr_valid, bool update_cmtime);
@@ -1028,7 +1035,8 @@ u64 fuse_lock_owner_id(struct fuse_conn *fc, fl_owner_t id);
 
 void fuse_update_ctime(struct inode *inode);
 
-int fuse_update_attributes(struct inode *inode, struct file *file);
+int fuse_update_attributes(struct inode *inode, struct file *file,
+			   enum inode_lock_state lock_state);
 
 void fuse_flush_writepages(struct inode *inode);
 

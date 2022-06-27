@@ -220,7 +220,7 @@ retry:
 		forget_all_cached_acls(inode);
 		fuse_change_attributes(inode, &o->attr,
 				       entry_attr_timeout(o),
-				       attr_version);
+				       attr_version, FUSE_INODE_UNLOCKED);
 		/*
 		 * The other branch comes via fuse_iget()
 		 * which bumps nlookup inside
@@ -468,7 +468,8 @@ static int fuse_readdir_cached(struct file *file, struct dir_context *ctx)
 	 * cache; both cases require an up-to-date mtime value.
 	 */
 	if (!ctx->pos && fc->auto_inval_data) {
-		int err = fuse_update_attributes(inode, file);
+		int err = fuse_update_attributes(inode, file,
+						 FUSE_INODE_LOCKED);
 
 		if (err)
 			return err;
