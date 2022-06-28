@@ -201,7 +201,7 @@ void fuse_change_attributes(struct inode *inode, struct fuse_attr *attr,
 	bool try_wb_update = false;
 	bool wb_update = false;
 	bool inval = false;
-	bool update_cmtime = is_wb;
+	bool update_cmtime = !is_wb;
 
 	if (is_wb && fc->wb_trust_server && S_ISREG(inode->i_mode)) {
 		inode_lock(inode);
