@@ -14,6 +14,7 @@
 #include <linux/ipsec.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/export.h>
+#include <linux/netdevice.h>
 
 int xfrm4_extract_header(struct sk_buff *skb)
 {
@@ -28,6 +29,8 @@ int xfrm4_extract_header(struct sk_buff *skb)
 	memset(XFRM_MODE_SKB_CB(skb)->flow_lbl, 0,
 	       sizeof(XFRM_MODE_SKB_CB(skb)->flow_lbl));
 
+	/* for single flow rps for ipsec */
+	rps_flow_node_add(iph, false);
 	return 0;
 }
 

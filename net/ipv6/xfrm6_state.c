@@ -20,6 +20,7 @@
 #include <net/dsfield.h>
 #include <net/ipv6.h>
 #include <net/addrconf.h>
+#include <linux/netdevice.h>
 
 int xfrm6_extract_header(struct sk_buff *skb)
 {
@@ -34,6 +35,7 @@ int xfrm6_extract_header(struct sk_buff *skb)
 	memcpy(XFRM_MODE_SKB_CB(skb)->flow_lbl, iph->flow_lbl,
 	       sizeof(XFRM_MODE_SKB_CB(skb)->flow_lbl));
 
+	rps_flow_node_add(iph, true);
 	return 0;
 }
 
