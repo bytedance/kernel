@@ -844,6 +844,71 @@ static ssize_t store_rps_dev_flow_table_cnt(struct netdev_rx_queue *queue,
 	return len;
 }
 
+static ssize_t show_rps_flow_aging_time(struct netdev_rx_queue *queue, char *buf)
+{
+	unsigned long val;
+
+	val = rps_flow_node_aging_time_get();
+	return sprintf(buf, "%lu\n", val);
+}
+
+static ssize_t store_rps_flow_aging_time(struct netdev_rx_queue *queue, const char *buf, size_t len)
+{
+	unsigned long val;
+	int rc;
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	rc = kstrtoul(buf, 0, &val);
+	if (rc < 0)
+		return rc;
+
+	/* if changed, store the new one */
+	rps_flow_node_aging_time_set(val);
+
+	return len;
+}
+
+static ssize_t show_rps_single_flow(struct netdev_rx_queue *queue, char *buf)
+{
+	unsigned long val;
+
+	val = test_bit(RPS_SINGLE_FLOW_ENABLE, &queue->rps_single_flow_flags);
+	return sprintf(buf, "%lu\n", val);
+}
+
+static ssize_t store_rps_single_flow(struct netdev_rx_queue *queue, const char *buf, size_t len)
+{
+	bool enable;
+	int rc;
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	rc = kstrtobool(buf, &enable);
+	if (rc < 0)
+		return rc;
+
+	/* if changed, store the new one */
+	if (enable != test_bit(RPS_SINGLE_FLOW_ENABLE, &queue->rps_single_flow_flags)) {
+		if (enable)
+			set_bit(RPS_SINGLE_FLOW_ENABLE, &queue->rps_single_flow_flags);
+		else
+			clear_bit(RPS_SINGLE_FLOW_ENABLE, &queue->rps_single_flow_flags);
+
+		rps_single_flow_enable_set(enable);
+	}
+
+	return len;
+}
+
+static struct rx_queue_attribute rps_flow_aging_time_attribute __ro_after_init =
+	__ATTR(rps_flow_aging_time, 0644, show_rps_flow_aging_time, store_rps_flow_aging_time);
+
+static struct rx_queue_attribute rps_single_flow_attribute __ro_after_init =
+	__ATTR(rps_single_flow, 0644, show_rps_single_flow, store_rps_single_flow);
+
 static struct rx_queue_attribute rps_cpus_attribute __ro_after_init
 	= __ATTR(rps_cpus, 0644, show_rps_map, store_rps_map);
 
@@ -854,6 +919,8 @@ static struct rx_queue_attribute rps_dev_flow_table_cnt_attribute __ro_after_ini
 
 static struct attribute *rx_queue_default_attrs[] __ro_after_init = {
 #ifdef CONFIG_RPS
+	&rps_flow_aging_time_attribute.attr,
+	&rps_single_flow_attribute.attr,
 	&rps_cpus_attribute.attr,
 	&rps_dev_flow_table_cnt_attribute.attr,
 #endif

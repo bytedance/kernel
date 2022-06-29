@@ -3943,6 +3943,256 @@ set_rps_cpu(struct net_device *dev, struct sk_buff *skb,
  * CPU from the RPS map of the receiving queue for a given skb.
  * rcu_read_lock must be held on entry.
  */
+#define DEFAULT_HASH_BUCKET_BIT (8)
+#define DEFAULT_QUOTA_PER_CPU   (128)
+static unsigned int quota_per_cpu = DEFAULT_QUOTA_PER_CPU;
+DEFINE_STATIC_KEY_FALSE(rps_flow_queue_enable_key);
+static atomic_t last_aging_jiffies;
+/* default 5000 ms */
+static unsigned long max_aging_time = 5000;
+static DEFINE_HASHTABLE(rps_flow_info_htable, DEFAULT_HASH_BUCKET_BIT);
+static DEFINE_RWLOCK(rps_flow_rwlock);
+
+unsigned long rps_flow_node_aging_time_get(void)
+{
+	return max_aging_time;
+}
+
+void rps_flow_node_aging_time_set(unsigned long aging_time)
+{
+	max_aging_time = aging_time;
+}
+
+static inline bool ipv4_flow_match(const struct iphdr *iph, struct rps_flow_info_node *flow)
+{
+	return iph->saddr == flow->v4_saddr && iph->daddr == flow->v4_daddr &&
+	       iph->protocol == flow->v4_protocol;
+}
+
+static inline u32 ipv4_hash_key(const struct iphdr *iph)
+{
+	return iph->saddr ^ iph->daddr ^ iph->protocol;
+}
+
+static inline bool ipv6_flow_match(const struct ipv6hdr *ip6h, struct rps_flow_info_node *p_flow)
+{
+	/* flow_lbl maximum probability is different， so compare it first */
+	if (memcmp(ip6h->flow_lbl, p_flow->v6_flow_lbl, sizeof(p_flow->v6_flow_lbl)))
+		return false;
+
+	if (memcmp(ip6h->daddr.s6_addr32, p_flow->v6_daddr, sizeof(p_flow->v6_daddr)))
+		return false;
+
+	if (memcmp(ip6h->saddr.s6_addr32, p_flow->v6_saddr, sizeof(p_flow->v6_saddr)))
+		return false;
+
+	return true;
+}
+
+static inline u32 ipv6_hash_key(const struct ipv6hdr *ip6h)
+{
+	/* saddr hash daddr hash and lbl hash */
+	u32 hash = 0;
+	u8 count;
+
+	for (count = 0; count < sizeof(ip6h->saddr.s6_addr32) / sizeof(u32); count++)
+		hash ^= ip6h->saddr.s6_addr32[count];
+
+	for (count = 0; count < sizeof(ip6h->daddr.s6_addr32) / sizeof(u32); count++)
+		hash ^= ip6h->daddr.s6_addr32[count];
+
+	for (count = 0; count < sizeof(ip6h->flow_lbl); count++)
+		hash ^= ip6h->flow_lbl[count];
+
+	return hash;
+}
+
+static bool rps_flow_node_create_v6(const struct ipv6hdr *ip6h)
+{
+	struct rps_flow_info_node *p_flow;
+	u32 hash_key;
+
+	hash_key = ipv6_hash_key(ip6h);
+
+	/* find if the node already exist */
+	read_lock(&rps_flow_rwlock);
+	hash_for_each_possible(rps_flow_info_htable, p_flow, node, hash_key) {
+		if (ipv6_flow_match(ip6h, p_flow)) {
+			p_flow->jiffies = jiffies;
+			read_unlock(&rps_flow_rwlock);
+			return true;
+		}
+	}
+	read_unlock(&rps_flow_rwlock);
+
+	/* if not exist. create a new one */
+	p_flow = kzalloc(sizeof(*p_flow), GFP_KERNEL);
+	if (!p_flow)
+		return false;
+
+	memcpy(p_flow->v6_saddr, ip6h->saddr.s6_addr, sizeof(ip6h->saddr.s6_addr));
+	memcpy(p_flow->v6_daddr, ip6h->daddr.s6_addr, sizeof(ip6h->daddr.s6_addr));
+	memcpy(p_flow->v6_flow_lbl, ip6h->flow_lbl, sizeof(ip6h->flow_lbl));
+
+	p_flow->jiffies = jiffies;
+
+	/* add the hash node */
+	write_lock(&rps_flow_rwlock);
+	hash_add(rps_flow_info_htable, &p_flow->node, hash_key);
+	write_unlock(&rps_flow_rwlock);
+	return true;
+}
+
+static bool rps_flow_node_create_v4(const struct iphdr *iph)
+{
+	struct rps_flow_info_node *p_flow;
+	u32 hash_key;
+
+	hash_key = ipv4_hash_key(iph);
+
+	/* find if the node already exist */
+	read_lock(&rps_flow_rwlock);
+	hash_for_each_possible(rps_flow_info_htable, p_flow, node, hash_key) {
+		if (ipv4_flow_match(iph, p_flow)) {
+			p_flow->jiffies = jiffies;
+			read_unlock(&rps_flow_rwlock);
+			return true;
+		}
+	}
+	read_unlock(&rps_flow_rwlock);
+
+	/* if not exist. create a new one */
+	p_flow = kzalloc(sizeof(*p_flow), GFP_KERNEL);
+	if (!p_flow)
+		return false;
+
+	p_flow->v4_saddr = iph->saddr;
+	p_flow->v4_daddr = iph->daddr;
+	p_flow->v4_protocol = iph->protocol;
+	p_flow->jiffies = jiffies;
+
+	/* add the hash node */
+	write_lock(&rps_flow_rwlock);
+	hash_add(rps_flow_info_htable, &p_flow->node, hash_key);
+	write_unlock(&rps_flow_rwlock);
+	return true;
+}
+
+/* create rps flow node if not exist.
+ * update Timestamp for rps flow node if exist
+ */
+bool __rps_flow_node_add(const void *iph, bool ipv6)
+{
+	struct ipv6hdr *ip6h;
+	struct iphdr *ip4h;
+
+	if (!ipv6) {
+		ip4h = (struct iphdr *)iph;
+		return rps_flow_node_create_v4(ip4h);
+	}
+
+	ip6h = (struct ipv6hdr *)iph;
+	return rps_flow_node_create_v6(ip6h);
+}
+
+static void rps_flow_node_clear(void)
+{
+	struct rps_flow_info_node *p_rps_flow_entry;
+	struct hlist_node *tmp;
+	u32 bucket;
+
+	write_lock(&rps_flow_rwlock);
+	hash_for_each_safe(rps_flow_info_htable, bucket, tmp, p_rps_flow_entry, node) {
+		hash_del(&p_rps_flow_entry->node);
+		kfree(p_rps_flow_entry);
+	}
+	write_unlock(&rps_flow_rwlock);
+}
+
+void rps_single_flow_enable_set(bool enable)
+{
+	if (enable) {
+		static_branch_inc(&rps_flow_queue_enable_key);
+	} else {
+		static_branch_dec(&rps_flow_queue_enable_key);
+		if (static_key_false(&rps_flow_queue_enable_key.key))
+			rps_flow_node_clear();
+	}
+}
+
+/* compute hash */
+static inline u32 rps_flow_hash_update(void)
+{
+	static u32 packet_count;
+	static u32 hash_count;
+
+	packet_count++;
+	if (packet_count % quota_per_cpu) {
+		packet_count = 0;
+		hash_count++;
+	}
+	return hash_count;
+}
+
+/* delete aging rps_flow  */
+static inline bool rps_flow_node_aging_period(void)
+{
+	struct rps_flow_info_node *p_rps_flow_entry;
+	struct hlist_node *tmp;
+	u32 bucket;
+
+	if (jiffies_to_msecs(jiffies - atomic_read(&last_aging_jiffies)) < max_aging_time)
+		return false;
+
+	atomic_set(&last_aging_jiffies, jiffies);
+	write_lock(&rps_flow_rwlock);
+	hash_for_each_safe(rps_flow_info_htable, bucket, tmp, p_rps_flow_entry, node) {
+		if (jiffies_to_msecs(jiffies - p_rps_flow_entry->jiffies) >= max_aging_time) {
+			hash_del(&p_rps_flow_entry->node);
+			kfree(p_rps_flow_entry);
+		}
+	}
+	write_unlock(&rps_flow_rwlock);
+	return true;
+}
+
+/*  find active rps_flow */
+static inline
+struct rps_flow_info_node *rps_flow_find_active_node_v4(const struct iphdr *iph)
+{
+	struct rps_flow_info_node *p_rps_flow;
+	u32 hash_key = ipv4_hash_key(iph);
+
+	read_lock(&rps_flow_rwlock);
+	hash_for_each_possible(rps_flow_info_htable, p_rps_flow, node, hash_key) {
+		if (ipv4_flow_match(iph, p_rps_flow) &&
+		    (jiffies_to_msecs(jiffies - p_rps_flow->jiffies) < max_aging_time)) {
+			read_unlock(&rps_flow_rwlock);
+			return p_rps_flow;
+		}
+	}
+	read_unlock(&rps_flow_rwlock);
+	return NULL;
+}
+
+static inline
+struct rps_flow_info_node *rps_flow_find_active_node_v6(const struct ipv6hdr *ip6h)
+{
+	struct rps_flow_info_node *p_rps_flow;
+	u32 hash_key = ipv6_hash_key(ip6h);
+
+	read_lock(&rps_flow_rwlock);
+	hash_for_each_possible(rps_flow_info_htable, p_rps_flow, node, hash_key) {
+		if (ipv6_flow_match(ip6h, p_rps_flow) &&
+		    (jiffies_to_msecs(jiffies - p_rps_flow->jiffies) < max_aging_time)) {
+			read_unlock(&rps_flow_rwlock);
+			return p_rps_flow;
+		}
+	}
+	read_unlock(&rps_flow_rwlock);
+	return NULL;
+}
+
 static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
 		       struct rps_dev_flow **rflowp)
 {
@@ -3975,6 +4225,70 @@ static int get_rps_cpu(struct net_device *dev, struct sk_buff *skb,
 		goto done;
 
 	skb_reset_network_header(skb);
+	/* this is to set rps for single flow */
+	if (unlikely(test_bit(RPS_SINGLE_FLOW_ENABLE, &rxqueue->rps_single_flow_flags))) {
+		u32 hash_single_flow;
+
+		/* clean the old node */
+		rps_flow_node_aging_period();
+
+		/* no rps ,skip it */
+		if (!map)
+			goto origin_rps;
+
+		/* skip vlan first  */
+		if (skb_vlan_tag_present(skb))
+			goto origin_rps;
+
+		switch (skb->protocol) {
+		/*  ipv4  */
+		case htons(ETH_P_IP): {
+			const struct iphdr *iph;
+			struct rps_flow_info_node *p_flow;
+
+			iph = (struct iphdr *)skb_network_header(skb);
+			/* hash map to match the src and dest ipaddr */
+			p_flow = rps_flow_find_active_node_v4(iph);
+			/* check if vailed */
+			if (p_flow) {
+				pr_debug("v4 rps, flow info: saddr = %pI4, daddr =%pI4, proto=%d\n",
+					 &p_flow->v4_saddr,
+					 &p_flow->v4_daddr,
+					 p_flow->v4_protocol);
+			} else {
+				goto origin_rps;
+			}
+			break;
+		}
+		case htons(ETH_P_IPV6): {
+			const struct ipv6hdr *ip6h;
+			struct rps_flow_info_node *p_flow;
+
+			ip6h = (struct ipv6hdr *)skb_network_header(skb);
+			p_flow = rps_flow_find_active_node_v6(ip6h);
+			if (p_flow) {
+				pr_debug("v6 rps,flow info:saddr = %pI6, daddr = %pI6.\n",
+					 &p_flow->v6_saddr, &p_flow->v6_daddr);
+			} else {
+				goto origin_rps;
+			}
+			break;
+		}
+		default:
+			goto origin_rps;
+		}
+
+		/* get the target cpu */
+		hash_single_flow = rps_flow_hash_update();
+		tcpu = map->cpus[hash_single_flow % map->len];
+		if (cpu_online(tcpu)) {
+			cpu = tcpu;
+			pr_debug("single flow rps, target cpu id = %d\n", cpu);
+			return cpu;
+		}
+	}
+
+origin_rps:
 	hash = skb_get_hash(skb);
 	if (!hash)
 		goto done;

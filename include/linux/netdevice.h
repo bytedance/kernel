@@ -739,6 +739,8 @@ struct netdev_rx_queue {
 #ifdef CONFIG_RPS
 	struct rps_map __rcu		*rps_map;
 	struct rps_dev_flow_table __rcu	*rps_flow_table;
+	unsigned long rps_single_flow_flags;
+#define RPS_SINGLE_FLOW_ENABLE (0)
 #endif
 	struct kobject			kobj;
 	struct net_device		*dev;
@@ -757,6 +759,46 @@ struct rx_queue_attribute {
 	ssize_t (*store)(struct netdev_rx_queue *queue,
 			 const char *buf, size_t len);
 };
+#ifdef CONFIG_RPS
+struct rps_flow_info_node {
+	union {
+		struct {
+			__be32 saddr;
+			__be32 daddr;
+			__u8 protocol;
+		} in4_u;
+
+		struct {
+			struct in6_addr saddr;
+			struct in6_addr daddr;
+			__u8   flow_lbl[3];
+		} in6_u;
+
+	};
+#define v4_saddr     in4_u.saddr
+#define v4_daddr     in4_u.daddr
+#define v4_protocol  in4_u.protocol
+#define v6_saddr     in6_u.saddr.s6_addr32
+#define v6_daddr     in6_u.daddr.s6_addr32
+#define v6_flow_lbl  in6_u.flow_lbl
+	u64 jiffies; /* keep the time update entry */
+	struct hlist_node node;
+};
+DECLARE_STATIC_KEY_FALSE(rps_flow_queue_enable_key);
+void rps_single_flow_enable_set(bool enable);
+unsigned long rps_flow_node_aging_time_get(void);
+void rps_flow_node_aging_time_set(unsigned long aging_time);
+bool __rps_flow_node_add(const void *iph, bool ipv6);
+
+static inline void rps_flow_node_add(const void *iph, bool ipv6)
+{
+	/* no rps_single_flow_enable */
+	if (static_branch_unlikely(&rps_flow_queue_enable_key))
+		__rps_flow_node_add(iph, ipv6);
+}
+#else
+static inline void rps_flow_node_add(const void *iph, bool ipv6) { }
+#endif
 
 #ifdef CONFIG_XPS
 /*
