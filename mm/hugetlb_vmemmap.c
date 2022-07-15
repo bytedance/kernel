@@ -287,17 +287,6 @@ void __init hugetlb_vmemmap_init(struct hstate *h)
 	if (!hugetlb_free_vmemmap_enabled())
 		return;
 
-	if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON) &&
-	    !is_power_of_2(sizeof(struct page))) {
-		/*
-		 * The hugetlb_free_vmemmap_enabled_key can be enabled when
-		 * CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON. It should
-		 * be disabled if "struct page" crosses page boundaries.
-		 */
-		static_branch_disable(&hugetlb_free_vmemmap_enabled_key);
-		return;
-	}
-
 	vmemmap_pages = (nr_pages * sizeof(struct page)) >> PAGE_SHIFT;
 	/*
 	 * The head page is not to be freed to buddy allocator, the other tail
