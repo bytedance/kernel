@@ -548,19 +548,6 @@ Change the minimum size of the hugepage pool.
 See Documentation/admin-guide/mm/hugetlbpage.rst
 
 
-hugetlb_free_vmemmap
-====================
-
-A toggle value indicating if vmemmap pages are allowed to be optimized.
-If it is off (0), then it can be set true (1).  Once true, the vmemmap
-pages associated with each HugeTLB page will be optimized, and the toggle
-cannot be set back to false.  It only optimizes the subsequent allocation
-of HugeTLB pages from buddy system, while already allocated HugeTLB pages
-will not be optimized.
-
-See Documentation/admin-guide/mm/hugetlbpage.rst
-
-
 nr_hugepages_mempolicy
 ======================
 

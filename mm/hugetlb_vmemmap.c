@@ -284,14 +284,17 @@ void __init hugetlb_vmemmap_init(struct hstate *h)
 	BUILD_BUG_ON(__NR_USED_SUBPAGE >=
 		     RESERVE_VMEMMAP_SIZE / sizeof(struct page));
 
-	if (!is_power_of_2(sizeof(struct page))) {
+	if (!hugetlb_free_vmemmap_enabled())
+		return;
+
+	if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON) &&
+	    !is_power_of_2(sizeof(struct page))) {
 		/*
 		 * The hugetlb_free_vmemmap_enabled_key can be enabled when
 		 * CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON. It should
 		 * be disabled if "struct page" crosses page boundaries.
 		 */
-		if (IS_ENABLED(CONFIG_HUGETLB_PAGE_FREE_VMEMMAP_DEFAULT_ON))
-			static_branch_disable(&hugetlb_free_vmemmap_enabled_key);
+		static_branch_disable(&hugetlb_free_vmemmap_enabled_key);
 		return;
 	}
 
@@ -309,17 +312,4 @@ void __init hugetlb_vmemmap_init(struct hstate *h)
 
 	pr_info("can free %d vmemmap pages for %s\n", h->nr_free_vmemmap_pages,
 		h->name);
-}
-
-int hugetlb_vmemmap_sysctl_handler(struct ctl_table *table, int write,
-				   void *buffer, size_t *length, loff_t *ppos)
-{
-	/*
-	 * The vmemmap pages cannot be optimized if a "struct page" crosses page
-	 * boundaries.
-	 */
-	if (write && !is_power_of_2(sizeof(struct page)))
-		return -EPERM;
-
-	return proc_do_static_key(table, write, buffer, length, ppos);
 }

@@ -1462,18 +1462,6 @@ static struct ctl_table vm_table[] = {
 		.mode		= 0644,
 		.proc_handler	= hugetlb_sysctl_handler,
 	},
-#ifdef CONFIG_HUGETLB_PAGE_FREE_VMEMMAP
-	{
-		.procname	= "hugetlb_free_vmemmap",
-		.data		= &hugetlb_free_vmemmap_enabled_key.key,
-		.maxlen		= sizeof(hugetlb_free_vmemmap_enabled_key.key.enabled),
-		.mode		= 0644,
-		/* only handle a transition from default "0" to "1" */
-		.proc_handler	= hugetlb_vmemmap_sysctl_handler,
-		.extra1		= SYSCTL_ONE,
-		.extra2		= SYSCTL_ONE,
-	},
-#endif
 #ifdef CONFIG_NUMA
 	{
 		.procname       = "nr_hugepages_mempolicy",
