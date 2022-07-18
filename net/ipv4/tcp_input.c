@@ -2066,7 +2066,8 @@ EXPORT_SYMBOL(tcp_init_undo);
 
 bool tcp_is_rack(const struct sock *sk)
 {
-	return sock_net(sk)->ipv4.sysctl_tcp_recovery & TCP_RACK_LOSS_DETECTION;
+	return READ_ONCE(sock_net(sk)->ipv4.sysctl_tcp_recovery) &
+		TCP_RACK_LOSS_DETECTION;
 }
 EXPORT_SYMBOL(tcp_is_rack);
 
