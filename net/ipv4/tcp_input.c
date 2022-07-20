@@ -2149,7 +2149,7 @@ void tcp_enter_loss(struct sock *sk)
 	 * the same SND.UNA (sec 3.2). Disable F-RTO on path MTU probing
 	 */
 	tp->frto = !tp->app_disable_frto &&
-		   net->ipv4.sysctl_tcp_frto &&
+		   READ_ONCE(net->ipv4.sysctl_tcp_frto) &&
 		   (new_recovery || icsk->icsk_retransmits) &&
 		   !inet_csk(sk)->icsk_mtup.probe_size;
 }
