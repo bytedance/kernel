@@ -36,6 +36,12 @@ enum cachefiles_object_state {
 	CACHEFILES_ONDEMAND_OBJSTATE_open, /* Anonymous fd associated with object is available */
 };
 
+struct cachefiles_ondemand_info {
+	int				ondemand_id;
+	enum cachefiles_object_state	state;
+	struct cachefiles_object	*object;
+};
+
 /*
  * node records
  */
@@ -53,10 +59,7 @@ struct cachefiles_object {
 	uint8_t				new;		/* T if object new */
 	spinlock_t			work_lock;
 	struct rb_node			active_node;	/* link in active tree (dentry is key) */
-#ifdef CONFIG_CACHEFILES_ONDEMAND
-	int				ondemand_id;
-	enum cachefiles_object_state	state;
-#endif
+	struct cachefiles_ondemand_info	*private;
 };
 
 extern struct kmem_cache *cachefiles_object_jar;
@@ -292,17 +295,20 @@ extern void cachefiles_ondemand_clean_object(struct cachefiles_object *object);
 extern int cachefiles_ondemand_read(struct cachefiles_object *object,
 											loff_t pos, size_t len);
 
+extern int cachefiles_ondemand_init_obj_info(struct cachefiles_object *object);
+extern void cachefiles_ondemand_deinit_obj_info(struct cachefiles_object *object);
+
 #define CACHEFILES_OBJECT_STATE_FUNCS(_state)	\
 static inline bool								\
 cachefiles_ondemand_object_is_##_state(const struct cachefiles_object *object) \
 {												\
-	return object->state == CACHEFILES_ONDEMAND_OBJSTATE_##_state; \
+	return object->private->state == CACHEFILES_ONDEMAND_OBJSTATE_##_state; \
 }												\
 												\
 static inline void								\
 cachefiles_ondemand_set_object_##_state(struct cachefiles_object *object) \
 {												\
-	object->state = CACHEFILES_ONDEMAND_OBJSTATE_##_state; \
+	object->private->state = CACHEFILES_ONDEMAND_OBJSTATE_##_state; \
 }
 
 CACHEFILES_OBJECT_STATE_FUNCS(open);
@@ -326,6 +332,16 @@ static inline int cachefiles_ondemand_read(struct cachefiles_object *object,
 											loff_t pos, size_t len)
 {
 	return -EOPNOTSUPP;
+}
+
+static inline int cachefiles_ondemand_init_obj_info(struct cachefiles_object *object)
+{
+	return 0;
+}
+
+static inline void cachefiles_ondemand_deinit_obj_info(struct cachefiles_object *object)
+{
+	return;
 }
 #endif
 

@@ -52,6 +52,9 @@ static struct fscache_object *cachefiles_alloc_object(
 
 	fscache_object_init(&object->fscache, cookie, &cache->cache);
 
+	if (cachefiles_ondemand_init_obj_info(object))
+		goto nomem_obj_info;
+
 	object->type = cookie->def->type;
 
 	/* get hold of the raw key
@@ -103,6 +106,8 @@ static struct fscache_object *cachefiles_alloc_object(
 nomem_key:
 	kfree(buffer);
 nomem_buffer:
+	cachefiles_ondemand_deinit_obj_info(object);
+nomem_obj_info:
 	BUG_ON(test_bit(CACHEFILES_OBJECT_ACTIVE, &object->flags));
 	kmem_cache_free(cachefiles_object_jar, object);
 	fscache_object_destroyed(&cache->cache);
@@ -374,6 +379,7 @@ void cachefiles_put_object(struct fscache_object *_object,
 		}
 
 		cache = object->fscache.cache;
+		cachefiles_ondemand_deinit_obj_info(object);
 		fscache_object_destroy(&object->fscache);
 		kmem_cache_free(cachefiles_object_jar, object);
 		fscache_object_destroyed(cache);
