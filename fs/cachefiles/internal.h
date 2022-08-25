@@ -97,6 +97,7 @@ struct cachefiles_cache {
 	char				*secctx;	/* LSM security context */
 	char				*tag;		/* cache binding tag */
 	struct xarray		reqs;		/* xarray of pending on-demand requests */
+	unsigned long		req_id_next;
 	struct xarray		ondemand_ids;	/* xarray for ondemand_id allocation */
 	refcount_t			unbind_pincount;/* refcount to do daemon unbind */
 	u32				ondemand_id_next;
