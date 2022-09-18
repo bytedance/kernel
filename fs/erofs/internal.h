@@ -358,6 +358,7 @@ static inline unsigned int erofs_inode_datalayout(unsigned int value)
 }
 
 extern const struct super_operations erofs_sops;
+extern struct file_system_type erofs_fs_type;
 
 extern const struct address_space_operations erofs_raw_access_aops;
 extern const struct address_space_operations z_erofs_aops;
