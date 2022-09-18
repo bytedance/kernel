@@ -66,6 +66,7 @@ struct erofs_mount_opts {
 #endif
 	unsigned int mount_opt;
 	char *fsid;
+	char *domain_id;
 };
 
 struct erofs_dev_context {
@@ -78,6 +79,13 @@ struct erofs_dev_context {
 struct erofs_fs_context {
 	struct erofs_mount_opts opt;
 	struct erofs_dev_context *devs;
+};
+
+struct erofs_domain {
+	refcount_t ref;
+	struct list_head list;
+	struct fscache_cookie *volume;
+	char *domain_id;
 };
 
 struct erofs_fscache {
@@ -129,6 +137,7 @@ struct erofs_sb_info {
 	/* fscache support */
 	struct fscache_cookie *volume;
 	struct erofs_fscache *s_fscache;
+	struct erofs_domain *domain;
 };
 
 #define EROFS_SB(sb) ((struct erofs_sb_info *)(sb)->s_fs_info)
