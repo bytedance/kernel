@@ -218,7 +218,7 @@ then
 		mkdir -p $output/tools/perf
 		output="O=$output/tools/perf"
 	fi
-	$MAKE -C $srctree/tools/perf $output LDFLAGS= srctree=$KBUILD_SRC prefix=$tools_dest/usr install
+	$MAKE -C $srctree/tools/perf $output LDFLAGS= srctree=$KBUILD_SRC DESTDIR=$tools_dest prefix=/usr install
 
 	$MAKE -C $srctree/tools/bpf/bpftool $output srctree=$(pwd)
 	mkdir -p $tools_dir/usr/sbin
@@ -226,7 +226,13 @@ then
 	cp $srctree/tools/bpf/bpftool/bpftool $tools_dir/usr/sbin
 	cp $srctree/tools/bpf/bpftool/bash-completion/bpftool $tools_dir/usr/share/bash-completion/completions
 
-	dpkg-shlibdeps $tools_dest/usr/bin/* $tools_dest/usr/lib64/traceevent/plugins/*
+	if [ "$(uname -m)" = "x86_64" ]; then
+		LIB=lib64
+	else
+		LIB=lib
+	fi
+
+	dpkg-shlibdeps $tools_dest/usr/bin/* $tools_dest/usr/$LIB/traceevent/plugins/*
 	create_package "$tools_packagename" "$tools_dir"
 fi
 
