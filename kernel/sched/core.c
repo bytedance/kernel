@@ -7539,6 +7539,12 @@ static u64 cpu_shares_read_u64(struct cgroup_subsys_state *css,
 }
 
 #ifdef CONFIG_CFS_BANDWIDTH
+/*
+ * The minimum of quota/period ratio users can set, default is zero and users can set
+ * quota and period without triggering this constraint.
+ */
+unsigned int sysctl_sched_cfs_bandwidth_min_ratio;
+
 static DEFINE_MUTEX(cfs_constraints_mutex);
 
 const u64 max_cfs_quota_period = 1 * NSEC_PER_SEC; /* 1s */
@@ -7547,6 +7553,20 @@ static const u64 min_cfs_quota_period = 1 * NSEC_PER_MSEC; /* 1ms */
 static const u64 max_cfs_runtime = MAX_BW * NSEC_PER_USEC;
 
 static int __cfs_schedulable(struct task_group *tg, u64 period, u64 runtime);
+
+static int check_cfs_bandwidth_min_ratio(u64 period, u64 quota)
+{
+	u64 ratio;
+
+	if (!sysctl_sched_cfs_bandwidth_min_ratio)
+		return 0;
+
+	ratio = div64_u64(quota * 100, period);
+	if (ratio < sysctl_sched_cfs_bandwidth_min_ratio)
+		return -1;
+
+	return 0;
+}
 
 static int tg_set_cfs_bandwidth(struct task_group *tg, u64 period, u64 quota,
 				u64 burst)
@@ -7581,6 +7601,9 @@ static int tg_set_cfs_bandwidth(struct task_group *tg, u64 period, u64 quota,
 
 	if (quota != RUNTIME_INF && (burst > quota ||
 				     burst + quota > max_cfs_runtime))
+		return -EINVAL;
+
+	if (quota != RUNTIME_INF && check_cfs_bandwidth_min_ratio(period, quota))
 		return -EINVAL;
 
 	/*

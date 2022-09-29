@@ -117,6 +117,19 @@ This is tunable via procfs::
 Larger slice values will reduce transfer overheads, while smaller values allow
 for more fine-grained consumption.
 
+Tasks may be throttled when holding locks for a long time by current
+cfs bandwidth control mechanism once users set a too small quota/period
+ratio, and other processes waiting for the lock will block. Once throttling
+occurs in the critical path of the kernel, e.g. fork(), the whole system
+may even get stuck. The minimum percentage of quota/period users can set
+is constrained by sysctl_sched_cfs_bandwidth_min_ratio.
+
+This is tunable via procfs::
+	/proc/sys/kernel/sysctl_sched_cfs_bandwidth_min_ratio
+
+The default value is zero and users can set quota and period without
+triggering this constraint.
+
 Statistics
 ----------
 A group's bandwidth statistics are exported via 5 fields in cpu.stat.

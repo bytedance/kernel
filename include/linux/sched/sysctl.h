@@ -64,6 +64,7 @@ extern unsigned int sysctl_sched_uclamp_util_max;
 
 #ifdef CONFIG_CFS_BANDWIDTH
 extern unsigned int sysctl_sched_cfs_bandwidth_slice;
+extern unsigned int sysctl_sched_cfs_bandwidth_min_ratio;
 #endif
 
 #ifdef CONFIG_SCHED_AUTOGROUP
