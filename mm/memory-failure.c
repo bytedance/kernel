@@ -1268,13 +1268,13 @@ static int memory_failure_hugetlb(unsigned long pfn, int flags)
 			    || (p != head && TestSetPageHWPoison(head))) {
 				num_poisoned_pages_dec();
 				unlock_page(head);
-				return 0;
+				return -EOPNOTSUPP;
 			}
 		}
 		unlock_page(head);
-		dissolve_free_huge_page(p);
-		action_result(pfn, MF_MSG_FREE_HUGE, MF_DELAYED);
-		return 0;
+		res = dissolve_free_huge_page(p);
+		action_result(pfn, MF_MSG_FREE_HUGE, res ? MF_FAILED : MF_DELAYED);
+		return res;
 	}
 
 	lock_page(head);
