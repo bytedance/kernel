@@ -37,8 +37,9 @@ struct cachefiles_msg {
 /*
  * @data contains the volume_key followed directly by the cookie_key. volume_key
  * is a NUL-terminated string; @volume_key_size indicates the size of the volume
- * key in bytes. cookie_key is binary data, which is netfs specific;
- * @cookie_key_size indicates the size of the cookie key in bytes.
+ * key in bytes (with trailing NUL). cookie_key is a string without trailing
+ * NUL; @cookie_key_size indicates the size of the cookie key in bytes (without
+ * trailing NUL).
  *
  * @fd identifies an anon_fd referring to the cache file.
  */

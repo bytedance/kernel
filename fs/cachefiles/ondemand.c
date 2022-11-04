@@ -403,21 +403,27 @@ static int cachefiles_ondemand_init_open_req(struct cachefiles_req *req,
 {
 	struct cachefiles_object *object = req->object;
 	struct fscache_cookie *cookie = object->fscache.cookie;
-	struct fscache_cookie *volume;
+	struct fscache_cookie *volume = object->fscache.parent->cookie;
 	struct cachefiles_open *load = (void *)req->msg.data;
 	size_t volume_key_size, cookie_key_size;
 	char *cookie_key, *volume_key;
 
-	/* Cookie key is binary data, which is netfs specific. */
+	/*
+	 * cookie_key is a string without trailing '\0', while cachefiles_open
+	 * expects cookie key a string without trailing '\0'.
+	 */
 	cookie_key_size = cookie->key_len;
 	if (cookie->key_len <= sizeof(cookie->inline_key))
 		cookie_key = cookie->inline_key;
 	else
 		cookie_key = cookie->key;
 
-	volume = object->fscache.parent->cookie;
+	/*
+	 * volume_key is a string without trailing '\0', while cachefiles_open
+	 * expects volume key a string with trailing '\0'.
+	 */
 	volume_key_size = volume->key_len + 1;
-	if (volume->key_len <= sizeof(cookie->inline_key))
+	if (volume->key_len <= sizeof(volume->inline_key))
 		volume_key = volume->inline_key;
 	else
 		volume_key = volume->key;
