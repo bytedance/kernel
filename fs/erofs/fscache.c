@@ -116,10 +116,14 @@ static void erofs_fscache_rreq_unlock_pages(struct netfs_read_request *rreq)
 
 	rcu_read_lock();
 	xas_for_each(&xas, page, last_page) {
-		unsigned int pgpos =
-			(page_index(page) - start_page) * PAGE_SIZE;
-		unsigned int pgend = pgpos + PAGE_SIZE;
+		unsigned int pgpos, pgend;
 		bool pg_failed = false;
+
+		if (xas_retry(&xas, page))
+			continue;
+
+		pgpos = (page_index(page) - start_page) * PAGE_SIZE;
+		pgend = pgpos + PAGE_SIZE;
 
 		for (;;) {
 			if (!subreq) {
