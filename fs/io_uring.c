@@ -9014,7 +9014,7 @@ static void io_disable_sqo_submit(struct io_ring_ctx *ctx)
 {
 	mutex_lock(&ctx->uring_lock);
 	ctx->sqo_dead = 1;
-	if (ctx->flags & IORING_SETUP_R_DISABLED)
+	if (ctx->flags & IORING_SETUP_R_DISABLED && ctx->sq_data)
 		io_sq_offload_start(ctx);
 	mutex_unlock(&ctx->uring_lock);
 
