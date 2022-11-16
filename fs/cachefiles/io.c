@@ -10,6 +10,7 @@
 #include <linux/file.h>
 #include <linux/uio.h>
 #include <linux/sched/mm.h>
+#include <linux/pagevec.h>
 #include <linux/netfs.h>
 #include "internal.h"
 
@@ -52,6 +53,52 @@ static void cachefiles_read_complete(struct kiocb *iocb, long ret, long ret2)
 	cachefiles_put_kiocb(ki);
 }
 
+static void cachefiles_page_copy(struct cachefiles_kiocb *ki, struct iov_iter *iter)
+{
+	struct address_space *mapping =  ki->iocb.ki_filp->f_mapping;
+	struct kiocb *iocb = &ki->iocb;
+	loff_t isize = i_size_read(mapping->host);
+	loff_t end = min_t(loff_t, isize, iocb->ki_pos + iov_iter_count(iter));
+	struct pagevec pv;
+	pgoff_t index;
+	unsigned int i;
+	bool writably_mapped;
+	int error = 0;
+
+	while (iocb->ki_pos < end && !error) {
+		index = iocb->ki_pos >> PAGE_SHIFT;
+		pv.nr = find_get_pages_contig(mapping, index, PAGEVEC_SIZE, pv.pages);
+		if (pv.nr == 0)
+			break;
+		writably_mapped = mapping_writably_mapped(mapping);
+
+		for (i = 0; i < pv.nr; i++) {
+			struct page *page = pv.pages[i];
+			unsigned int offset = iocb->ki_pos & ~PAGE_MASK;
+			unsigned int bytes = min_t(loff_t, end - iocb->ki_pos,
+						   PAGE_SIZE - offset);
+			unsigned int copied;
+
+			if (page->index * PAGE_SIZE >= end)
+				break;
+			if (!PageUptodate(page)) {
+				error = -1;
+				break;
+			}
+			if (writably_mapped)
+				flush_dcache_page(page);
+			copied = copy_page_to_iter(page, offset, bytes, iter);
+			iocb->ki_pos += copied;
+			if (copied < bytes) {
+				error = -1;
+				break;
+			}
+		}
+		for (i = 0; i < pv.nr; i++)
+			put_page(pv.pages[i]);
+	}
+}
+
 /*
  * Initiate a read from the cache.
  */
@@ -67,6 +114,10 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 	unsigned int old_nofs;
 	ssize_t ret = -ENOBUFS;
 	size_t len = iov_iter_count(iter), skipped = 0;
+	struct fscache_retrieval *op = cres->cache_priv;
+	struct cachefiles_object *object = container_of(op->op.object,
+					struct cachefiles_object, fscache);
+
 
 	_enter("%pD,%li,%llx,%zx/%llx",
 	       file, file_inode(file)->i_ino, start_pos, len,
@@ -122,6 +173,19 @@ static int cachefiles_read(struct netfs_cache_resources *cres,
 	get_file(ki->iocb.ki_filp);
 
 	old_nofs = memalloc_nofs_save();
+
+	/* for ondemand mode try to fill iter form pagecache first */
+	if (cachefiles_in_ondemand_mode(container_of(object->fscache.cache,
+					struct cachefiles_cache, cache))) {
+		cachefiles_page_copy(ki, iter);
+		if (!iov_iter_count(iter)) {
+			memalloc_nofs_restore(old_nofs);
+			ki->was_async = false;
+			cachefiles_read_complete(&ki->iocb, len - skipped, 0);
+			ret = 0;
+			goto in_progress;
+		}
+	}
 	ret = vfs_iocb_iter_read(file, &ki->iocb, iter);
 	memalloc_nofs_restore(old_nofs);
 	switch (ret) {
@@ -191,6 +255,8 @@ int __cachefiles_write(struct cachefiles_object *object,
 	unsigned int old_nofs;
 	ssize_t ret = -ENOBUFS;
 	size_t len = iov_iter_count(iter);
+	struct cachefiles_cache *cache = container_of(object->fscache.cache,
+			     struct cachefiles_cache, cache);
 
 	_enter("%pD,%li,%llx,%zx/%llx",
 	       file, file_inode(file)->i_ino, start_pos, len,
@@ -203,7 +269,10 @@ int __cachefiles_write(struct cachefiles_object *object,
 	refcount_set(&ki->ki_refcnt, 2);
 	ki->iocb.ki_filp	= file;
 	ki->iocb.ki_pos		= start_pos;
-	ki->iocb.ki_flags	= IOCB_DIRECT | IOCB_WRITE;
+	if (cachefiles_in_ondemand_mode(cache))
+		ki->iocb.ki_flags	= IOCB_WRITE;
+	else
+		ki->iocb.ki_flags	= IOCB_DIRECT | IOCB_WRITE;
 	ki->iocb.ki_hint	= ki_hint_validate(file_write_hint(file));
 	ki->iocb.ki_ioprio	= get_current_ioprio();
 	ki->start		= start_pos;
