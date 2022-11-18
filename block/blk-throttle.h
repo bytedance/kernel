@@ -179,6 +179,8 @@ static inline bool blk_throtl_bio(struct bio *bio)
 		blkg_rwstat_add(&tg->stat_ios, bio->bi_opf, 1);
 	}
 
+	if (bio->bi_opf & REQ_META)
+		return false;
 	if (bio_flagged(bio, BIO_THROTTLED))
 		return false;
 	if (!tg->has_rules[bio_data_dir(bio)])
