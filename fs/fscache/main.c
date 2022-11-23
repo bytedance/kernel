@@ -39,6 +39,7 @@ MODULE_PARM_DESC(fscache_debug,
 
 struct kobject *fscache_root;
 struct workqueue_struct *fscache_object_wq;
+EXPORT_SYMBOL(fscache_object_wq);
 struct workqueue_struct *fscache_op_wq;
 
 DEFINE_PER_CPU(wait_queue_head_t, fscache_object_cong_wait);

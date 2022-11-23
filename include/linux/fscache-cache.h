@@ -74,6 +74,7 @@ struct fscache_cache {
 };
 
 extern wait_queue_head_t fscache_cache_cleared_wq;
+extern struct workqueue_struct *fscache_object_wq;
 
 /*
  * operation to be applied to a cache object
