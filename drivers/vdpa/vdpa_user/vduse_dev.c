@@ -817,6 +817,9 @@ static void vduse_vdpa_get_config(struct vdpa_device *vdpa, unsigned int offset,
 					     dev->config_size);
 	}
 
+	/* Initialize the buffer in case of partial copy. */
+	memset(buf, 0, len);
+
 	spin_lock(&dev->config_lock);
 	if (!dev->config)
 		dev->config = config;
