@@ -43,6 +43,8 @@
 #define VDUSE_DEV_MAX (1U << MINORBITS)
 #define VDUSE_REQUEST_TIMEOUT 30
 
+#define MIN_CUSTOM_VIRTIO_ID 63
+
 struct vduse_dev;
 
 struct vduse_virtqueue {
@@ -136,6 +138,10 @@ struct vduse_control {
 	unsigned long api_version;
 };
 
+static bool allow_unsafe_device;
+module_param(allow_unsafe_device, bool, 0644);
+MODULE_PARM_DESC(allow_unsage_device, "Allow emulating unsafe device types");
+
 static unsigned long max_bounce_size = (1024 * 1024 * 1024UL);
 module_param(max_bounce_size, ulong, 0444);
 MODULE_PARM_DESC(max_bounce_size, "Maximum bounce buffer size. (default: 1G)");
@@ -152,6 +158,12 @@ static dev_t vduse_major;
 static struct class *vduse_class;
 static struct workqueue_struct *vduse_irq_wq;
 static struct workqueue_struct *vduse_irq_bound_wq;
+
+static u32 allowed_device_id[] = {
+	VIRTIO_ID_BLOCK,
+	VIRTIO_ID_FS,
+	VIRTIO_ID_NET,
+};
 
 static inline struct vduse_dev *vdpa_to_vduse(struct vdpa_device *vdpa)
 {
@@ -2061,6 +2073,37 @@ static void vduse_release_dev(struct device *device)
 	vduse_dev_destroy(dev);
 }
 
+static bool device_is_allowed(u32 device_id)
+{
+	int i;
+
+	if (allow_unsafe_device || device_id >= MIN_CUSTOM_VIRTIO_ID)
+		return true;
+
+	for (i = 0; i < ARRAY_SIZE(allowed_device_id); i++)
+		if (allowed_device_id[i] == device_id)
+			return true;
+
+	return false;
+}
+
+static bool vduse_validate_config(struct vduse_dev_config *config)
+{
+	if (config->vq_align > PAGE_SIZE)
+		return false;
+
+	if (config->config_size > PAGE_SIZE)
+		return false;
+
+	if (config->vq_num > 0xffff)
+		return false;
+
+	if (!device_is_allowed(config->device_id))
+		return false;
+
+	return true;
+}
+
 static int vduse_create_dev(struct vduse_dev_config *config,
 			    unsigned long api_version)
 {
@@ -2164,6 +2207,10 @@ static long vduse_ioctl(struct file *file, unsigned int cmd,
 
 		ret = -EFAULT;
 		if (copy_from_user(&config, argp, sizeof(config)))
+			break;
+
+		ret = -EINVAL;
+		if (vduse_validate_config(&config) == false)
 			break;
 
 		ret = vduse_create_dev(&config, control->api_version);
