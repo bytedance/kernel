@@ -2570,7 +2570,6 @@ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *
 	   (!(sb->s_iflags & SB_I_TS_EXPIRY_WARNED)) &&
 	   (ktime_get_real_seconds() + TIME_UPTIME_SEC_MAX > sb->s_time_max)) {
 		char *buf, *mntpath;
-		struct tm tm;
 		
 		buf = (char *)__get_free_page(GFP_KERNEL);
 		if (buf)
@@ -2580,13 +2579,11 @@ static void mnt_warn_timestamp_expiry(struct path *mountpoint, struct vfsmount *
 		if (IS_ERR(mntpath))
 			mntpath = "(unknown)";
 
-		time64_to_tm(sb->s_time_max, 0, &tm);
-
-		pr_warn("%s filesystem being %s at %s supports timestamps until %04ld (0x%llx)\n",
+		pr_warn("%s filesystem being %s at %s supports timestamps until %ptTd (0x%llx)\n",
 			sb->s_type->name,
 			is_mounted(mnt) ? "remounted" : "mounted",
-			mntpath,
-			tm.tm_year+1900, (unsigned long long)sb->s_time_max);
+			mntpath, &sb->s_time_max,
+			(unsigned long long)sb->s_time_max);
 
 		sb->s_iflags |= SB_I_TS_EXPIRY_WARNED;
 		if (buf)
