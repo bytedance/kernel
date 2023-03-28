@@ -23468,6 +23468,11 @@ F:	Documentation/ABI/testing/sysfs-mce
 F:	Documentation/arch/x86/x86_64/machinecheck.rst
 F:	arch/x86/kernel/cpu/mce/*
 
+X86 MCE STAT
+M:	Rui Qi <qirui.001@bytedance.com>
+S:	Maintained
+F:	include/linux/mce.h
+
 X86 MICROCODE UPDATE SUPPORT
 M:	Borislav Petkov <bp@alien8.de>
 S:	Maintained
