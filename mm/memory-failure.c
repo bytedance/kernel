@@ -37,6 +37,7 @@
 #define pr_fmt(fmt) "Memory failure: " fmt
 
 #include <linux/kernel.h>
+#include <linux/mce.h>
 #include <linux/mm.h>
 #include <linux/page-flags.h>
 #include <linux/sched/signal.h>
@@ -343,6 +344,9 @@ static int kill_proc(struct to_kill *tk, unsigned long pfn, int flags)
 	short addr_lsb = tk->size_shift;
 	int ret = 0;
 
+	mcestat_record(tk->tsk, pfn << PAGE_SHIFT, SIGBUS,
+		       !(flags & MF_ACTION_REQUIRED));
+
 	pr_err("%#lx: Sending SIGBUS to %s:%d due to hardware memory corruption\n",
 			pfn, t->comm, t->pid);
 
@@ -532,6 +536,9 @@ static void kill_procs(struct list_head *to_kill, int forcekill, bool fail,
 			 * signal and then access the memory. Just kill it.
 			 */
 			if (fail || tk->addr == -EFAULT) {
+				mcestat_record(tk->tsk, pfn << PAGE_SHIFT, SIGKILL,
+					       !(flags & MF_ACTION_REQUIRED));
+
 				pr_err("%#lx: forcibly killing %s:%d because of failure to unmap corrupted page\n",
 				       pfn, tk->tsk->comm, tk->tsk->pid);
 				do_send_sig_info(SIGKILL, SEND_SIG_PRIV,
@@ -625,16 +632,22 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
 		struct anon_vma_chain *vmac;
 		struct task_struct *t = task_early_kill(tsk, force_early);
 
+#if !defined(CONFIG_X86_MCE)
 		if (!t)
 			continue;
+#endif
 		anon_vma_interval_tree_foreach(vmac, &av->rb_root,
 					       pgoff, pgoff) {
 			vma = vmac->vma;
-			if (vma->vm_mm != t->mm)
+			if (vma->vm_mm != tsk->mm)
 				continue;
 			if (!page_mapped_in_vma(page, vma))
 				continue;
-			add_to_kill_anon_file(t, page, vma, to_kill);
+
+			mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
+				       0, !force_early);
+			if (t)
+				add_to_kill_anon_file(t, page, vma, to_kill);
 		}
 	}
 	rcu_read_unlock();
@@ -658,8 +671,10 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 	for_each_process(tsk) {
 		struct task_struct *t = task_early_kill(tsk, force_early);
 
+#if !defined(CONFIG_X86_MCE)
 		if (!t)
 			continue;
+#endif
 		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
 				      pgoff) {
 			/*
@@ -669,8 +684,12 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 			 * Assume applications who requested early kill want
 			 * to be informed of all such data corruptions.
 			 */
-			if (vma->vm_mm == t->mm)
-				add_to_kill_anon_file(t, page, vma, to_kill);
+			if (vma->vm_mm == tsk->mm) {
+				mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
+					       0, !force_early);
+				if (t)
+					add_to_kill_anon_file(t, page, vma, to_kill);
+			}
 		}
 	}
 	rcu_read_unlock();
@@ -700,11 +719,17 @@ static void collect_procs_fsdax(struct page *page,
 	for_each_process(tsk) {
 		struct task_struct *t = task_early_kill(tsk, true);
 
+#if !defined(CONFIG_BYTEDANCE_X86_MCE_STAT)
 		if (!t)
 			continue;
+#endif
 		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
-			if (vma->vm_mm == t->mm)
-				add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
+			if (vma->vm_mm == tsk->mm) {
+				mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
+					       0, false);
+				if (t)
+					add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
+			}
 		}
 	}
 	rcu_read_unlock();
