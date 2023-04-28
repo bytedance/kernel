@@ -1062,6 +1062,16 @@ retry:
 			}
 		}
 
+		/*
+		 * Page is unmapped now so it cannot be newly pinned anymore.
+		 * No point in trying to reclaim page if it is pinned.
+		 * Furthermore we don't want to reclaim underlying fs metadata
+		 * if the page is pinned and thus potentially modified by the
+		 * pinning process as that may upset the filesystem.
+		 */
+		if (page_maybe_dma_pinned(page))
+			goto activate_locked;
+
 		if (PageDirty(page)) {
 			/*
 			 * Only kswapd can writeback filesystem pages
