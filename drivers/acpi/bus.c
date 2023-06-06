@@ -26,9 +26,6 @@
 #include <asm/mpspec.h>
 #include <linux/dmi.h>
 #endif
-#include <linux/acpi_apmt.h>
-#include <linux/acpi_agdi.h>
-#include <linux/acpi_iort.h>
 #include <linux/acpi_viot.h>
 #include <linux/pci.h>
 #include <acpi/apei.h>
@@ -1322,7 +1319,7 @@ static int __init acpi_init(void)
 	}
 
 	pci_mmcfg_late_init();
-	acpi_iort_init();
+	acpi_arm_init();
 	acpi_viot_early_init();
 	acpi_hest_init();
 	ghes_init();
@@ -1334,8 +1331,6 @@ static int __init acpi_init(void)
 	acpi_debugger_init();
 	acpi_setup_sb_notify_handler();
 	acpi_viot_init();
-	acpi_apmt_init();
-	acpi_agdi_init();
 	return 0;
 }
 
