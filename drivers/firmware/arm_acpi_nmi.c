@@ -164,8 +164,7 @@ static void dump_in_irq(struct irq_work *irq_work)
 		show_all_cpus();
 
 	if (panic_on_acpi_nmi) {
-		pr_emerg("Panic triggered by BMC");
-		panic("ACPI NMI");
+		panic("Panic triggered by BMC!!\n");
 	}
 }
 
