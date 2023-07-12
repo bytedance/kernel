@@ -225,7 +225,7 @@ static int acpi_nmi_probe(struct platform_device *pdev)
 	if (obj && obj->integer.value != INVALID_SDEI_NUM)
 		err = register_sdei_event(obj->integer.value);
 	else {
-		pr_info("failed get sdei num\n");
+		pr_err("failed get sdei num\n");
 		return -EINVAL;
 	}
 
@@ -241,7 +241,7 @@ static int acpi_nmi_probe(struct platform_device *pdev)
 			registered_event_num = 0;
 		}
 	} else {
-		pr_info("failed register sdei num, err %d\n", err);
+		pr_err("failed register sdei num, err %d\n", err);
 	}
 	ACPI_FREE(obj);
 
