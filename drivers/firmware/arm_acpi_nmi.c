@@ -132,14 +132,14 @@ static void show_all_cpus(void)
 		preempt_enable();
 
 		if (idle_cpu(cpu)) {
-			pr_info("CPU%d: backtrace skipped as idling\n", cpu);
+			pr_emerg("CPU%d: backtrace skipped as idling\n", cpu);
 			return;
 		}
 
 		if (in_irq())
 			regs = get_irq_regs();
 
-		pr_info("CPU%d:\n", cpu);
+		pr_emerg("CPU%d:\n", cpu);
 		if (regs)
 			show_regs(regs);
 		else
@@ -156,7 +156,7 @@ static void show_memory(void)
 
 static void dump_in_irq(struct irq_work *irq_work)
 {
-	pr_info("Start dumping, triggered by BMC");
+	pr_emerg("Start dumping, triggered by BMC");
 	if (showmem_on_acpi_nmi)
 		show_memory();
 
@@ -164,7 +164,7 @@ static void dump_in_irq(struct irq_work *irq_work)
 		show_all_cpus();
 
 	if (panic_on_acpi_nmi) {
-		pr_info("Panic triggered by BMC");
+		pr_emerg("Panic triggered by BMC");
 		panic("ACPI NMI");
 	}
 }
@@ -177,12 +177,12 @@ static void showacpu(void *dummy)
 
 	/* Idle CPUs have no interesting backtrace. */
 	if (idle_cpu(smp_processor_id())) {
-		pr_info("CPU%d: backtrace skipped as idling\n", smp_processor_id());
+		pr_emerg("CPU%d: backtrace skipped as idling\n", smp_processor_id());
 		return;
 	}
 
 	raw_spin_lock_irqsave(&show_lock, flags);
-	pr_info("CPU%d:\n", smp_processor_id());
+	pr_emerg("CPU%d:\n", smp_processor_id());
 	show_stack(NULL, NULL, KERN_DEFAULT);
 	raw_spin_unlock_irqrestore(&show_lock, flags);
 }
