@@ -125,11 +125,21 @@ static void show_all_cpus(void)
 	 */
 	if (!trigger_all_cpu_backtrace()) {
 		struct pt_regs *regs = NULL;
+		int cpu;
+
+		preempt_disable();
+		cpu = smp_processor_id();
+		preempt_enable();
+
+		if (idle_cpu(cpu)) {
+			pr_info("CPU%d: backtrace skipped as idling\n", cpu);
+			return;
+		}
 
 		if (in_irq())
 			regs = get_irq_regs();
 
-		pr_info("CPU%d:\n", smp_processor_id());
+		pr_info("CPU%d:\n", cpu);
 		if (regs)
 			show_regs(regs);
 		else
