@@ -432,6 +432,8 @@ static int seamldr_install(const struct seamldr_params *params)
 static int do_tdx_module_update(struct update_ctx *ctx)
 {
 	struct seamldr_params *params = ctx->params;
+	struct seam_sigstruct *sig;
+	bool live_update;
 	int ret;
 
 	/*
@@ -459,6 +461,16 @@ static int do_tdx_module_update(struct update_ctx *ctx)
 	if (ret)
 		goto unlock;
 
+	live_update = (ctx->params->scenario == SEAMLDR_SCENARIO_UPDATE);
+	if (live_update) {
+		sig = ctx->sig->data;
+		ret = tdx_prepare_handoff_data(sig->min_update_hv);
+		if (ret) {
+			ctx->recoverable = true;
+			goto put;
+		}
+	}
+
 	ret = seamldr_install(params);
 	if (!ret) {
 		ret = tdx_enable_after_update();
@@ -468,6 +480,7 @@ static int do_tdx_module_update(struct update_ctx *ctx)
 		pr_err("Failed to install new TDX module %d\n", ret);
 	}
 
+put:
 	cpu_vmxop_put_all();
 unlock:
 	cpus_read_unlock();

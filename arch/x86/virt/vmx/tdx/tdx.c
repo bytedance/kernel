@@ -1435,6 +1435,18 @@ int tdx_enable(void)
 }
 EXPORT_SYMBOL_GPL(tdx_enable);
 
+/*
+ * Shut down TDX module and prepare handoff data for the next TDX module.
+ * Following a successful TDH_SYS_SHUTDOWN, further TDX module APIs will
+ * fail.
+ */
+int tdx_prepare_handoff_data(u16 req_hv)
+{
+	struct tdx_module_args args = { .rcx = req_hv };
+
+	return seamcall(TDH_SYS_SHUTDOWN, &args);
+}
+
 static void tdx_cpu_reenable(void *unused)
 {
 	tdx_cpu_enable(raw_smp_processor_id());

@@ -21,6 +21,7 @@
 #define TDH_SYS_LP_INIT		35
 #define TDH_SYS_TDMR_INIT	36
 #define TDH_SYS_CONFIG		45
+#define TDH_SYS_SHUTDOWN	52
 
 /* TDX page types */
 #define	PT_NDA		0x0
@@ -171,6 +172,7 @@ struct tdx_sysinfo {
 void tdx_module_lock(void);
 void tdx_module_unlock(void);
 int tdx_enable_after_update(void);
+int tdx_prepare_handoff_data(u16 req_hv);
 
 extern struct tdx_sysinfo sysinfo;
 extern enum tdx_module_status_t tdx_module_status; 
