@@ -211,6 +211,11 @@ static bool can_preserve_td(const struct seam_sigstruct *sigstruct)
 		return false;
 	}
 
+	if (!sigstruct->num_handoff_pages) {
+		pr_err("TD-preserving: New module doesn't support TD-preserving\n");
+		return false;
+	}
+
 	return true;
 }
 
