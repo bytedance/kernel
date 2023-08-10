@@ -103,7 +103,7 @@ struct p_seamldr_info {
 	u8	reserved2[88];
 } __packed __aligned(P_SEAMLDR_INFO_ALIGNMENT);
 
- /* P-SEAMLDR SEAMCALL leaf function */
+/* P-SEAMLDR SEAMCALL leaf function */
 #define P_SEAMLDR_SEAMCALL_BASE		BIT_ULL(63)
 #define P_SEAMLDR_INFO			(P_SEAMLDR_SEAMCALL_BASE | 0x0)
 #define P_SEAMLDR_INSTALL		(P_SEAMLDR_SEAMCALL_BASE | 0x1)

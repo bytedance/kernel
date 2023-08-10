@@ -91,6 +91,10 @@ struct tdmr_info {
 
 
 #define TDX_FEATURES0_TD_PRES			BIT(1)
+#define TDX_MD_MODULE_HV			0x8900000100000000
+#define TDX_MD_MIN_UPDATE_HV			0x8900000100000001
+#define TDX_MD_NO_DOWNGRADE			0x8900000000000002
+
 /*
  * Do not put any hardware-defined TDX structure representations below
  * this comment!
@@ -170,10 +174,12 @@ struct tdx_sysinfo {
 	struct tdx_sysinfo_tdmr_info		tdmr_info;
 };
 
+struct seam_sigstruct;
+
 void tdx_module_lock(void);
 void tdx_module_unlock(void);
 int tdx_enable_after_update(bool live_update);
-int tdx_prepare_handoff_data(u16 req_hv);
+int tdx_prepare_handoff_data(struct seam_sigstruct *sig);
 
 extern struct tdx_sysinfo sysinfo;
 extern enum tdx_module_status_t tdx_module_status; 

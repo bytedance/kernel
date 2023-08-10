@@ -1249,6 +1249,23 @@ static void mark_may_have_private_memory(bool may)
 	smp_wmb();
 }
 
+#define BUILD_TDX_READ_MD_HELPERS(rtype)		\
+static int tdx_read_md_##rtype(u64 id, rtype *value)	\
+{							\
+	struct tdx_module_args args = { .rdx = id };	\
+	int ret;					\
+							\
+	ret = seamcall(TDH_SYS_RD, &args);		\
+	if (!ret)					\
+		*value = args.r8;			\
+	else						\
+		*value = 0;				\
+	return ret;					\
+}
+
+BUILD_TDX_READ_MD_HELPERS(u16)
+BUILD_TDX_READ_MD_HELPERS(bool)
+
 struct tdx_sysinfo sysinfo;
 
 static int get_sysinfo(void)
@@ -1354,7 +1371,7 @@ static bool verify_all_cpus_enabled_tdx(void)
 
 static int init_tdx_module_via_handoff_data(void)
 {
-	struct tdx_module_args args = { .rcx = 0 };
+	struct tdx_module_args args = {};
 	return seamcall(TDH_SYS_UPDATE, &args);
 }
 
@@ -1443,15 +1460,62 @@ int tdx_enable(void)
 }
 EXPORT_SYMBOL_GPL(tdx_enable);
 
+static int determine_handoff_version(const struct seam_sigstruct *sig)
+{
+	u16 module_hv, min_update_hv;
+	bool no_downgrade;
+	int ret;
+
+	/*
+	 * TDX module can generate handoff for any version between its
+	 * [min_update_hv, module_hv]. But if no_downgrade is set, TDX
+	 * module can generate handoff for version == module_hv only.
+	 * Retrieve these three values from current TDX module,
+	 * compare them with the supported handoff version carried
+	 * in the new module's seam_sigstruct, then decide the proper
+	 * handoff version.
+	 */
+	ret = tdx_read_md_u16(TDX_MD_MODULE_HV, &module_hv);
+	if (ret)
+		return ret;
+
+	ret = tdx_read_md_u16(TDX_MD_MIN_UPDATE_HV, &min_update_hv);
+	if (ret)
+		return ret;
+
+	ret = tdx_read_md_bool(TDX_MD_NO_DOWNGRADE, &no_downgrade);
+	if (ret)
+		return ret;
+
+	if (no_downgrade)
+		min_update_hv = module_hv;
+
+	/* The supported handoff version doesn't overlap */
+	if (module_hv < sig->min_update_hv || min_update_hv > sig->module_hv) {
+		pr_err("Unsupported handoff versions [%d, %d]. Supported versions [%d, %d].\n",
+			sig->min_update_hv, sig->module_hv, min_update_hv, module_hv);
+		return -EINVAL;
+	}
+
+	/* Use the highest handoff version supported by both modules */
+	return min(module_hv, sig->module_hv);
+}
+
 /*
  * Shut down TDX module and prepare handoff data for the next TDX module.
  * Following a successful TDH_SYS_SHUTDOWN, further TDX module APIs will
  * fail.
  */
-int tdx_prepare_handoff_data(u16 req_hv)
+int tdx_prepare_handoff_data(struct seam_sigstruct *sig)
 {
-	struct tdx_module_args args = { .rcx = req_hv };
+	struct tdx_module_args args;
+	int ret;
 
+	ret = determine_handoff_version(sig);
+	if (ret < 0)
+		return ret;
+
+	args.rcx = ret;
 	return seamcall(TDH_SYS_SHUTDOWN, &args);
 }
 
