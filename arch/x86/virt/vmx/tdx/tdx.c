@@ -1352,7 +1352,13 @@ static bool verify_all_cpus_enabled_tdx(void)
 	return true;
 }
 
-static int __tdx_enable(void)
+static int init_tdx_module_via_handoff_data(void)
+{
+	struct tdx_module_args args = { .rcx = 0 };
+	return seamcall(TDH_SYS_UPDATE, &args);
+}
+
+static int __tdx_enable(bool live_update)
 {
 	int ret;
 
@@ -1363,19 +1369,21 @@ static int __tdx_enable(void)
 	if (ret)
 		goto out;
 
-	ret = init_tdx_module();
+	if (live_update)
+		ret = init_tdx_module_via_handoff_data();
+	else
+		ret = init_tdx_module();
 	if (ret)
 		goto out;
- 
+
 	pr_info("module initialized\n");
 	tdx_module_status = TDX_MODULE_INITIALIZED;
-
 	return 0;
 
 out:
 	pr_err("module initialization failed (%d)\n", ret);
 	tdx_module_status = TDX_MODULE_ERROR;
-	return ret; 
+	return ret;
 }
 
 /**
@@ -1413,7 +1421,7 @@ int tdx_enable(void)
 			pr_warn("all present CPUs should be online.\n");
 			ret = -EINVAL;
 		} else {
-			ret = __tdx_enable();
+			ret = __tdx_enable(false);
 		}
 
 		cpu_vmxop_put_all();
@@ -1462,7 +1470,7 @@ void tdx_reset_status(void)
         *per_cpu_ptr(&tdx_lp_initialized, cpu) = false;
 }
 
-int tdx_enable_after_update(void)
+int tdx_enable_after_update(bool live_update)
 {
 	/*
 	 * Reset flags used to track TDX module status and global (and per-CPU
@@ -1473,7 +1481,7 @@ int tdx_enable_after_update(void)
 	init_module_global();
 	on_each_cpu(tdx_cpu_reenable, NULL, 1);
 
-	return tdx_enable();
+	return __tdx_enable(live_update);
 }
 
 static bool is_pamt_page(unsigned long phys)
