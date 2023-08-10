@@ -180,7 +180,8 @@ static void free_seamldr_params(struct seamldr_params *params)
 
 /* Allocate and populate a seamldr_params */
 static struct seamldr_params *alloc_seamldr_params(const void *module, int module_size,
-						   const void *sig, int sig_size)
+						   const void *sig, int sig_size,
+						   bool live_update)
 {
 	struct seamldr_params *params;
 	unsigned long page;
@@ -195,7 +196,8 @@ static struct seamldr_params *alloc_seamldr_params(const void *module, int modul
 	if (!params)
 		return ERR_PTR(-ENOMEM);
 
-	params->scenario = SEAMLDR_SCENARIO_LOAD;
+	params->scenario = live_update ? SEAMLDR_SCENARIO_UPDATE :
+					 SEAMLDR_SCENARIO_LOAD;
 	params->num_module_pages = module_size >> PAGE_SHIFT;
 
 	/*
@@ -332,7 +334,7 @@ static struct update_ctx *init_update_ctx(void)
 		goto free;
 
 	params = alloc_seamldr_params(module->data, module->size,
-				      sig->data, sig->size);
+				      sig->data, sig->size, false);
 	if (IS_ERR(params)) {
 		ret = PTR_ERR(params);
 		goto free;
