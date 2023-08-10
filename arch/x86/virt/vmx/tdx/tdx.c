@@ -55,7 +55,9 @@ static DEFINE_PER_CPU(bool, tdx_lp_initialized);
 
 static struct tdmr_info_list tdx_tdmr_list;
 
-static enum tdx_module_status_t tdx_module_status;
+u64 tdx_features0;
+
+enum tdx_module_status_t tdx_module_status;
 static DEFINE_MUTEX(module_lock);
 
 void tdx_module_lock(void)

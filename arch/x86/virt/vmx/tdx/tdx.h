@@ -87,6 +87,8 @@ struct tdmr_info {
 	DECLARE_FLEX_ARRAY(struct tdmr_reserved_area, reserved_areas);
 } __packed __aligned(TDMR_INFO_ALIGNMENT);
 
+
+#define TDX_FEATURES0_TD_PRES			BIT(1)
 /*
  * Do not put any hardware-defined TDX structure representations below
  * this comment!
@@ -171,4 +173,5 @@ void tdx_module_unlock(void);
 int tdx_enable_after_update(void);
 
 extern struct tdx_sysinfo sysinfo;
+extern enum tdx_module_status_t tdx_module_status; 
 #endif

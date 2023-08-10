@@ -28,6 +28,7 @@
 
 static RAW_NOTIFIER_HEAD(update_chain_head);
 static DEFINE_MUTEX(update_chain_lock);
+static struct p_seamldr_info p_seamldr_info;
 
 /* Fake device for request_firmware */
 struct platform_device *tdx_pdev;
@@ -166,6 +167,46 @@ static int tdx_module_update_end(int val)
 	ret = raw_notifier_call_chain(&update_chain_head, val, NULL);
 
 	return notifier_to_errno(ret);
+}
+
+static bool can_preserve_td(void)
+{
+	int ret;
+
+	preempt_disable();
+	ret = cpu_vmxop_get();
+	if (ret) {
+		preempt_enable();
+		return false;
+	}
+	ret = seamldr_call(P_SEAMLDR_INFO, __pa(&p_seamldr_info), NULL);
+	cpu_vmxop_put();
+	preempt_enable();
+	if (ret) {
+		pr_err("Failed to get p_seamldr_info: %d\n", ret);
+		return false;
+	}
+
+	if (!p_seamldr_info.num_remaining_updates) {
+		pr_err("TD-preserving: No remaining update slot\n");
+		return false;
+	}
+
+	/*
+	 * Cannot create handoff data if the existing module hasn't
+	 * been initialized.
+	 */
+	if (tdx_module_status != TDX_MODULE_INITIALIZED) {
+		pr_err("TD-preserving: TDX module hasn't been initialized\n");
+		return false;
+	}
+
+	if (!(sysinfo.module_info.tdx_features0 & TDX_FEATURES0_TD_PRES)) {
+		pr_err("TD-preserving: TDX module doesn't support\n");
+		return false;
+	}
+
+	return true;
 }
 
 static void free_seamldr_params(struct seamldr_params *params)
@@ -334,7 +375,8 @@ static struct update_ctx *init_update_ctx(void)
 		goto free;
 
 	params = alloc_seamldr_params(module->data, module->size,
-				      sig->data, sig->size, false);
+				      sig->data, sig->size,
+				      can_preserve_td());
 	if (IS_ERR(params)) {
 		ret = PTR_ERR(params);
 		goto free;

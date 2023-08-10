@@ -70,6 +70,26 @@ struct seam_sigstruct {
 	u8		cpuid_table[1020];
 } __packed;
 
+#define P_SEAMLDR_INFO_ALIGNMENT	256
+
+struct p_seamldr_info {
+	u32	version;
+	u32	attributes;
+	u32	vendor_id;
+	u32	build_date;
+	u16	build_num;
+	u16	minor;
+	u16	major;
+	u8	reserved0[2];
+	u32	acm_x2apicid;
+	u32	num_remaining_updates;
+	u8	seaminfo[128];
+	u8	seam_ready;
+	u8	seam_debug;
+	u8	p_seamldr_ready;
+	u8	reserved2[88];
+} __packed __aligned(P_SEAMLDR_INFO_ALIGNMENT);
+
  /* P-SEAMLDR SEAMCALL leaf function */
 #define P_SEAMLDR_SEAMCALL_BASE		BIT_ULL(63)
 #define P_SEAMLDR_INFO			(P_SEAMLDR_SEAMCALL_BASE | 0x0)
