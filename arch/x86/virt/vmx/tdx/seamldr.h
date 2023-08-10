@@ -70,6 +70,19 @@ struct seam_sigstruct {
 	u8		cpuid_table[1020];
 } __packed;
 
+struct tee_tcb_svn {
+	u16	seamsvn;
+	u8	reserved[14];
+} __packed;
+
+struct __tee_tcb_info {
+	u64			valid;
+	struct tee_tcb_svn	tcb_svn;
+	u8			mrseam[48];
+	u8			mrsignerseam[48];
+	u64			attributes;
+} __packed;
+
 #define P_SEAMLDR_INFO_ALIGNMENT	256
 
 struct p_seamldr_info {
@@ -83,7 +96,7 @@ struct p_seamldr_info {
 	u8	reserved0[2];
 	u32	acm_x2apicid;
 	u32	num_remaining_updates;
-	u8	seaminfo[128];
+	struct __tee_tcb_info tcb_info;
 	u8	seam_ready;
 	u8	seam_debug;
 	u8	p_seamldr_ready;

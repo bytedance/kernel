@@ -169,7 +169,7 @@ static int tdx_module_update_end(int val)
 	return notifier_to_errno(ret);
 }
 
-static bool can_preserve_td(void)
+static bool can_preserve_td(const struct seam_sigstruct *sigstruct)
 {
 	int ret;
 
@@ -203,6 +203,11 @@ static bool can_preserve_td(void)
 
 	if (!(sysinfo.module_info.tdx_features0 & TDX_FEATURES0_TD_PRES)) {
 		pr_err("TD-preserving: TDX module doesn't support\n");
+		return false;
+	}
+
+	if (sigstruct->seamsvn < p_seamldr_info.tcb_info.tcb_svn.seamsvn) {
+		pr_err("TD-preserving: Cannot downgrade SEAMSVN\n");
 		return false;
 	}
 
@@ -376,7 +381,7 @@ static struct update_ctx *init_update_ctx(void)
 
 	params = alloc_seamldr_params(module->data, module->size,
 				      sig->data, sig->size,
-				      can_preserve_td());
+				      can_preserve_td((void *)sig->data));
 	if (IS_ERR(params)) {
 		ret = PTR_ERR(params);
 		goto free;
