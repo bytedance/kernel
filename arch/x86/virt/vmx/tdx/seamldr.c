@@ -146,7 +146,7 @@ int unregister_tdx_update_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL_GPL(unregister_tdx_update_notifier);
 
-static int tdx_module_update_start(void)
+static int tdx_module_update_start(void *data)
 {
 	int ret;
 
@@ -154,17 +154,17 @@ static int tdx_module_update_start(void)
 	ret = raw_notifier_call_chain_robust(&update_chain_head,
 					     TDX_UPDATE_START,
 					     TDX_UPDATE_ABORT,
-					     NULL);
+					     data);
 
 	return notifier_to_errno(ret);
 }
 
-static int tdx_module_update_end(int val)
+static int tdx_module_update_end(int action, void *data)
 {
 	int ret;
 
 	lockdep_assert_held(&update_chain_lock);
-	ret = raw_notifier_call_chain(&update_chain_head, val, NULL);
+	ret = raw_notifier_call_chain(&update_chain_head, action, data);
 
 	return notifier_to_errno(ret);
 }
@@ -439,6 +439,11 @@ static int seamldr_install(const struct seamldr_params *params)
 	return 0;
 }
 
+static bool is_live_update(struct seamldr_params *params)
+{
+	return params->scenario == SEAMLDR_SCENARIO_UPDATE;
+}
+
 static int do_tdx_module_update(struct update_ctx *ctx)
 {
 	struct seamldr_params *params = ctx->params;
@@ -470,7 +475,7 @@ static int do_tdx_module_update(struct update_ctx *ctx)
 	if (ret)
 		goto unlock;
 
-	live_update = (ctx->params->scenario == SEAMLDR_SCENARIO_UPDATE);
+	live_update = is_live_update(params);
 	if (live_update) {
 		ret = tdx_prepare_handoff_data((void *)ctx->sig->data);
 		if (ret) {
@@ -517,7 +522,7 @@ static int tdx_module_update(void)
 		goto unlock;
 	}
 
-	ret = tdx_module_update_start();
+	ret = tdx_module_update_start((void *)(unsigned long)is_live_update(ctx->params));
 	if (ret)
 		goto free;
 
@@ -538,7 +543,7 @@ unlock:
 	 */
 	tdx_module_unlock();
 	if (update_status >= 0)
-		WARN_ON_ONCE(tdx_module_update_end(update_status));
+		WARN_ON_ONCE(tdx_module_update_end(update_status, NULL));
 	mutex_unlock(&update_chain_lock);
 	return ret;
 }
