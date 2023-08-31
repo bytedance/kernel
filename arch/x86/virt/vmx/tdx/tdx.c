@@ -39,6 +39,7 @@
 #include <asm/mce.h>
 #include <asm/vmx.h>
 #include "tdx.h"
+#include "seamldr.h"
 
 u32 tdx_global_keyid __ro_after_init;
 EXPORT_SYMBOL_GPL(tdx_global_keyid);
@@ -201,6 +202,11 @@ static int tdx_cpu_enable(unsigned int cpu)
 	__this_cpu_write(tdx_lp_initialized, true);
 
 	return 0;
+}
+
+static int tdx_cpu_disable(unsigned int cpu)
+{
+	return seamldr_flush_vmcs();
 }
 
 /*
@@ -1715,7 +1721,7 @@ void __init tdx_init(void)
 	}
 
 	err = cpuhp_setup_state_nocalls(CPUHP_AP_X86_INTEL_TDX_ONLINE,
-			"x86/tdx:online", tdx_cpu_enable, NULL);
+			"x86/tdx:online", tdx_cpu_enable, tdx_cpu_disable);
 	if (err) {
 		pr_err("Failed to register CPU hotplug callback: %d\n", err);
 		return;

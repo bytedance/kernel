@@ -101,6 +101,26 @@ static int seamldr_call(u64 func_leaf, u64 rcx, u64 *sret)
 	}
 }
 
+/*
+ * Flush SEAM VMCS. CPUs that ever called into TDX module may have dirty SEAM
+ * VMCS. Dirty SEAM VMCS should be flushed on all CPUs before installing a new
+ * TDX module because otherwise, writeback of dirty SEAM VMCS may corrupt the
+ * newly installed TDX module.
+ */
+int seamldr_flush_vmcs(void)
+{
+	int ret;
+
+	ret = cpu_vmxop_get();
+	if (ret)
+		return ret;
+
+	seamldr_call(P_SEAMLDR_OFFLINE, 0, NULL);
+	cpu_vmxop_put();
+
+	return 0;
+}
+
 int register_tdx_update_notifier(struct notifier_block *nb)
 {
 	int ret;

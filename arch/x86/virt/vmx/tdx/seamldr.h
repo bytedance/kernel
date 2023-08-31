@@ -75,4 +75,12 @@ struct seam_sigstruct {
 #define P_SEAMLDR_INFO			(P_SEAMLDR_SEAMCALL_BASE | 0x0)
 #define P_SEAMLDR_INSTALL		(P_SEAMLDR_SEAMCALL_BASE | 0x1)
 
+/* FIXME: Update the leaf number */
+#define P_SEAMLDR_OFFLINE		(P_SEAMLDR_SEAMCALL_BASE | 0xF0)
+
+#ifdef CONFIG_INTEL_TDX_MODULE_UPDATE
+int seamldr_flush_vmcs(void);
+#else  /* !CONFIG_INTEL_TDX_MODULE_UPDATE */
+static inline int seamldr_flush_vmcs(void) { return 0; }
+#endif /* CONFIG_INTEL_TDX_MODULE_UPDATE */
 #endif
