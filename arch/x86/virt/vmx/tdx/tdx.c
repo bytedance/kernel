@@ -1360,7 +1360,18 @@ int tdx_enable(void)
 
 	switch (tdx_module_status) {
 	case TDX_MODULE_UNINITIALIZED:
-		ret = __tdx_enable();
+		/*
+		 * Current TDX module requires TDH_SYS_LP_INIT for all LPs to
+		 * initialize. It requires all present LPs to be online. Once
+		 * the TDX module is updated to allow offline LPs, remove this
+		 * warning.
+		 */
+		if (!cpumask_equal(cpu_online_mask, cpu_present_mask)) {
+			pr_warn("all present CPUs should be online.\n");
+			ret = -EINVAL;
+		} else {
+			ret = __tdx_enable();
+		} 
 		break;
 	case TDX_MODULE_INITIALIZED:
 		/* Already initialized, great, tell the caller. */
