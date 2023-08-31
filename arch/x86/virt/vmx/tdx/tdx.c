@@ -1221,9 +1221,10 @@ static void mark_may_have_private_memory(bool may)
 	smp_wmb();
 }
 
-static int init_tdx_module(void)
+struct tdx_sysinfo sysinfo;
+
+static int get_sysinfo(void)
 {
-	struct tdx_sysinfo sysinfo;
 	int ret;
 
 	ret = get_tdx_sysinfo(&sysinfo);
@@ -1231,7 +1232,12 @@ static int init_tdx_module(void)
 		return ret;
 
 	print_basic_sysinfo(&sysinfo);
+	return 0;
+}
 
+static int init_tdx_module(void)
+{
+	int ret;
 	/*
 	 * To keep things simple, assume that all TDX-protected memory
 	 * will come from the page allocator.  Make sure all pages in the
@@ -1325,17 +1331,23 @@ static int __tdx_enable(void)
 	if (unlikely(!verify_all_cpus_enabled_tdx()))
 		return -ENODEV;
 
-	ret = init_tdx_module();
-	if (ret) {
-		pr_err("module initialization failed (%d)\n", ret);
-		tdx_module_status = TDX_MODULE_ERROR;
-		return ret;
-	}
+	ret = get_sysinfo();
+	if (ret)
+		goto out;
 
+	ret = init_tdx_module();
+	if (ret)
+		goto out;
+ 
 	pr_info("module initialized\n");
 	tdx_module_status = TDX_MODULE_INITIALIZED;
 
 	return 0;
+
+out:
+	pr_err("module initialization failed (%d)\n", ret);
+	tdx_module_status = TDX_MODULE_ERROR;
+	return ret; 
 }
 
 /**
