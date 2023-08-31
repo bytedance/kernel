@@ -1711,13 +1711,10 @@ void __init tdx_init(void)
 	err = init_module_global();
 	if (err) {
 		pr_err("Global initialization failed: %d\n", err);
-		return;
-	}
-
-	err = tdx_cpu_enable(smp_processor_id());
-	if (err) {
-		pr_err("Per-CPU initialization failed: %d\n", err);
-		return;
+	} else {
+		err = tdx_cpu_enable(smp_processor_id());
+		if (err)
+			pr_err("Per-CPU initialization failed: %d\n", err);
 	}
 
 	err = cpuhp_setup_state_nocalls(CPUHP_AP_X86_INTEL_TDX_ONLINE,
