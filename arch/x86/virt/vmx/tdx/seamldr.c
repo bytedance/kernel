@@ -19,6 +19,7 @@
 
 #include <asm/archrandom.h>
 #include <asm/tdx.h>
+#include <asm/virtext.h>
 
 #include "tdx.h"
 #include "seamldr.h"
@@ -38,10 +39,29 @@ static int __always_unused seamldr_call(u64 func_leaf, u64 rcx, u64 *sret)
 {
 	struct tdx_module_args args = { .rcx = rcx, };
 	int retry = RDRAND_RETRY_LOOPS;
+	unsigned long flags;
 	u64 seamcall_ret;
+	u64 vmcs;
+	int ret;
 
 	if (!is_seamldr_func_leaf(func_leaf))
 		return -EINVAL;
+
+	/*
+	 * SEAMRET from P-SEAMLDR invalidates the current-VMCS pointer.
+	 * Save/restore current-VMCS pointer across P-SEAMLDR SEAMCALLs so
+	 * that other VMX instructions won't fail due to an invalid
+	 * current-VMCS.
+	 *
+	 * Disable interrupt to prevent SMP call functions from seeing the
+	 * invalid current-VMCS.
+	 */
+	local_irq_save(flags);
+	ret = cpu_vmcs_store(&vmcs);
+	if (ret) {
+		local_irq_restore(flags);
+		return ret;
+	}
 
 	/*
 	 * Certain P-SEAMLDR SEAMCALLs may run out of entropy like TDX
@@ -50,6 +70,12 @@ static int __always_unused seamldr_call(u64 func_leaf, u64 rcx, u64 *sret)
 	do {
 		seamcall_ret = __seamcall_ret(func_leaf, &args);
 	} while ((seamcall_ret == SEAMLDR_RND_NO_ENTROPY) && --retry);
+
+	/* Restore current-VMCS pointer */
+#define INVALID_VMCS	-1ULL
+	if (vmcs != INVALID_VMCS)
+		WARN_ON_ONCE(cpu_vmcs_load(vmcs));
+	local_irq_restore(flags);
 
 	if (sret)
 		*sret = seamcall_ret;

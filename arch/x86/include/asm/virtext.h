@@ -55,4 +55,37 @@ fault:
 	return -EIO;
 }
 
+static inline int cpu_vmcs_load(u64 vmcs_pa)
+{
+	asm goto("1: vmptrld %0\n\t"
+			  ".byte 0x2e\n\t" /* branch not taken hint */
+			  "jna %l[error]\n\t"
+			  _ASM_EXTABLE(1b, %l[fault])
+			  : : "m" (vmcs_pa) : "cc" : error, fault);
+	return 0;
+
+error:
+	pr_err("vmptrld failed: %llx\n", vmcs_pa);
+	return -EIO;
+fault:
+	pr_err("vmptrld faulted\n");
+	return -EIO;
+}
+
+static inline int cpu_vmcs_store(u64 *vmcs_pa)
+{
+	int ret = -EIO;
+
+	asm volatile("1: vmptrst %0\n\t"
+		     "mov $0, %1\n\t"
+		     "2:\n\t"
+		     _ASM_EXTABLE(1b, 2b)
+		     : "=m" (*vmcs_pa), "+r" (ret) : :);
+
+	if (ret)
+		pr_err("vmptrst faulted\n");
+
+	return ret;
+}
+
 #endif /* _ASM_X86_VIRTEX_H */
