@@ -17,6 +17,7 @@
 #include <linux/slab.h>
 #include <linux/sysfs.h>
 
+#include <asm/archrandom.h>
 #include <asm/tdx.h>
 
 #include "tdx.h"
@@ -27,6 +28,50 @@ static DEFINE_MUTEX(update_chain_lock);
 
 /* Fake device for request_firmware */
 struct platform_device *tdx_pdev;
+
+static bool is_seamldr_func_leaf(u64 func_leaf)
+{
+	return func_leaf & BIT_ULL(63);
+}
+
+static int __always_unused seamldr_call(u64 func_leaf, u64 rcx, u64 *sret)
+{
+	struct tdx_module_args args = { .rcx = rcx, };
+	int retry = RDRAND_RETRY_LOOPS;
+	u64 seamcall_ret;
+
+	if (!is_seamldr_func_leaf(func_leaf))
+		return -EINVAL;
+
+	/*
+	 * Certain P-SEAMLDR SEAMCALLs may run out of entropy like TDX
+	 * SEAMCALLs. But P-SEAMLDR uses a different error code.
+	 */
+	do {
+		seamcall_ret = __seamcall_ret(func_leaf, &args);
+	} while ((seamcall_ret == SEAMLDR_RND_NO_ENTROPY) && --retry);
+
+	if (sret)
+		*sret = seamcall_ret;
+
+	switch (seamcall_ret) {
+	case TDX_SUCCESS:
+		return 0;
+	case TDX_SEAMCALL_VMFAILINVALID:
+		pr_err_once("module is not loaded.\n");
+		return -ENODEV;
+	case TDX_SEAMCALL_GP:
+		pr_err_once("not enabled by BIOS.\n");
+		return -ENODEV;
+	case TDX_SEAMCALL_UD:
+		pr_err_once("not in VMX operation.\n");
+		return -EINVAL;
+	default:
+		pr_err_once("SEAMCALL failed: leaf 0x%llx, rcx 0x%llx, error 0x%llx.\n",
+			    func_leaf, rcx, seamcall_ret);
+		return -EIO;
+	}
+}
 
 int register_tdx_update_notifier(struct notifier_block *nb)
 {
