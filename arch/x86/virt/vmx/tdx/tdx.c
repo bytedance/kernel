@@ -37,6 +37,7 @@
 #include <asm/intel-family.h>
 #include <asm/processor.h>
 #include <asm/mce.h>
+#include <asm/vmx.h>
 #include "tdx.h"
 
 u32 tdx_global_keyid __ro_after_init;
@@ -63,6 +64,8 @@ static bool tdx_may_have_private_memory __read_mostly;
 static BLOCKING_NOTIFIER_HEAD(tdx_memory_reset_chain);
 
 typedef void (*sc_err_func_t)(u64 fn, u64 err, struct tdx_module_args *args);
+
+static bool tdx_global_initialized;
 
 static inline void seamcall_err(u64 fn, u64 err, struct tdx_module_args *args)
 {
@@ -106,41 +109,44 @@ static inline int sc_retry_prerr(sc_func_t func, sc_err_func_t err_func,
 #define seamcall_prerr_ret(__fn, __args)					\
 	sc_retry_prerr(__seamcall_ret, seamcall_err_ret, (__fn), (__args))
 
-/*
- * Do the module global initialization once and return its result.
- * It can be done on any cpu.  It's always called with interrupts
- * disabled.
- */
-static int try_init_module_global(void)
+/* Do the global initialization, the first step of TDX module initialization */
+static int init_module_global(void)
 {
 	struct tdx_module_args args = {};
 	static DEFINE_RAW_SPINLOCK(sysinit_lock);
-	static bool sysinit_done;
-	static int sysinit_ret;
+	static int ret;
 
 	lockdep_assert_irqs_disabled();
-
 	raw_spin_lock(&sysinit_lock);
 
-	if (sysinit_done)
+	if (!platform_tdx_enabled())
+		return -ENODEV;
+
+	preempt_disable();
+	ret = cpu_vmxop_get();
+	if (ret)
 		goto out;
 
 	/* RCX is module attributes and all bits are reserved */
 	args.rcx = 0;
-	sysinit_ret = seamcall_prerr(TDH_SYS_INIT, &args);
+	ret = seamcall_prerr(TDH_SYS_INIT, &args);
+	if (!ret)
+	tdx_global_initialized = true;
 
 	/*
 	 * The first SEAMCALL also detects the TDX module, thus
 	 * it can fail due to the TDX module is not loaded.
 	 * Dump message to let the user know.
 	 */
-	if (sysinit_ret == -ENODEV)
+	if (ret == -ENODEV)
 		pr_err("module not loaded\n");
 
-	sysinit_done = true;
+	cpu_vmxop_put();
+	preempt_enable();
+
 out:
 	raw_spin_unlock(&sysinit_lock);
-	return sysinit_ret;
+	return ret;
 }
 
 /**
@@ -162,19 +168,13 @@ int tdx_cpu_enable(void)
 	if (!boot_cpu_has(X86_FEATURE_TDX_HOST_PLATFORM))
 		return -ENODEV;
 
+	if (!tdx_global_initialized)
+		return -ENODEV;
+
 	lockdep_assert_irqs_disabled();
 
 	if (__this_cpu_read(tdx_lp_initialized))
 		return 0;
-
-	/*
-	 * The TDX module global initialization is the very first step
-	 * to enable TDX.  Need to do it first (if hasn't been done)
-	 * before the per-cpu initialization.
-	 */
-	ret = try_init_module_global();
-	if (ret)
-		return ret;
 
 	ret = seamcall_prerr(TDH_SYS_LP_INIT, &args);
 	if (ret)
@@ -1600,6 +1600,15 @@ void __init tdx_init(void)
 	setup_force_cpu_cap(X86_FEATURE_TDX_HOST_PLATFORM);
 
 	check_tdx_erratum();
+
+	err = init_module_global();
+	if (err)
+		pr_err("Global initialization failed: %d\n", err);
+}
+
+bool platform_tdx_enabled(void)
+{
+    return !!tdx_global_keyid;
 }
 
 int tdx_register_memory_reset_notifier(struct notifier_block *nb)
