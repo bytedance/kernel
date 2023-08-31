@@ -125,7 +125,7 @@ void init_ia32_feat_ctl(struct cpuinfo_x86 *c)
 	}
 
 	enable_vmx = cpu_has(c, X86_FEATURE_VMX) &&
-		     IS_ENABLED(CONFIG_KVM_INTEL);
+		     IS_ENABLED(CONFIG_HAVE_VMX_GENERIC);
 
 	if (cpu_has(c, X86_FEATURE_SGX) && IS_ENABLED(CONFIG_X86_SGX)) {
 		/*
