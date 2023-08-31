@@ -49,6 +49,7 @@ EXPORT_SYMBOL_GPL(tdx_guest_keyid_start);
 u32 tdx_nr_guest_keyids __ro_after_init;
 EXPORT_SYMBOL_GPL(tdx_nr_guest_keyids);
 
+static bool tdx_global_initialized;
 static DEFINE_PER_CPU(bool, tdx_lp_initialized);
 
 static struct tdmr_info_list tdx_tdmr_list;
@@ -774,12 +775,6 @@ err:
 	return ret;
 }
 
-int tdx_enable_after_update(void)
-{
-	/* Reset all global status and initialize the TDX module */
-	return 0;
-}
-
 /*
  * Convert TDX private pages back to normal by using MOVDIR64B to
  * clear these pages.  Note this function doesn't flush cache of
@@ -1041,6 +1036,13 @@ static int construct_tdmrs(struct list_head *tmb_list,
 			   struct tdx_sysinfo_tdmr_info *tdmr_sysinfo)
 {
 	int ret;
+
+	/*
+	 * Skip TDMR construction if it is already done. e.g., TDMRs can be
+	 * used when initializing newly installed TDX modules.
+	 */
+	if (!list_empty(tmb_list))
+		return 0;
 
 	ret = build_tdx_memlist(tmb_list);
 	if (ret)
@@ -1422,6 +1424,35 @@ int tdx_enable(void)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(tdx_enable);
+
+static void tdx_cpu_reenable(void *unused)
+{
+	tdx_cpu_enable(raw_smp_processor_id());
+}
+
+void tdx_reset_status(void)
+{
+    int cpu;
+
+    tdx_module_status = TDX_MODULE_UNINITIALIZED;
+    tdx_global_initialized = false;
+    for_each_online_cpu(cpu)
+        *per_cpu_ptr(&tdx_lp_initialized, cpu) = false;
+}
+
+int tdx_enable_after_update(void)
+{
+	/*
+	 * Reset flags used to track TDX module status and global (and per-CPU
+	 * in tdx_cpu_reenable()) initialization status.
+	 */
+	tdx_reset_status();
+
+	init_module_global();
+	on_each_cpu(tdx_cpu_reenable, NULL, 1);
+
+	return tdx_enable();
+}
 
 static bool is_pamt_page(unsigned long phys)
 {
