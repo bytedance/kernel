@@ -276,6 +276,7 @@ static int verify_hash(const void *module, int module_size,
 struct update_ctx {
 	struct seamldr_params *params;
 	const struct firmware *module, *sig;
+	bool recoverable;
 };
 
 static void free_update_ctx(struct update_ctx *ctx)
@@ -397,6 +398,19 @@ static int do_tdx_module_update(struct update_ctx *ctx)
 	 * CPUs, i.e., TDX SEAMCALLs may be made on any online CPUs).
 	 */
 	cpus_read_lock();
+
+	/*
+	 * Early generations of TDX need all logical CPUs to call
+	 * SEAMLDR.INSTALL.
+	 */
+	if (!cpumask_equal(cpu_online_mask, cpu_present_mask)) {
+		pr_warn("all present CPUs should be online.\n");
+		ctx->recoverable = true;
+		ret = -EINVAL;
+		goto unlock;
+	}
+	ctx->recoverable = false;
+
 	ret = cpu_vmxop_get_all();
 	if (ret)
 		goto unlock;
@@ -445,7 +459,7 @@ static int tdx_module_update(void)
 	ret = do_tdx_module_update(ctx);
 
 	if (ret)
-		update_status = TDX_UPDATE_FAIL;
+		update_status = ctx->recoverable ? TDX_UPDATE_ABORT : TDX_UPDATE_FAIL;
 	else
 		update_status = TDX_UPDATE_SUCCESS;
 
