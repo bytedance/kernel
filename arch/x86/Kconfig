@@ -2009,6 +2009,8 @@ config INTEL_TDX_HOST
 config INTEL_TDX_MODULE_UPDATE
 	bool "Intel TDX module runtime update support"
 	depends on INTEL_TDX_HOST
+	depends on CRYPTO=y
+	depends on CRYPTO_SHA512=y
 	depends on SYSFS
 	help
 	  Intel TDX module can be updated while the system is running. This
