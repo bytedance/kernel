@@ -27,6 +27,49 @@ struct seamldr_params {
 	u64	mod_pages_pa_list[SEAMLDR_MAX_NR_MODULE_PAGES];
 } __packed;
 
+/*
+ * TDX module's signature structure, which provides metadata
+ * information about the module.
+ */
+struct seam_sigstruct {
+	u32		header_type;
+	u32		header_length;
+	u32		header_version;
+	u32		module_type;
+	u32		module_vendor;
+	u32		date;
+	u32		size;
+	u32		key_size;
+	u32		module_size;
+	u32		exponent_size;
+	u8		reserved[88];
+	u8		modulus[384];
+	u32		exponent;
+	u8		signature[384];
+	u8		seamhash[48];
+	u16		seamsvn;
+	u64		attributes;
+	u32		rip_offset;
+	u8		num_stack_pages;
+	u8		num_tls_pages;
+	u16		num_keyhole_pgs;
+	u16		min_glb_data_pages;
+	u16		max_tdmrs;
+	u16		max_reserved_per_tdmr;
+	u16		pamt_entry_size_4K;
+	u16		pamt_entry_size_2M;
+	u16		pamt_entry_size_1G;
+	u8		reserved2[6];
+	u16		module_hv;
+	u16		min_update_hv;
+	u8		no_downgrade;
+	u8		reserved3;
+	u16		num_handoff_pages;
+	u8		reserved4[32];
+	u32		cpuid_table_size;
+	u8		cpuid_table[1020];
+} __packed;
+
  /* P-SEAMLDR SEAMCALL leaf function */
 #define P_SEAMLDR_SEAMCALL_BASE		BIT_ULL(63)
 #define P_SEAMLDR_INFO			(P_SEAMLDR_SEAMCALL_BASE | 0x0)

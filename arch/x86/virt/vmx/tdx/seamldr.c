@@ -204,6 +204,23 @@ free:
 	return ERR_PTR(-ENOMEM);
 }
 
+static int sigstruct_pamt_entry_size(const struct seam_sigstruct *sig)
+{
+	/*
+	 * For backward compatibility, 0 indicates that PAMT entry size is 16
+	 * bytes.
+	 */
+	return sig->pamt_entry_size_4K ? : 16;
+}
+
+static bool pamt_can_reuse(const struct seam_sigstruct *sig)
+{
+	if (!sysinfo.tdmr_info.tdmr_pamt_size)
+		return true;
+
+	return sysinfo.tdmr_info.pamt_entry_size[TDX_PS_4K] == sigstruct_pamt_entry_size(sig);
+}
+
 struct update_ctx {
 	struct seamldr_params *params;
 	const struct firmware *module, *sig;
@@ -244,6 +261,17 @@ static struct update_ctx *init_update_ctx(void)
 	if (ret)
 		goto free;
 	ctx->sig = sig;
+
+	/*
+	 * Don't install the new TDX module if PAMT cannot be reused.
+	 * Re-allocating PAMTs are not desired because PAMTs need large
+	 * contiguous memory, if they are free'd, there is a risk that they
+	 * cannot be allocated again.
+	 */
+	if (!pamt_can_reuse((const struct seam_sigstruct *)sig->data)) {
+		ret = -EIO;
+		goto free;
+	}
 
 	params = alloc_seamldr_params(module->data, module->size,
 				      sig->data, sig->size);

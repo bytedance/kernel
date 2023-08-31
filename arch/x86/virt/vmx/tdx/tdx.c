@@ -381,7 +381,7 @@ static int get_tdx_module_version(struct tdx_sysinfo_module_version *modver)
 
 static void print_basic_sysinfo(struct tdx_sysinfo *sysinfo)
 {
-	struct tdx_sysinfo_module_version *modver = &sysinfo->module_version;
+	struct tdx_sysinfo_module_version *modver =&sysinfo->module_version;
 	struct tdx_sysinfo_module_info *modinfo = &sysinfo->module_info;
 	bool debug = modinfo->sys_attributes & TDX_SYS_ATTR_DEBUG_MODULE;
 
@@ -671,6 +671,8 @@ static int tdmr_set_up_pamt(struct tdmr_info *tdmr,
 					pamt_entry_size[pgsz]);
 		tdmr_pamt_size += pamt_size[pgsz];
 	}
+
+	sysinfo.tdmr_info.tdmr_pamt_size = tdmr_pamt_size;
 
 	/*
 	 * Allocate one chunk of physically contiguous memory for all

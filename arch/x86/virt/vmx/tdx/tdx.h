@@ -157,6 +157,7 @@ struct tdx_sysinfo_tdmr_info {
 	u16 max_tdmrs;
 	u16 max_reserved_per_tdmr;
 	u16 pamt_entry_size[TDX_PS_NR];
+	unsigned long tdmr_pamt_size;
 };
 
 struct tdx_sysinfo {
@@ -169,4 +170,5 @@ void tdx_module_lock(void);
 void tdx_module_unlock(void);
 int tdx_enable_after_update(void);
 
+extern struct tdx_sysinfo sysinfo;
 #endif
