@@ -5,18 +5,28 @@
  * Intel TDX module runtime update support
  */
 
+#define pr_fmt(fmt)	"seamldr: " fmt
+
 #include <linux/cpu.h>
 #include <linux/device.h>
-#include <linux/sysfs.h>
+#include <linux/gfp.h>
+#include <linux/firmware.h>
 #include <linux/mutex.h>
 #include <linux/notifier.h>
+#include <linux/platform_device.h>
+#include <linux/slab.h>
+#include <linux/sysfs.h>
 
 #include <asm/tdx.h>
 
 #include "tdx.h"
+#include "seamldr.h"
 
 static RAW_NOTIFIER_HEAD(update_chain_head);
 static DEFINE_MUTEX(update_chain_lock);
+
+/* Fake device for request_firmware */
+struct platform_device *tdx_pdev;
 
 int register_tdx_update_notifier(struct notifier_block *nb)
 {
@@ -65,9 +75,123 @@ static int tdx_module_update_end(int val)
 	return notifier_to_errno(ret);
 }
 
+static void free_seamldr_params(struct seamldr_params *params)
+{
+	int i;
+
+	for (i = 0; i < params->num_module_pages; i++)
+		free_page((unsigned long)__va(params->mod_pages_pa_list[i]));
+	free_page((unsigned long)__va(params->sigstruct_pa));
+	free_page((unsigned long)params);
+}
+
+/* Allocate and populate a seamldr_params */
+static struct seamldr_params *alloc_seamldr_params(const void *module, int module_size,
+						   const void *sig, int sig_size)
+{
+	struct seamldr_params *params;
+	unsigned long page;
+	int i;
+
+	BUILD_BUG_ON(sizeof(struct seamldr_params) != PAGE_SIZE);
+	if ((module_size >> PAGE_SHIFT) > SEAMLDR_MAX_NR_MODULE_PAGES ||
+	    sig_size != SEAMLDR_SIGSTRUCT_SIZE)
+		return ERR_PTR(-EINVAL);
+
+	params = (struct seamldr_params *)get_zeroed_page(GFP_KERNEL);
+	if (!params)
+		return ERR_PTR(-ENOMEM);
+
+	params->scenario = SEAMLDR_SCENARIO_LOAD;
+	params->num_module_pages = module_size >> PAGE_SHIFT;
+
+	/*
+	 * Module binary can take up to 496 pages. These pages needn't be
+	 * contiguous. Allocate pages one-by-one to reduce the possibility
+	 * of failure. Note that this allocation is very rare and so
+	 * performance isn't critical.
+	 */
+	for (i = 0; i < params->num_module_pages; i++) {
+		page = __get_free_page(GFP_KERNEL);
+		if (!page)
+			goto free;
+		memcpy((void *)page, module + (i << PAGE_SHIFT),
+		       min((int)PAGE_SIZE, module_size - (i << PAGE_SHIFT)));
+		params->mod_pages_pa_list[i] = __pa(page);
+	}
+
+	page = __get_free_page(GFP_KERNEL);
+	if (!page)
+		goto free;
+	memcpy((void *)page, sig, sig_size);
+	params->sigstruct_pa = __pa(page);
+
+	return params;
+free:
+	free_seamldr_params(params);
+	return ERR_PTR(-ENOMEM);
+}
+
+struct update_ctx {
+	struct seamldr_params *params;
+	const struct firmware *module, *sig;
+};
+
+static void free_update_ctx(struct update_ctx *ctx)
+{
+	if (!ctx)
+		return;
+
+	if (ctx->sig)
+		release_firmware(ctx->sig);
+	if (ctx->module)
+		release_firmware(ctx->module);
+	if (ctx->params)
+		free_seamldr_params(ctx->params);
+	kfree(ctx);
+}
+
+static struct update_ctx *init_update_ctx(void)
+{
+	struct update_ctx *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	struct seamldr_params *params;
+	const struct firmware *module, *sig;
+	int ret;
+
+	if (!ctx)
+		return ERR_PTR(-ENOMEM);
+
+	ret = request_firmware_direct(&module, "intel-seam/libtdx.bin",
+				      &tdx_pdev->dev);
+	if (ret)
+		goto free;
+	ctx->module = module;
+
+	ret = request_firmware_direct(&sig, "intel-seam/libtdx.bin.sigstruct",
+				      &tdx_pdev->dev);
+	if (ret)
+		goto free;
+	ctx->sig = sig;
+
+	params = alloc_seamldr_params(module->data, module->size,
+				      sig->data, sig->size);
+	if (IS_ERR(params)) {
+		ret = PTR_ERR(params);
+		goto free;
+	}
+	ctx->params = params;
+
+	return ctx;
+
+free:
+	free_update_ctx(ctx);
+	return ERR_PTR(ret);
+}
+
 static int tdx_module_update(void)
 {
 	int update_status = -1;
+	struct update_ctx *ctx;
 	int ret;
 
 	/*
@@ -80,9 +204,15 @@ static int tdx_module_update(void)
 	/* Prevent concurrent calls of tdx kernel APIs during the update */
 	tdx_module_lock();
 
+	ctx = init_update_ctx();
+	if (IS_ERR(ctx)) {
+		ret = PTR_ERR(ctx);
+		goto unlock;
+	}
+
 	ret = tdx_module_update_start();
 	if (ret)
-		goto unlock;
+		goto free;
 
 	/* TODO: Install and re-initialize the new TDX module */
 
@@ -91,6 +221,8 @@ static int tdx_module_update(void)
 	else
 		update_status = TDX_UPDATE_SUCCESS;
 
+free:
+	free_update_ctx(ctx);
 unlock:
 	/*
 	 * Release the lock before sending the completion notification so
@@ -136,6 +268,10 @@ static __init int tdx_module_update_init(void)
 
 	if (!platform_tdx_enabled())
 		return 0;
+
+	tdx_pdev = platform_device_register_simple("tdx", -1, NULL, 0);
+	if (IS_ERR(tdx_pdev))
+		return PTR_ERR(tdx_pdev);
 
 	dev_root = bus_get_dev_root(&cpu_subsys);
 	if (dev_root) {
