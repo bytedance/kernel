@@ -34,6 +34,17 @@
 
 #include <uapi/asm/mce.h>
 
+enum tdx_notifier_event {
+	/* Start a TDX module update */
+	TDX_UPDATE_START,
+	/* Update succeeded. A new module takes over */
+	TDX_UPDATE_SUCCESS,
+	/* Update aborted. the old module still functions */
+	TDX_UPDATE_ABORT,
+	/* Failed, no working TDX module */
+	TDX_UPDATE_FAIL,
+};
+
 /*
  * Used by the #VE exception handler to gather the #VE exception
  * info from the TDX module. This is a software only structure
@@ -166,6 +177,22 @@ static inline int tdx_register_memory_reset_notifier(struct notifier_block *nb)
 static inline void tdx_unregister_memory_reset_notifier(
 		struct notifier_block *nb) { }
 #endif	/* CONFIG_INTEL_TDX_HOST */
+
+struct notifier_block;
+#ifdef CONFIG_INTEL_TDX_MODULE_UPDATE
+int register_tdx_update_notifier(struct notifier_block *nb);
+int unregister_tdx_update_notifier(struct notifier_block *nb);
+#else /* !CONFIG_INTEL_TDX_MODULE_UPDATE */
+static inline int register_tdx_update_notifier(struct notifier_block *nb)
+{
+	return 0;
+}
+
+static inline int unregister_tdx_update_notifier(struct notifier_block *nb)
+{
+	return 0;
+}
+#endif /* CONFIG_INTEL_TDX_MODULE_UPDATE */
 
 #endif /* !__ASSEMBLY__ */
 #endif /* _ASM_X86_TDX_H */
