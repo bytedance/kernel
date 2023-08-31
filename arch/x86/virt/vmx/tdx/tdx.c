@@ -1336,10 +1336,6 @@ static int __tdx_enable(void)
 /**
  * tdx_enable - Enable TDX module to make it ready to run TDX guests
  *
- * This function assumes the caller has: 1) held read lock of CPU hotplug
- * lock to prevent any new cpu from becoming online; 2) done VMXON on all
- * online cpus.
- *
  * This function requires there's at least one online cpu for each CPU
  * package to succeed.
  *
@@ -1354,12 +1350,14 @@ int tdx_enable(void)
 	if (!boot_cpu_has(X86_FEATURE_TDX_HOST_PLATFORM))
 		return -ENODEV;
 
-	lockdep_assert_cpus_held();
-
 	mutex_lock(&tdx_module_lock);
 
 	switch (tdx_module_status) {
 	case TDX_MODULE_UNINITIALIZED:
+		cpus_read_lock();
+		ret = cpu_vmxop_get_all();
+		if (ret)
+			break; 
 		/*
 		 * Current TDX module requires TDH_SYS_LP_INIT for all LPs to
 		 * initialize. It requires all present LPs to be online. Once
@@ -1371,7 +1369,10 @@ int tdx_enable(void)
 			ret = -EINVAL;
 		} else {
 			ret = __tdx_enable();
-		} 
+		}
+
+		cpu_vmxop_put_all();
+		cpus_read_unlock();
 		break;
 	case TDX_MODULE_INITIALIZED:
 		/* Already initialized, great, tell the caller. */
