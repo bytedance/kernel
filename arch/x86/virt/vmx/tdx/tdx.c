@@ -774,6 +774,12 @@ err:
 	return ret;
 }
 
+int tdx_enable_after_update(void)
+{
+	/* Reset all global status and initialize the TDX module */
+	return 0;
+}
+
 /*
  * Convert TDX private pages back to normal by using MOVDIR64B to
  * clear these pages.  Note this function doesn't flush cache of

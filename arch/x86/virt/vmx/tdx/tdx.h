@@ -167,5 +167,6 @@ struct tdx_sysinfo {
 
 void tdx_module_lock(void);
 void tdx_module_unlock(void);
+int tdx_enable_after_update(void);
 
 #endif

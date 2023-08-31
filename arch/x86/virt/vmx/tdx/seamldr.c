@@ -20,6 +20,7 @@
 #include <asm/archrandom.h>
 #include <asm/tdx.h>
 #include <asm/virtext.h>
+#include <asm/vmx.h>
 
 #include "tdx.h"
 #include "seamldr.h"
@@ -35,7 +36,7 @@ static bool is_seamldr_func_leaf(u64 func_leaf)
 	return func_leaf & BIT_ULL(63);
 }
 
-static int __always_unused seamldr_call(u64 func_leaf, u64 rcx, u64 *sret)
+static int seamldr_call(u64 func_leaf, u64 rcx, u64 *sret)
 {
 	struct tdx_module_args args = { .rcx = rcx, };
 	int retry = RDRAND_RETRY_LOOPS;
@@ -259,6 +260,77 @@ free:
 	return ERR_PTR(ret);
 }
 
+struct install_args {
+	const struct seamldr_params *params;
+	u64 sret;
+};
+
+static void do_seamldr_install(void *data)
+{
+	struct install_args *args = data;
+
+	seamldr_call(P_SEAMLDR_INSTALL, __pa(args->params), &(args->sret));
+}
+
+static int seamldr_install(const struct seamldr_params *params)
+{
+	struct install_args args = { .params = params };
+	int cpu;
+
+	/*
+	 * Don't use on_each_cpu() because P-SEAMLDR SEAMCALLs can be invoked
+	 * by only one CPU at a time.
+	 */
+	for_each_online_cpu(cpu) {
+		smp_call_function_single(cpu, do_seamldr_install, &args, true);
+
+		/* Skip CPUs that have called SEAMLDR.INSTALL */
+		if (args.sret == SEAMLDR_BADCALL)
+			continue;
+		else if (args.sret)
+			break;
+	}
+
+	if (args.sret) {
+		pr_err("SEAMLDR.INSTALL failed. Error %llx\n", args.sret);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static int do_tdx_module_update(struct update_ctx *ctx)
+{
+	struct seamldr_params *params = ctx->params;
+	int ret;
+
+	/*
+	 * Prevent tdx_cpu_enable(), which is called when onlining CPUs. This
+	 * also couples with the following cpu_vmxop_get_all() to ensure all
+	 * online CPUs entering VMX operation, which is a requirement of later
+	 * TDMR initialization (this thread may be scheduled to any online
+	 * CPUs, i.e., TDX SEAMCALLs may be made on any online CPUs).
+	 */
+	cpus_read_lock();
+	ret = cpu_vmxop_get_all();
+	if (ret)
+		goto unlock;
+
+	ret = seamldr_install(params);
+	if (!ret) {
+		ret = tdx_enable_after_update();
+		if (ret)
+			pr_err("Failed to initialize new TDX module %d\n", ret);
+	} else {
+		pr_err("Failed to install new TDX module %d\n", ret);
+	}
+
+	cpu_vmxop_put_all();
+unlock:
+	cpus_read_unlock();
+	return ret;
+}
+
 static int tdx_module_update(void)
 {
 	int update_status = -1;
@@ -285,7 +357,7 @@ static int tdx_module_update(void)
 	if (ret)
 		goto free;
 
-	/* TODO: Install and re-initialize the new TDX module */
+	ret = do_tdx_module_update(ctx);
 
 	if (ret)
 		update_status = TDX_UPDATE_FAIL;

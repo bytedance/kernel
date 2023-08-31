@@ -5,6 +5,7 @@
 /*
  * SEAMLDR SEAMCALL error codes
  */
+#define SEAMLDR_BADCALL			0x8000000000000003ULL
 #define SEAMLDR_RND_NO_ENTROPY		0x8000000000030001ULL
 
 #define SEAMLDR_MAX_NR_MODULE_PAGES	496
@@ -25,5 +26,10 @@ struct seamldr_params {
 	u64	num_module_pages;
 	u64	mod_pages_pa_list[SEAMLDR_MAX_NR_MODULE_PAGES];
 } __packed;
+
+ /* P-SEAMLDR SEAMCALL leaf function */
+#define P_SEAMLDR_SEAMCALL_BASE		BIT_ULL(63)
+#define P_SEAMLDR_INFO			(P_SEAMLDR_SEAMCALL_BASE | 0x0)
+#define P_SEAMLDR_INSTALL		(P_SEAMLDR_SEAMCALL_BASE | 0x1)
 
 #endif
