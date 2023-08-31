@@ -7,6 +7,7 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "x86/virt/vmx: " fmt
 
+#include <linux/cpumask.h>
 #include <linux/types.h>
 #include <linux/gfp.h>
 #include <linux/mm.h>
@@ -237,3 +238,82 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(cpu_vmxop_put);
+
+static void __cpu_vmxop_get(void *cpus)
+{
+	if (!cpu_vmxop_get())
+		cpumask_set_cpu(smp_processor_id(), cpus);
+}
+
+static void __cpu_vmxop_put(void *cpus)
+{
+	if (!cpu_vmxop_put())
+		cpumask_clear_cpu(smp_processor_id(), cpus);
+}
+
+/*
+ * Enable VMX and enter VMX operation on all online CPUs
+ *
+ * Cpu hotplug must have been disabled. This requirement is to ensure the
+ * cpu_vmxop_get_all() and cpu_vmxop_put_all() are called on the same set of
+ * CPUs to keep the ref-counting balanced.
+ *
+ * Return 0 on success, otherwise an error.
+ */
+int cpu_vmxop_get_all(void)
+{
+	cpumask_var_t cpus;
+	int ret = 0;
+
+	lockdep_assert_cpus_held();
+
+	if (!zalloc_cpumask_var(&cpus, GFP_KERNEL))
+		return -ENOMEM;
+
+	on_each_cpu(__cpu_vmxop_get, cpus, 1);
+
+	if (!cpumask_equal(cpus, cpu_online_mask)) {
+		on_each_cpu_mask(cpus, __cpu_vmxop_put, cpus, 1);
+		/*
+		 * Cannot revert what has been done. There is no way out.
+		 * Just emit an error message.
+		 */
+		if (unlikely(!cpumask_empty(cpus)))
+			pr_err_once("CPUs failed to put VMX: %*pbl\n",
+				    cpumask_pr_args(cpus));
+		ret = -EIO;
+	}
+	free_cpumask_var(cpus);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(cpu_vmxop_get_all);
+
+/*
+ * Leave VMX operation and disable VMX on all online CPUs
+ *
+ * Like cpu_vmxop_get_all(), this function must be called with cpu hotplug
+ * disabled.
+ *
+ * Return 0 on success, otherwise an error.
+ */
+int cpu_vmxop_put_all(void)
+{
+	int ret = 0;
+	cpumask_var_t cpus;
+
+	lockdep_assert_cpus_held();
+
+	if (!zalloc_cpumask_var(&cpus, GFP_KERNEL))
+		return -ENOMEM;
+
+	cpumask_copy(cpus, cpu_online_mask);
+	on_each_cpu(__cpu_vmxop_put, cpus, 1);
+
+	if (unlikely(!cpumask_empty(cpus)))
+		ret = -EIO;
+	free_cpumask_var(cpus);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(cpu_vmxop_put_all);

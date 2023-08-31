@@ -646,9 +646,13 @@ extern enum vmx_l1d_flush_state l1tf_vmx_mitigation;
 DECLARE_PER_CPU(u64, vmx_basic);
 int cpu_vmxop_get(void);
 int cpu_vmxop_put(void);
+int cpu_vmxop_get_all(void);
+int cpu_vmxop_put_all(void);
 #else
 static inline int cpu_vmxop_get(void) { return -EOPNOTSUPP; }
 static inline int cpu_vmxop_put(void) { return -EOPNOTSUPP; }
+static inline int cpu_vmxop_get_all(void) { return -EOPNOTSUPP; }
+static inline int cpu_vmxop_put_all(void) { return -EOPNOTSUPP; }
 #endif
 
 #endif
