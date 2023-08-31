@@ -1996,6 +1996,7 @@ config INTEL_TDX_HOST
 	depends on KVM_INTEL
 	depends on X86_X2APIC
 	select ARCH_KEEP_MEMBLOCK
+	select HAVE_VMX_GENERIC
 	depends on CONTIG_ALLOC
 	depends on X86_MCE
 	help

@@ -2025,7 +2025,6 @@ static __init void identify_boot_cpu(void)
 	setup_cr_pinning();
 
 	tsx_init();
-	tdx_init();
 	lkgs_init();
 }
 

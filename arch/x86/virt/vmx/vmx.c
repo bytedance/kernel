@@ -19,6 +19,7 @@
 #include <asm/virtext.h>
 #include <asm/perf_event.h>
 #include <asm/tlbflush.h>
+#include <asm/tdx.h>
 
 DEFINE_PER_CPU(u64, vmx_basic);
 EXPORT_PER_CPU_SYMBOL_GPL(vmx_basic);
@@ -127,6 +128,7 @@ static int __init vmx_early_init(void)
 			"x86/vmx:online", vmx_cpu_startup, vmx_cpu_teardown))
 		pr_err("failed to register CPU hotplug callback.\n");
 
+	tdx_init();
 	return 0;
 }
 early_initcall(vmx_early_init);
