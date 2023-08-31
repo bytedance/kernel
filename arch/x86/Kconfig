@@ -2006,6 +2006,16 @@ config INTEL_TDX_HOST
 
 	  If unsure, say N.
 
+config INTEL_TDX_MODULE_UPDATE
+	bool "Intel TDX module runtime update support"
+	depends on INTEL_TDX_HOST
+	help
+	  Intel TDX module can be updated while the system is running. This
+	  enables TDX module runtime update feature to save a reboot which is
+	  otherwise necessary.
+
+	  If unsure, say N.
+
 config EFI
 	bool "EFI runtime service support"
 	depends on ACPI
