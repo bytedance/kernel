@@ -2009,6 +2009,7 @@ config INTEL_TDX_HOST
 config INTEL_TDX_MODULE_UPDATE
 	bool "Intel TDX module runtime update support"
 	depends on INTEL_TDX_HOST
+	depends on SYSFS
 	help
 	  Intel TDX module can be updated while the system is running. This
 	  enables TDX module runtime update feature to save a reboot which is
