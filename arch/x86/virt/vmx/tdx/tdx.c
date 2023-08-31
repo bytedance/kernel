@@ -54,8 +54,18 @@ static DEFINE_PER_CPU(bool, tdx_lp_initialized);
 static struct tdmr_info_list tdx_tdmr_list;
 
 static enum tdx_module_status_t tdx_module_status;
-static DEFINE_MUTEX(tdx_module_lock);
+static DEFINE_MUTEX(module_lock);
 
+void tdx_module_lock(void)
+{
+	mutex_lock(&module_lock);
+}
+
+void tdx_module_unlock(void)
+{
+	mutex_unlock(&module_lock);
+}
+ 
 /* All TDX-usable memory regions.  Protected by mem_hotplug_lock. */
 static LIST_HEAD(tdx_memlist);
 
@@ -1367,7 +1377,7 @@ int tdx_enable(void)
 	if (!boot_cpu_has(X86_FEATURE_TDX_HOST_PLATFORM))
 		return -ENODEV;
 
-	mutex_lock(&tdx_module_lock);
+	tdx_module_lock();
 
 	switch (tdx_module_status) {
 	case TDX_MODULE_UNINITIALIZED:
@@ -1401,7 +1411,7 @@ int tdx_enable(void)
 		break;
 	}
 
-	mutex_unlock(&tdx_module_lock);
+	tdx_module_unlock();
 
 	return ret;
 }

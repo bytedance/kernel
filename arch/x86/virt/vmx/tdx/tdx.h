@@ -165,4 +165,7 @@ struct tdx_sysinfo {
 	struct tdx_sysinfo_tdmr_info		tdmr_info;
 };
 
+void tdx_module_lock(void);
+void tdx_module_unlock(void);
+
 #endif
