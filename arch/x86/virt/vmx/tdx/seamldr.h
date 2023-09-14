@@ -113,7 +113,10 @@ struct p_seamldr_info {
 
 #ifdef CONFIG_INTEL_TDX_MODULE_UPDATE
 int seamldr_flush_vmcs(void);
+int tdx_module_update(void);
 #else  /* !CONFIG_INTEL_TDX_MODULE_UPDATE */
 static inline int seamldr_flush_vmcs(void) { return 0; }
+static inline int tdx_module_update(void) { return 0; }
+int tdx_module_update(void);
 #endif /* CONFIG_INTEL_TDX_MODULE_UPDATE */
 #endif

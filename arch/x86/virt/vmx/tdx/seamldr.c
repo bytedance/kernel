@@ -500,7 +500,7 @@ unlock:
 	return ret;
 }
 
-static int tdx_module_update(void)
+int tdx_module_update(void)
 {
 	int update_status = -1;
 	struct update_ctx *ctx;

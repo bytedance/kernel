@@ -1456,6 +1456,15 @@ int tdx_enable(void)
 
 	tdx_module_unlock();
 
+	/*
+	 * The last resort: try to load a new TDX module. This is useful for
+	 * kexec'd kernel
+	 */
+	if (ret) {
+		if (!tdx_module_update())
+			return 0;
+	}
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(tdx_enable);
