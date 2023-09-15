@@ -320,6 +320,9 @@ HWCAP2_MOPS
 HWCAP2_HBC
     Functionality implied by ID_AA64ISAR2_EL1.BC == 0b0001.
 
+HWCAP2_SVE_B16B16
+    Functionality implied by ID_AA64ZFR0_EL1.B16B16 == 0b0001.
+
 HWCAP3_LS64
     Functionality implied by ID_AA64ISAR1_EL1.LS64 == 0b0001.
 
