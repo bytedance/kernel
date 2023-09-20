@@ -98,12 +98,60 @@ static void prepare_vmxon_region(struct cpuinfo_x86 *c)
 	this_cpu_write(vmxon_region, _vmxon_region);
 }
 
+static int vmx_enable(void)
+{
+	struct vmcs *_vmxon_region;
+	int ret;
+
+	/*
+	 * Use __this_cpu_read() to catch error in case the caller
+	 * didn't call it when preemption is impossible.
+	 */
+	_vmxon_region = __this_cpu_read(vmxon_region);
+	if (!_vmxon_region)
+		return -EOPNOTSUPP;
+
+	/* No other code should set X86_CR4_VMXE bit */
+	if (WARN_ON_ONCE(cr4_read_shadow() & X86_CR4_VMXE))
+		return -EBUSY;
+
+	/* On some processor PT may not play nice with VMX */
+	intel_pt_handle_vmx(1);
+
+	ret = cpu_vmxon(__pa(_vmxon_region));
+	if (ret)
+		intel_pt_handle_vmx(0);
+
+	return ret;
+}
+
 static int vmx_cpu_startup(unsigned int cpu)
 {
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
+	unsigned long rflags;
+	int *count, ret = 0;
 
 	prepare_vmxon_region(c);
 
+	/* Disable IRQ to prevent race against @vmxop_count */
+	local_irq_save(rflags);
+
+	count = this_cpu_ptr(&vmxop_count);
+	/*
+	 * Enable and enter VMX operation if vmxop_count is positive which
+	 * means someone called cpu_vmxop_get_all() to enable VMX on all CPUs.
+	 * Don't let CPU hotplug break cpu_vmxop_get_all().
+	 */
+	if (*count > 0) {
+		ret = vmx_enable();
+		if (ret)
+			goto out;
+
+		*count -= 1;
+	}
+
+out:
+	local_irq_restore(rflags);
 	return 0;
 }
 
@@ -143,17 +191,8 @@ early_initcall(vmx_early_init);
  */
 int cpu_vmxop_get(void)
 {
-	struct vmcs *_vmxon_region;
 	unsigned long rflags;
 	int count, ret = 0;
-
-	/*
-	 * Use __this_cpu_read() to catch error in case the caller
-	 * didn't call it when preemption is impossible.
-	 */
-	_vmxon_region = __this_cpu_read(vmxon_region);
-	if (!_vmxon_region)
-		return -EOPNOTSUPP;
 
 	/* Disable IRQ to prevent race against @vmxop_count */
 	local_irq_save(rflags);
@@ -170,20 +209,7 @@ int cpu_vmxop_get(void)
 	if (count > 1)
 		goto update;
 
-	/* No other code should set X86_CR4_VMXE bit */
-	if (WARN_ON_ONCE(cr4_read_shadow() & X86_CR4_VMXE)) {
-		ret = -EBUSY;
-		goto out;
-	}
-
-	/* On some processor PT may not play nice with VMX */
-	intel_pt_handle_vmx(1);
-
-	ret = cpu_vmxon(__pa(_vmxon_region));
-	if (ret)  {
-		intel_pt_handle_vmx(0);
-		goto out;
-	}
+	ret = vmx_enable();
 
 update:
 	/* Successfully done.  Increase the count. */
@@ -254,22 +280,18 @@ static void __cpu_vmxop_put(void *cpus)
 /*
  * Enable VMX and enter VMX operation on all online CPUs
  *
- * Cpu hotplug must have been disabled. This requirement is to ensure the
- * cpu_vmxop_get_all() and cpu_vmxop_put_all() are called on the same set of
- * CPUs to keep the ref-counting balanced.
- *
  * Return 0 on success, otherwise an error.
  */
 int cpu_vmxop_get_all(void)
 {
 	cpumask_var_t cpus;
-	int ret = 0;
-
-	lockdep_assert_cpus_held();
+	int cpu, ret = 0;
+	int *count;
 
 	if (!zalloc_cpumask_var(&cpus, GFP_KERNEL))
 		return -ENOMEM;
 
+	cpus_read_lock();
 	on_each_cpu(__cpu_vmxop_get, cpus, 1);
 
 	if (!cpumask_equal(cpus, cpu_online_mask)) {
@@ -279,11 +301,32 @@ int cpu_vmxop_get_all(void)
 		 * Just emit an error message.
 		 */
 		if (unlikely(!cpumask_empty(cpus)))
-			pr_err_once("CPUs failed to put VMX: %*pbl\n",
+			pr_err_once("CPUs failed to disable VMX: %*pbl\n",
 				    cpumask_pr_args(cpus));
 		ret = -EIO;
+		goto out;
 	}
+
+	/*
+	 * Increase the vmxop_count of not online but possible CPUs. Then
+	 * these CPUs will enable and enter VMX operation when being bought
+	 * online. This ensures the guarantee offered by cpu_vmxop_get_all()
+	 * still holds even across CPU hotplug. See vmx_cpu_startup().
+	 */
+	cpumask_andnot(cpus, cpu_possible_mask, cpu_online_mask);
+	for_each_cpu(cpu, cpus) {
+		count = per_cpu_ptr(&vmxop_count, cpu);
+
+		/* Overflow */
+		if (*count + 1 < 0)
+			pr_err_once("CPU%d: vmxop_count overflow\n", cpu);
+		else
+			*count += 1;
+	}
+
+out:
 	free_cpumask_var(cpus);
+	cpus_read_unlock();
 
 	return ret;
 }
@@ -292,26 +335,41 @@ EXPORT_SYMBOL_GPL(cpu_vmxop_get_all);
 /*
  * Leave VMX operation and disable VMX on all online CPUs
  *
- * Like cpu_vmxop_get_all(), this function must be called with cpu hotplug
- * disabled.
- *
  * Return 0 on success, otherwise an error.
  */
 int cpu_vmxop_put_all(void)
 {
-	int ret = 0;
 	cpumask_var_t cpus;
-
-	lockdep_assert_cpus_held();
+	int cpu, ret = 0;
+	int *count;
 
 	if (!zalloc_cpumask_var(&cpus, GFP_KERNEL))
 		return -ENOMEM;
 
+	cpus_read_lock();
 	cpumask_copy(cpus, cpu_online_mask);
 	on_each_cpu(__cpu_vmxop_put, cpus, 1);
 
-	if (unlikely(!cpumask_empty(cpus)))
+	if (unlikely(!cpumask_empty(cpus))) {
+		pr_err_once("CPUs failed to disable VMX: %*pbl\n",
+			    cpumask_pr_args(cpus));
 		ret = -EIO;
+	}
+
+	/*
+	 * Like cpu_vmxop_get_all(), decrease vmxop_count of not online but
+	 * possible CPUs
+	 */
+	cpumask_andnot(cpus, cpu_possible_mask, cpu_online_mask);
+	for_each_cpu(cpu, cpus) {
+		count = per_cpu_ptr(&vmxop_count, cpu);
+		if (*count > 0)
+			*count -= 1;
+		else
+			pr_err_once("CPU%d: unbalanced VMXOFF\n", cpu);
+	}
+
+	cpus_read_unlock();
 	free_cpumask_var(cpus);
 
 	return ret;
