@@ -704,9 +704,7 @@ struct cfs_rq {
 	bool			pelt_clock_throttled:1;
 	int			throttle_count;
 	struct list_head	throttled_list;
-#ifdef CONFIG_SMP
 	struct list_head	throttled_csd_list;
-#endif
 	struct list_head        throttled_limbo_list;
 #endif /* CONFIG_CFS_BANDWIDTH */
 #endif /* CONFIG_FAIR_GROUP_SCHED */
