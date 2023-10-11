@@ -1505,6 +1505,14 @@ static struct ctl_table ipv4_net_table[] = {
 		.mode           = 0644,
 		.proc_handler   = proc_dointvec_minmax,
 	},
+	{
+		.procname	= "tcp_pingpong_thresh",
+		.data		= &init_net.ipv4.sysctl_tcp_pingpong_thresh,
+		.maxlen		= sizeof(u8),
+		.mode		= 0644,
+		.proc_handler	= proc_dou8vec_minmax,
+		.extra1		= SYSCTL_ONE,
+	},
 	{ }
 };
 
