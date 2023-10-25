@@ -1424,10 +1424,10 @@ int tdx_enable(void)
 
 	switch (tdx_module_status) {
 	case TDX_MODULE_UNINITIALIZED:
-		cpus_read_lock();
 		ret = cpu_vmxop_get_all();
 		if (ret)
 			break; 
+		cpus_read_lock();
 		/*
 		 * Current TDX module requires TDH_SYS_LP_INIT for all LPs to
 		 * initialize. It requires all present LPs to be online. Once
@@ -1441,8 +1441,8 @@ int tdx_enable(void)
 			ret = __tdx_enable(false);
 		}
 
-		cpu_vmxop_put_all();
 		cpus_read_unlock();
+		cpu_vmxop_put_all();
 		break;
 	case TDX_MODULE_INITIALIZED:
 		/* Already initialized, great, tell the caller. */
