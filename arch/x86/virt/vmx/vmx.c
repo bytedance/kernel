@@ -125,6 +125,16 @@ static int vmx_enable(void)
 	return ret;
 }
 
+static int vmx_disable(void)
+{
+	int ret;
+
+	ret = cpu_vmxoff();
+	intel_pt_handle_vmx(0);
+
+	return ret;
+}
+
 static int vmx_cpu_startup(unsigned int cpu)
 {
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
@@ -158,6 +168,16 @@ out:
 static int vmx_cpu_teardown(unsigned int cpu)
 {
 	struct vmcs *_vmxon_region = this_cpu_read(vmxon_region);
+	int *count;
+
+	/*
+	 * The INIT signal is blocked whenever a logical processor is in VMX
+	 * root operation. Exit VMX root operation so that the CPU can be
+	 * brought up later by INIT signal.
+	 */
+	count = this_cpu_ptr(&vmxop_count);
+	if (*count > 0)
+		WARN_ON_ONCE(vmx_disable());
 
 	if (_vmxon_region) {
 		free_page((unsigned long)_vmxon_region);
@@ -253,10 +273,7 @@ int cpu_vmxop_put(void)
 	if (count > 0)
 		goto update;
 
-	ret = cpu_vmxoff();
-
-	intel_pt_handle_vmx(0);
-
+	ret = vmx_disable();
 update:
 	this_cpu_write(vmxop_count, count);
 out:
