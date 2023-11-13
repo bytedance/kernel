@@ -543,7 +543,8 @@ unlock:
 	 */
 	tdx_module_unlock();
 	if (update_status >= 0)
-		WARN_ON_ONCE(tdx_module_update_end(update_status, NULL));
+		WARN_ON_ONCE(tdx_module_update_end(update_status,
+					(void *)(unsigned long)is_live_update(ctx->params)));
 	mutex_unlock(&update_chain_lock);
 	return ret;
 }
