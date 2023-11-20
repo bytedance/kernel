@@ -156,6 +156,7 @@ static void show_memory(void)
 
 static void dump_in_irq(struct irq_work *irq_work)
 {
+	console_verbose();
 	pr_emerg("Start dumping, triggered by BMC");
 	if (showmem_on_acpi_nmi)
 		show_memory();
