@@ -45,6 +45,17 @@ config ARM_SDE_INTERFACE
 	  standard for registering callbacks from the platform firmware
 	  into the OS. This is typically used to implement RAS notifications.
 
+config ARM_ACPI_NMI
+	bool "ARM ACPI NMI by SDEI"
+	default n
+	depends on ARM64 && ACPI && ARM_SDE_INTERFACE
+	help
+	  BMC can trigger not only memory usage and cpu backtrace showing
+          but also crash dump, like NMI on X86 platform, by SDEI.
+
+	  Add this config to support triggering those actions.
+	  Say N if not sure.
+
 config EDD
 	tristate "BIOS Enhanced Disk Drive calls determine boot disk"
 	depends on X86
