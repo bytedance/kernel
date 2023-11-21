@@ -15,10 +15,6 @@
 #define safe_smp_processor_id()			0
 #endif /* CONFIG_SMP */
 
-struct x86_cpu {
-	struct cpu cpu;
-};
-
 #ifdef CONFIG_HOTPLUG_CPU
 extern void soft_restart_cpu(void);
 #endif
