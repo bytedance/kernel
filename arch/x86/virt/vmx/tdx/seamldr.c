@@ -346,7 +346,7 @@ static void free_update_ctx(struct update_ctx *ctx)
 	kfree(ctx);
 }
 
-static struct update_ctx *init_update_ctx(void)
+static struct update_ctx *init_update_ctx(bool force_load)
 {
 	struct update_ctx *ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	struct seamldr_params *params;
@@ -386,7 +386,7 @@ static struct update_ctx *init_update_ctx(void)
 
 	params = alloc_seamldr_params(module->data, module->size,
 				      sig->data, sig->size,
-				      can_preserve_td((void *)sig->data));
+				      force_load ? false : can_preserve_td((void *)sig->data));
 	if (IS_ERR(params)) {
 		ret = PTR_ERR(params);
 		goto free;
@@ -500,7 +500,7 @@ unlock:
 	return ret;
 }
 
-int tdx_module_update(void)
+int tdx_module_update(bool force_load)
 {
 	int update_status = -1;
 	struct update_ctx *ctx;
@@ -517,7 +517,7 @@ int tdx_module_update(void)
 	/* Prevent concurrent calls of tdx kernel APIs during the update */
 	tdx_module_lock();
 
-	ctx = init_update_ctx();
+	ctx = init_update_ctx(force_load);
 	if (IS_ERR(ctx)) {
 		ret = PTR_ERR(ctx);
 		goto unlock;
@@ -560,12 +560,17 @@ static ssize_t reload_store(struct device *dev,
 			    struct device_attribute *attr,
 			    const char *buf, size_t size)
 {
+	bool force_load = false;
 	int ret;
 
-	if (!sysfs_streq(buf, "update"))
+	if (sysfs_streq(buf, "update"))
+		force_load = false;
+	else if (sysfs_streq(buf, "load"))
+		force_load = true;
+	else
 		return -EINVAL;
 
-	ret = tdx_module_update();
+	ret = tdx_module_update(force_load);
 
 	return ret ? : size;
 }

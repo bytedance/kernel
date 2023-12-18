@@ -1461,7 +1461,7 @@ int tdx_enable(void)
 	 * kexec'd kernel
 	 */
 	if (ret) {
-		if (!tdx_module_update())
+		if (!tdx_module_update(false))
 			return 0;
 	}
 
