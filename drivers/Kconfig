@@ -243,6 +243,8 @@ source "drivers/hte/Kconfig"
 
 source "drivers/cdx/Kconfig"
 
+source "drivers/cpuinspect/Kconfig"
+
 source "drivers/bytedance/Kconfig"
 
 endmenu
