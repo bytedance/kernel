@@ -118,6 +118,28 @@ static inline u64 sc_retry(sc_func_t func, u64 fn,
 int tdx_cpu_enable(void);
 int tdx_enable(void);
 const char *tdx_dump_mce_info(struct mce *m);
+
+struct tdx_metadata_field_mapping {
+	u64 field_id;
+	int offset;
+	int size;
+};
+
+#define TD_SYSINFO_MAP(_field_id, _struct, _member)	\
+	{ .field_id = MD_FIELD_ID_##_field_id,		\
+	  .offset   = offsetof(_struct, _member),	\
+	  .size     = sizeof(typeof(((_struct *)0)->_member)) }
+
+/*
+ * Read multiple global metadata fields to a buffer of a structure
+ * based on the "field ID -> structure member" mapping table.
+ */
+int tdx_sys_metadata_read(const struct tdx_metadata_field_mapping *fields,
+			  int nr_fields, void *stbuf);
+
+/* Read a single global metadata field */
+int tdx_sys_metadata_field_read(u64 field_id, u64 *data);
+
 #else
 static inline void tdx_init(void) { }
 static inline int tdx_cpu_enable(void) { return -ENODEV; }
