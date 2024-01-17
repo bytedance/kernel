@@ -35,8 +35,20 @@
 #include <uapi/asm/mce.h>
 
 enum tdx_notifier_event {
-	/* Start a TDX module update */
+	/*
+	 * Start a TDX module update, to agree on the update scenario. if
+	 * there is any reason to reject an update, return an error in this
+	 * phase. after passing this phase, there is no way for the subscribers
+	 * to reject an update.
+	 */
 	TDX_UPDATE_START,
+	/*
+	 * On receiving this event, everyone has agreed to do the update and
+	 * thus no one should return an error. In general, some cleanups
+	 * about hardware i.e., reset IOMMU states and reclaim some resources
+	 * are done in this phase.
+	 */
+	TDX_UPDATE_PREPARE,
 	/* Update succeeded. A new module takes over */
 	TDX_UPDATE_SUCCESS,
 	/* Update aborted. the old module still functions */

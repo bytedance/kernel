@@ -159,7 +159,7 @@ static int tdx_module_update_start(void *data)
 	return notifier_to_errno(ret);
 }
 
-static int tdx_module_update_end(int action, void *data)
+static int tdx_module_update_action(int action, void *data)
 {
 	int ret;
 
@@ -505,6 +505,7 @@ int tdx_module_update(void)
 	int update_status = -1;
 	struct update_ctx *ctx;
 	int ret;
+	void *event_data;
 
 	/*
 	 * Hold update_chain_lock to ensure no new registration during updates.
@@ -522,9 +523,16 @@ int tdx_module_update(void)
 		goto unlock;
 	}
 
-	ret = tdx_module_update_start((void *)(unsigned long)is_live_update(ctx->params));
+	event_data = (void *)(unsigned long)is_live_update(ctx->params);
+	ret = tdx_module_update_start(event_data);
 	if (ret)
 		goto free;
+
+	ret = tdx_module_update_action(TDX_UPDATE_PREPARE, event_data);
+	if (WARN_ON_ONCE(ret)) {
+		update_status = TDX_UPDATE_FAIL;
+		goto free;
+	}
 
 	ret = do_tdx_module_update(ctx);
 
@@ -543,8 +551,7 @@ unlock:
 	 */
 	tdx_module_unlock();
 	if (update_status >= 0)
-		WARN_ON_ONCE(tdx_module_update_end(update_status,
-					(void *)(unsigned long)is_live_update(ctx->params)));
+		WARN_ON_ONCE(tdx_module_update_action(update_status, event_data));
 	mutex_unlock(&update_chain_lock);
 	return ret;
 }
