@@ -56,6 +56,9 @@ DECLARE_KVM_NVHE_PER_CPU(struct kvm_cpu_context, kvm_hyp_ctxt);
 
 static bool vgic_present, kvm_arm_initialised;
 
+/* Hisi cpu type enum */
+enum hisi_cpu_type hi_cpu_type = UNKNOWN_HI_TYPE;
+
 static DEFINE_PER_CPU(unsigned char, kvm_hyp_initialized);
 
 bool is_kvm_arm_initialised(void)
@@ -2462,6 +2465,9 @@ static __init int kvm_arm_init(void)
 		kvm_info("Error initializing system register tables");
 		return err;
 	}
+
+	/* Probe the Hisi CPU type */
+	probe_hisi_cpu_type();
 
 	in_hyp_mode = is_kernel_in_hyp_mode();
 
