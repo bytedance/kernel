@@ -492,6 +492,7 @@ static int do_tdx_module_update(struct update_ctx *ctx)
 		if (ret)
 			pr_err("Failed to initialize new TDX module %d\n", ret);
 	} else {
+		tdx_reset_status();
 		pr_err("Failed to install new TDX module %d\n", ret);
 	}
 

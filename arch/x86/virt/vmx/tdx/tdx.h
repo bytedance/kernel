@@ -179,6 +179,7 @@ struct seam_sigstruct;
 void tdx_module_lock(void);
 void tdx_module_unlock(void);
 int tdx_enable_after_update(bool live_update);
+void tdx_reset_status(void);
 int tdx_prepare_handoff_data(struct seam_sigstruct *sig);
 
 extern struct tdx_sysinfo sysinfo;

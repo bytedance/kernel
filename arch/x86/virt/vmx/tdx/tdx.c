@@ -1533,6 +1533,10 @@ static void tdx_cpu_reenable(void *unused)
 	tdx_cpu_enable(raw_smp_processor_id());
 }
 
+/*
+ * Reset flags used to track TDX module status and global and per-CPU
+ * initialization status.
+ */
 void tdx_reset_status(void)
 {
     int cpu;
