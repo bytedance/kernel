@@ -206,7 +206,12 @@ static bool can_preserve_td(const struct seam_sigstruct *sigstruct)
 		return false;
 	}
 
-	if (sigstruct->seamsvn < p_seamldr_info.tcb_info.tcb_svn.seamsvn) {
+	if (sigstruct->seamsvn_major != p_seamldr_info.tcb_info.tcb_svn.seamsvn_major) {
+		pr_err("TD-preserving: cannot change Major version of SEAMSVN\n");
+		return false;
+	}
+
+	if (sigstruct->seamsvn_minor < p_seamldr_info.tcb_info.tcb_svn.seamsvn_minor) {
 		pr_err("TD-preserving: Cannot downgrade SEAMSVN\n");
 		return false;
 	}

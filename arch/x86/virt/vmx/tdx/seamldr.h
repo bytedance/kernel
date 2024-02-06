@@ -47,7 +47,8 @@ struct seam_sigstruct {
 	u32		exponent;
 	u8		signature[384];
 	u8		seamhash[48];
-	u16		seamsvn;
+	u8		seamsvn_minor;
+	u8		seamsvn_major;
 	u64		attributes;
 	u32		rip_offset;
 	u8		num_stack_pages;
@@ -71,7 +72,8 @@ struct seam_sigstruct {
 } __packed;
 
 struct tee_tcb_svn {
-	u16	seamsvn;
+	u8	seamsvn_minor;
+	u8	seamsvn_major;
 	u8	reserved[14];
 } __packed;
 
