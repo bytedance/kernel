@@ -110,7 +110,7 @@ void kvm_arch_vcpu_load_fp(struct kvm_vcpu *vcpu)
 void kvm_arch_vcpu_ctxflush_fp(struct kvm_vcpu *vcpu)
 {
 	if (test_thread_flag(TIF_FOREIGN_FPSTATE))
-		vcpu->arch.fp_state = FP_STATE_FREE;
+		*host_data_ptr(fp_owner) = FP_STATE_FREE;
 }
 
 /*
@@ -126,7 +126,7 @@ void kvm_arch_vcpu_ctxsync_fp(struct kvm_vcpu *vcpu)
 
 	WARN_ON_ONCE(!irqs_disabled());
 
-	if (vcpu->arch.fp_state == FP_STATE_GUEST_OWNED) {
+	if (*host_data_ptr(fp_owner) == FP_STATE_GUEST_OWNED) {
 
 		/*
 		 * Currently we do not support SME guests so SVCR is
@@ -162,7 +162,35 @@ void kvm_arch_vcpu_put_fp(struct kvm_vcpu *vcpu)
 
 	local_irq_save(flags);
 
-	if (vcpu->arch.fp_state == FP_STATE_GUEST_OWNED) {
+	/*
+	 * If we have VHE then the Hyp code will reset CPACR_EL1 to
+	 * the default value and we need to reenable SME.
+	 */
+	if (has_vhe() && system_supports_sme()) {
+		/* Also restore EL0 state seen on entry */
+		if (vcpu_get_flag(vcpu, HOST_SME_ENABLED))
+			sysreg_clear_set(CPACR_EL1, 0,
+					 CPACR_EL1_SMEN_EL0EN |
+					 CPACR_EL1_SMEN_EL1EN);
+		else
+			sysreg_clear_set(CPACR_EL1,
+					 CPACR_EL1_SMEN_EL0EN,
+					 CPACR_EL1_SMEN_EL1EN);
+		isb();
+	}
+
+	if (*host_data_ptr(fp_owner) == FP_STATE_GUEST_OWNED) {
+		if (vcpu_has_sve(vcpu)) {
+			__vcpu_sys_reg(vcpu, ZCR_EL1) = read_sysreg_el1(SYS_ZCR);
+
+			/* Restore the VL that was saved when bound to the CPU */
+			if (!has_vhe())
+				sve_cond_update_zcr_vq(vcpu_sve_max_vq(vcpu) - 1,
+						       SYS_ZCR_EL1);
+		}
+
+		fpsimd_save_and_flush_cpu_state();
+	} else if (has_vhe() && system_supports_sve()) {
 		/*
 		 * Flush (save and invalidate) the fpsimd/sve state so that if
 		 * the host tries to use fpsimd/sve, it's not using stale data
