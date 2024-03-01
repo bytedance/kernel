@@ -86,7 +86,18 @@ void kvm_arch_vcpu_load_fp(struct kvm_vcpu *vcpu)
 	 * that PSTATE.{SM,ZA} == {0,0}.
 	 */
 	fpsimd_save_and_flush_cpu_state();
-	vcpu->arch.fp_state = FP_STATE_FREE;
+	*host_data_ptr(fp_owner) = FP_STATE_FREE;
+	*host_data_ptr(fpsimd_state) = NULL;
+
+	vcpu_clear_flag(vcpu, HOST_SVE_ENABLED);
+	if (read_sysreg(cpacr_el1) & CPACR_EL1_ZEN_EL0EN)
+		vcpu_set_flag(vcpu, HOST_SVE_ENABLED);
+
+	if (system_supports_sme()) {
+		vcpu_clear_flag(vcpu, HOST_SME_ENABLED);
+		if (read_sysreg(cpacr_el1) & CPACR_EL1_SMEN_EL0EN)
+			vcpu_set_flag(vcpu, HOST_SME_ENABLED);
+	}
 }
 
 /*
