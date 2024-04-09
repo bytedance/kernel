@@ -21,7 +21,7 @@
 	GUID_INIT(0xe83a4698, 0xe3a0, 0x11eb, 0xba, 0x80, 0x02, 0x42,	\
 		  0xac, 0x13, 0x00, 0x04)
 
-static int panic_on_acpi_nmi;
+static int panic_on_acpi_nmi = 1;
 static int showmem_on_acpi_nmi = 1;
 static int showcpus_on_acpi_nmi = 1;
 
