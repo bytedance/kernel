@@ -338,7 +338,7 @@ void machine_kexec(struct kimage *image)
 	 * This must be done before load_segments() since if call depth tracking
 	 * is used then GS must be valid to make any function calls.
 	 */
-	host_mem_enc_active = cc_platform_has(CC_ATTR_HOST_MEM_ENCRYPT);
+	host_mem_enc_active = !boot_cpu_has(X86_FEATURE_HYPERVISOR);
 
 #ifdef CONFIG_KEXEC_JUMP
 	if (image->preserve_context)
