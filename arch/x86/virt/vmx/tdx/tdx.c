@@ -27,6 +27,7 @@
 #include <linux/log2.h>
 #include <linux/acpi.h>
 #include <linux/suspend.h>
+#include <linux/notifier.h>
 #include <asm/page.h>
 #include <asm/special_insns.h>
 #include <asm/msr-index.h>
@@ -58,6 +59,8 @@ static DEFINE_MUTEX(tdx_module_lock);
 static LIST_HEAD(tdx_memlist);
 
 static bool tdx_may_have_private_memory __read_mostly;
+
+static BLOCKING_NOTIFIER_HEAD(tdx_memory_reset_chain);
 
 typedef void (*sc_err_func_t)(u64 fn, u64 err, struct tdx_module_args *args);
 
@@ -1530,6 +1533,27 @@ void __init tdx_init(void)
 	check_tdx_erratum();
 }
 
+int tdx_register_memory_reset_notifier(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&tdx_memory_reset_chain, nb);
+}
+EXPORT_SYMBOL_GPL(tdx_register_memory_reset_notifier);
+
+void tdx_unregister_memory_reset_notifier(struct notifier_block *nb)
+{
+	blocking_notifier_chain_unregister(&tdx_memory_reset_chain, nb);
+}
+EXPORT_SYMBOL_GPL(tdx_unregister_memory_reset_notifier);
+
+static int notify_reset_memory(void)
+{
+	int ret;
+
+	ret = blocking_notifier_call_chain(&tdx_memory_reset_chain, 0, NULL);
+
+	return notifier_to_errno(ret);
+}
+
 void tdx_reset_memory(void)
 {
 	if (!boot_cpu_has(X86_FEATURE_TDX_HOST_PLATFORM))
@@ -1572,18 +1596,15 @@ void tdx_reset_memory(void)
 	wbinvd();
 
 	/*
-	 * It's ideal to cover all types of TDX private pages here, but
-	 * currently there's no unified way to tell whether a given page
-	 * is TDX private page or not.
-	 *
-	 * Just convert PAMT pages now, as currently TDX private pages
-	 * can only be PAMT pages.
-	 *
-	 * TODO:
-	 *
-	 * This leaves all other types of TDX private pages undealt
-	 * with.  They must be handled in _some_ way when they become
-	 * possible to exist.
+	 * Tell all in-kernel TDX users to reset TDX private pages
+	 * that they manage.
+	 */
+	if (notify_reset_memory())
+		pr_err("Failed to reset all TDX private pages.\n");
+
+	/*
+	 * The only remaining TDX private pages are PAMT pages.
+	 * Reset them.
 	 */
 	tdmrs_reset_pamt_all(&tdx_tdmr_list);
 }
