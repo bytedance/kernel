@@ -57,6 +57,8 @@ static DEFINE_MUTEX(tdx_module_lock);
 /* All TDX-usable memory regions.  Protected by mem_hotplug_lock. */
 static LIST_HEAD(tdx_memlist);
 
+static bool tdx_may_have_private_memory __read_mostly;
+
 typedef void (*sc_err_func_t)(u64 fn, u64 err, struct tdx_module_args *args);
 
 static inline void seamcall_err(u64 fn, u64 err, struct tdx_module_args *args)
@@ -1115,6 +1117,18 @@ static int init_tdmrs(struct tdmr_info_list *tdmr_list)
 	return 0;
 }
 
+static void mark_may_have_private_memory(bool may)
+{
+	tdx_may_have_private_memory = may;
+
+	/*
+	 * Ensure update to tdx_may_have_private_memory is visible to all
+	 * cpus.  This ensures when any remote cpu reads it as true, the
+	 * 'tdx_tdmr_list' must be stable for reading PAMTs.
+	 */
+	smp_wmb();
+}
+
 static int init_tdx_module(void)
 {
 	struct tdx_tdmr_sysinfo tdmr_sysinfo;
@@ -1160,6 +1174,12 @@ static int init_tdx_module(void)
 	if (ret)
 		goto err_reset_pamts;
 
+	/*
+	 * Starting from this point the system is possible to have
+	 * TDX private memory.
+	 */
+	mark_may_have_private_memory(true);
+
 	/* Initialize TDMRs to complete the TDX module initialization */
 	ret = init_tdmrs(&tdx_tdmr_list);
 	if (ret)
@@ -1191,6 +1211,7 @@ err_reset_pamts:
 	 * as suggested by the TDX spec.
 	 */
 	tdmrs_reset_pamt_all(&tdx_tdmr_list);
+	mark_may_have_private_memory(false);
 err_free_pamts:
 	tdmrs_free_pamt_all(&tdx_tdmr_list);
 err_free_tdmrs:
@@ -1507,4 +1528,62 @@ void __init tdx_init(void)
 	setup_force_cpu_cap(X86_FEATURE_TDX_HOST_PLATFORM);
 
 	check_tdx_erratum();
+}
+
+void tdx_reset_memory(void)
+{
+	if (!boot_cpu_has(X86_FEATURE_TDX_HOST_PLATFORM))
+		return;
+
+	/*
+	 * Converting TDX private pages back to normal must be done
+	 * when there's no TDX activity anymore on all remote cpus.
+	 * Verify this is only called when all remote cpus have
+	 * been stopped.
+	 */
+	WARN_ON_ONCE(num_online_cpus() != 1);
+
+	/*
+	 * Kernel read/write to TDX private memory doesn't cause
+	 * machine check on hardware w/o this erratum.
+	 */
+	if (!boot_cpu_has_bug(X86_BUG_TDX_PW_MCE))
+		return;
+
+	/*
+	 * Nothing to convert if it's not possible to have any TDX
+	 * private pages.
+	 */
+	if (!tdx_may_have_private_memory)
+		return;
+
+	/*
+	 * Ensure the 'tdx_tdmr_list' is stable for reading PAMTs
+	 * when tdx_may_have_private_memory reads true, paired with
+	 * the smp_wmb() in mark_may_have_private_memory().
+	 */
+	smp_rmb();
+
+	/*
+	 * All remote cpus have been stopped, and their caches have
+	 * been flushed in stop_this_cpu().  Now flush cache for the
+	 * last running cpu _before_ converting TDX private pages.
+	 */
+	wbinvd();
+
+	/*
+	 * It's ideal to cover all types of TDX private pages here, but
+	 * currently there's no unified way to tell whether a given page
+	 * is TDX private page or not.
+	 *
+	 * Just convert PAMT pages now, as currently TDX private pages
+	 * can only be PAMT pages.
+	 *
+	 * TODO:
+	 *
+	 * This leaves all other types of TDX private pages undealt
+	 * with.  They must be handled in _some_ way when they become
+	 * possible to exist.
+	 */
+	tdmrs_reset_pamt_all(&tdx_tdmr_list);
 }
