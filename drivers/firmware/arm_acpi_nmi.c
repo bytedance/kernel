@@ -156,7 +156,10 @@ static void show_memory(void)
 
 static void dump_in_irq(struct irq_work *irq_work)
 {
-	console_verbose();
+	int old_lvl;
+
+	old_lvl = console_loglevel;
+	console_loglevel = CONSOLE_LOGLEVEL_MOTORMOUTH;
 	pr_emerg("Start dumping, triggered by BMC");
 	if (showmem_on_acpi_nmi)
 		show_memory();
@@ -167,6 +170,8 @@ static void dump_in_irq(struct irq_work *irq_work)
 	if (panic_on_acpi_nmi) {
 		panic("Panic triggered by BMC!!\n");
 	}
+
+	console_loglevel = old_lvl;
 }
 
 static DEFINE_RAW_SPINLOCK(show_lock);
@@ -174,16 +179,22 @@ static DEFINE_RAW_SPINLOCK(show_lock);
 static void showacpu(void *dummy)
 {
 	unsigned long flags;
+	int old_lvl;
 
+	old_lvl = console_loglevel;
 	/* Idle CPUs have no interesting backtrace. */
 	if (idle_cpu(smp_processor_id())) {
+		console_loglevel = CONSOLE_LOGLEVEL_MOTORMOUTH;
 		pr_emerg("CPU%d: backtrace skipped as idling\n", smp_processor_id());
+		console_loglevel = old_lvl;
 		return;
 	}
 
 	raw_spin_lock_irqsave(&show_lock, flags);
+	console_loglevel = CONSOLE_LOGLEVEL_MOTORMOUTH;
 	pr_emerg("CPU%d:\n", smp_processor_id());
 	show_stack(NULL, NULL, KERN_DEFAULT);
+	console_loglevel = old_lvl;
 	raw_spin_unlock_irqrestore(&show_lock, flags);
 }
 
