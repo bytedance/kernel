@@ -986,43 +986,15 @@ static inline void reset_cpu_possible_mask(void)
 	bitmap_zero(cpumask_bits(&__cpu_possible_mask), NR_CPUS);
 }
 
-static inline void
-set_cpu_possible(unsigned int cpu, bool possible)
-{
-	if (possible)
-		cpumask_set_cpu(cpu, &__cpu_possible_mask);
-	else
-		cpumask_clear_cpu(cpu, &__cpu_possible_mask);
-}
+#define assign_cpu(cpu, mask, val)	\
+	assign_bit(cpumask_check(cpu), cpumask_bits(mask), (val))
 
-static inline void
-set_cpu_present(unsigned int cpu, bool present)
-{
-	if (present)
-		cpumask_set_cpu(cpu, &__cpu_present_mask);
-	else
-		cpumask_clear_cpu(cpu, &__cpu_present_mask);
-}
+#define set_cpu_possible(cpu, possible)	assign_cpu((cpu), &__cpu_possible_mask, (possible))
+#define set_cpu_present(cpu, present)	assign_cpu((cpu), &__cpu_present_mask, (present))
+#define set_cpu_active(cpu, active)	assign_cpu((cpu), &__cpu_active_mask, (active))
+#define set_cpu_dying(cpu, dying)	assign_cpu((cpu), &__cpu_dying_mask, (dying))
 
 void set_cpu_online(unsigned int cpu, bool online);
-
-static inline void
-set_cpu_active(unsigned int cpu, bool active)
-{
-	if (active)
-		cpumask_set_cpu(cpu, &__cpu_active_mask);
-	else
-		cpumask_clear_cpu(cpu, &__cpu_active_mask);
-}
-
-static inline void
-set_cpu_dying(unsigned int cpu, bool dying)
-{
-	if (dying)
-		cpumask_set_cpu(cpu, &__cpu_dying_mask);
-	else
-		cpumask_clear_cpu(cpu, &__cpu_dying_mask);
-}
 
 /**
  * to_cpumask - convert an NR_CPUS bitmap to a struct cpumask *
