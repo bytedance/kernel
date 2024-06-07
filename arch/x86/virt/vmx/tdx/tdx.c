@@ -332,6 +332,58 @@ int tdx_sys_metadata_read(const struct tdx_metadata_field_mapping *fields,
 }
 EXPORT_SYMBOL_GPL(tdx_sys_metadata_read);
 
+#define TD_SYSINFO_MAP_MOD_INFO(_field_id, _member)	\
+	TD_SYSINFO_MAP(_field_id, struct tdx_sysinfo_module_info, _member)
+
+static int get_tdx_module_info(struct tdx_sysinfo_module_info *modinfo)
+{
+	static const struct tdx_metadata_field_mapping fields[] = {
+		TD_SYSINFO_MAP_MOD_INFO(SYS_ATTRIBUTES, sys_attributes),
+		TD_SYSINFO_MAP_MOD_INFO(TDX_FEATURES0,  tdx_features0),
+	};
+
+	return tdx_sys_metadata_read(fields, ARRAY_SIZE(fields), modinfo);
+}
+
+#define TD_SYSINFO_MAP_MOD_VERSION(_field_id, _member)	\
+	TD_SYSINFO_MAP(_field_id, struct tdx_sysinfo_module_version, _member)
+
+static int get_tdx_module_version(struct tdx_sysinfo_module_version *modver)
+{
+	static const struct tdx_metadata_field_mapping fields[] = {
+		TD_SYSINFO_MAP_MOD_VERSION(MAJOR_VERSION,    major),
+		TD_SYSINFO_MAP_MOD_VERSION(MINOR_VERSION,    minor),
+		TD_SYSINFO_MAP_MOD_VERSION(UPDATE_VERSION,   update),
+		TD_SYSINFO_MAP_MOD_VERSION(INTERNAL_VERSION, internal),
+		TD_SYSINFO_MAP_MOD_VERSION(BUILD_NUM,	     build_num),
+		TD_SYSINFO_MAP_MOD_VERSION(BUILD_DATE,	     build_date),
+	};
+
+	return tdx_sys_metadata_read(fields, ARRAY_SIZE(fields), modver);
+}
+
+static void print_basic_sysinfo(struct tdx_sysinfo *sysinfo)
+{
+	struct tdx_sysinfo_module_version *modver = &sysinfo->module_version;
+	struct tdx_sysinfo_module_info *modinfo = &sysinfo->module_info;
+	bool debug = modinfo->sys_attributes & TDX_SYS_ATTR_DEBUG_MODULE;
+
+	/*
+	 * TDX module version encoding:
+	 *
+	 *   <major>.<minor>.<update>.<internal>.<build_num>
+	 *
+	 * When printed as text, <major> and <minor> are 1-digit,
+	 * <update> and <internal> are 2-digits and <build_num>
+	 * is 4-digits.
+	 */
+	pr_info("Initializing TDX module: %u.%u.%02u.%02u.%04u (build_date %u, %s module), TDX_FEATURES0 0x%llx\n",
+			modver->major, modver->minor, modver->update,
+			modver->internal, modver->build_num,
+			modver->build_date, debug ? "Debug" : "Production",
+			modinfo->tdx_features0);
+}
+
 #define TD_SYSINFO_MAP_TDMR_INFO(_field_id, _member)	\
 	TD_SYSINFO_MAP(_field_id, struct tdx_sysinfo_tdmr_info, _member)
 
@@ -352,6 +404,16 @@ static int get_tdx_tdmr_sysinfo(struct tdx_sysinfo_tdmr_info *tdmr_sysinfo)
 
 static int get_tdx_sysinfo(struct tdx_sysinfo *sysinfo)
 {
+	int ret;
+
+	ret = get_tdx_module_info(&sysinfo->module_info);
+	if (ret)
+		return ret;
+
+	ret = get_tdx_module_version(&sysinfo->module_version);
+	if (ret)
+		return ret;
+
 	return get_tdx_tdmr_sysinfo(&sysinfo->tdmr_info);
 }
 
@@ -1145,6 +1207,8 @@ static int init_tdx_module(void)
 	ret = get_tdx_sysinfo(&sysinfo);
 	if (ret)
 		return ret;
+
+	print_basic_sysinfo(&sysinfo);
 
 	/*
 	 * To keep things simple, assume that all TDX-protected memory

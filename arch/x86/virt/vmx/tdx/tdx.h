@@ -31,6 +31,15 @@
  *
  * See the "global_metadata.json" in the "TDX 1.5 ABI definitions".
  */
+#define MD_FIELD_ID_SYS_ATTRIBUTES		0x0A00000200000000ULL
+#define MD_FIELD_ID_TDX_FEATURES0		0x0A00000300000008ULL
+#define MD_FIELD_ID_BUILD_DATE			0x8800000200000001ULL
+#define MD_FIELD_ID_BUILD_NUM			0x8800000100000002ULL
+#define MD_FIELD_ID_MINOR_VERSION		0x0800000100000003ULL
+#define MD_FIELD_ID_MAJOR_VERSION		0x0800000100000004ULL
+#define MD_FIELD_ID_UPDATE_VERSION		0x0800000100000005ULL
+#define MD_FIELD_ID_INTERNAL_VERSION		0x0800000100000006ULL
+
 #define MD_FIELD_ID_MAX_TDMRS			0x9100000100000008ULL
 #define MD_FIELD_ID_MAX_RESERVED_PER_TDMR	0x9100000100000009ULL
 #define MD_FIELD_ID_PAMT_4K_ENTRY_SIZE		0x9100000100000010ULL
@@ -121,7 +130,27 @@ struct tdmr_info_list {
  *
  * Note not all metadata fields in each class are defined, only those
  * used by the kernel are.
+ *
+ * Also note the "bit definitions" are architectural.
  */
+
+/* Class "TDX Module Info" */
+struct tdx_sysinfo_module_info {
+	u32 sys_attributes;
+	u64 tdx_features0;
+};
+
+#define TDX_SYS_ATTR_DEBUG_MODULE	0x1
+
+/* Class "TDX Module Version" */
+struct tdx_sysinfo_module_version {
+	u16 major;
+	u16 minor;
+	u16 update;
+	u16 internal;
+	u16 build_num;
+	u32 build_date;
+};
 
 /* Class "TDMR Info" */
 struct tdx_sysinfo_tdmr_info {
@@ -131,7 +160,9 @@ struct tdx_sysinfo_tdmr_info {
 };
 
 struct tdx_sysinfo {
-	struct tdx_sysinfo_tdmr_info tdmr_info;
+	struct tdx_sysinfo_module_info		module_info;
+	struct tdx_sysinfo_module_version	module_version;
+	struct tdx_sysinfo_tdmr_info		tdmr_info;
 };
 
 #endif
