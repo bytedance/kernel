@@ -19,8 +19,6 @@
 #include <linux/evm.h>
 #include <linux/ima.h>
 
-#include "internal.h"
-
 /**
  * setattr_should_drop_sgid - determine whether the setgid bit needs to be
  *                            removed
