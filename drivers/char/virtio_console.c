@@ -1882,8 +1882,7 @@ static int init_vqs(struct ports_device *portdev)
 		}
 	}
 	/* Find the queues. */
-	err = virtio_find_vqs_info(portdev->vdev, nr_queues, vqs,
-				   vqs_info, NULL);
+	err = virtio_find_vqs(portdev->vdev, nr_queues, vqs, vqs_info, NULL);
 	if (err)
 		goto free;
 
