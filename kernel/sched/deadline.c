@@ -2027,17 +2027,6 @@ static struct task_struct *pick_task_dl(struct rq *rq)
 	return p;
 }
 
-static struct task_struct *pick_next_task_dl(struct rq *rq)
-{
-	struct task_struct *p;
-
-	p = pick_task_dl(rq);
-	if (p)
-		set_next_task_dl(rq, p, true);
-
-	return p;
-}
-
 static void put_prev_task_dl(struct rq *rq, struct task_struct *p)
 {
 	struct sched_dl_entity *dl_se = &p->dl;
@@ -2758,13 +2747,12 @@ DEFINE_SCHED_CLASS(dl) = {
 
 	.wakeup_preempt		= wakeup_preempt_dl,
 
-	.pick_next_task		= pick_next_task_dl,
+	.pick_task		= pick_task_dl,
 	.put_prev_task		= put_prev_task_dl,
 	.set_next_task		= set_next_task_dl,
 
 #ifdef CONFIG_SMP
 	.balance		= balance_dl,
-	.pick_task		= pick_task_dl,
 	.select_task_rq		= select_task_rq_dl,
 	.migrate_task_rq	= migrate_task_rq_dl,
 	.set_cpus_allowed       = set_cpus_allowed_dl,
