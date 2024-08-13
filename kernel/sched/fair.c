@@ -8559,8 +8559,6 @@ again:
 
 simple:
 #endif
-	put_prev_task(rq, prev);
-
 	do {
 		se = pick_next_entity(cfs_rq, NULL);
 		cfs_rq = group_cfs_rq(se);
@@ -8568,7 +8566,7 @@ simple:
 
 	p = task_of(se);
 
-	set_next_task_fair(rq, p, true);
+	put_prev_set_next_task(rq, prev, p);
 	return p;
 
 idle:
