@@ -172,6 +172,22 @@ to_ast_sil164_connector(struct drm_connector *connector)
 	return container_of(connector, struct ast_sil164_connector, base);
 }
 
+/*
+ * Connector
+ */
+
+struct ast_connector {
+	struct drm_connector base;
+
+	enum drm_connector_status physical_status;
+};
+
+static inline struct ast_connector *
+to_ast_connector(struct drm_connector *connector)
+{
+	return container_of(connector, struct ast_connector, base);
+}
+
 struct ast_bmc_connector {
 	struct drm_connector base;
 	struct drm_connector *physical_connector;
@@ -219,11 +235,11 @@ struct ast_device {
 		} sil164;
 		struct {
 			struct drm_encoder encoder;
-			struct drm_connector connector;
+			struct ast_connector connector;
 		} dp501;
 		struct {
 			struct drm_encoder encoder;
-			struct drm_connector connector;
+			struct ast_connector connector;
 		} astdp;
 		struct {
 			struct drm_encoder encoder;

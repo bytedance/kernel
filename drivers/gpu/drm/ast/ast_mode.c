@@ -1588,11 +1588,16 @@ static int ast_dp501_connector_helper_detect_ctx(struct drm_connector *connector
 						 struct drm_modeset_acquire_ctx *ctx,
 						 bool force)
 {
+	struct ast_connector *ast_connector = to_ast_connector(connector);
 	struct ast_device *ast = to_ast_device(connector->dev);
+	enum drm_connector_status status = connector_status_disconnected;
 
 	if (ast_dp501_is_connected(ast))
-		return connector_status_connected;
-	return connector_status_disconnected;
+		status = connector_status_connected;
+
+	ast_connector->physical_status = status;
+
+	return status;
 }
 
 static const struct drm_connector_helper_funcs ast_dp501_connector_helper_funcs = {
@@ -1632,17 +1637,20 @@ static int ast_dp501_output_init(struct ast_device *ast)
 	struct drm_device *dev = &ast->base;
 	struct drm_crtc *crtc = &ast->crtc;
 	struct drm_encoder *encoder = &ast->output.dp501.encoder;
-	struct drm_connector *connector = &ast->output.dp501.connector;
+	struct ast_connector *ast_connector = &ast->output.dp501.connector;
+	struct drm_connector *connector = &ast_connector->base;
 	int ret;
 
 	ret = drm_simple_encoder_init(dev, encoder, DRM_MODE_ENCODER_TMDS);
 	if (ret)
 		return ret;
+
 	encoder->possible_crtcs = drm_crtc_mask(crtc);
 
 	ret = ast_dp501_connector_init(dev, connector);
 	if (ret)
 		return ret;
+	ast_connector->physical_status = connector->status;
 
 	ret = drm_connector_attach_encoder(connector, encoder);
 	if (ret)
@@ -1698,11 +1706,16 @@ static int ast_astdp_connector_helper_detect_ctx(struct drm_connector *connector
 						 struct drm_modeset_acquire_ctx *ctx,
 						 bool force)
 {
+	struct ast_connector *ast_connector = to_ast_connector(connector);
 	struct ast_device *ast = to_ast_device(connector->dev);
+	enum drm_connector_status status = connector_status_disconnected;
 
 	if (ast_astdp_is_connected(ast))
-		return connector_status_connected;
-	return connector_status_disconnected;
+		status = connector_status_connected;
+
+	ast_connector->physical_status = status;
+
+	return status;
 }
 
 static const struct drm_connector_helper_funcs ast_astdp_connector_helper_funcs = {
@@ -1742,17 +1755,20 @@ static int ast_astdp_output_init(struct ast_device *ast)
 	struct drm_device *dev = &ast->base;
 	struct drm_crtc *crtc = &ast->crtc;
 	struct drm_encoder *encoder = &ast->output.astdp.encoder;
-	struct drm_connector *connector = &ast->output.astdp.connector;
+	struct ast_connector *ast_connector = &ast->output.astdp.connector;
+	struct drm_connector *connector = &ast_connector->base;
 	int ret;
 
 	ret = drm_simple_encoder_init(dev, encoder, DRM_MODE_ENCODER_TMDS);
 	if (ret)
 		return ret;
+
 	encoder->possible_crtcs = drm_crtc_mask(crtc);
 
 	ret = ast_astdp_connector_init(dev, connector);
 	if (ret)
 		return ret;
+	ast_connector->physical_status = connector->status;
 
 	ret = drm_connector_attach_encoder(connector, encoder);
 	if (ret)
@@ -1962,13 +1978,13 @@ int ast_mode_config_init(struct ast_device *ast)
 		ret = ast_dp501_output_init(ast);
 		if (ret)
 			return ret;
-		physical_connector = &ast->output.dp501.connector;
+		physical_connector = &ast->output.dp501.connector.base;
 	}
 	if (ast->tx_chip_types & AST_TX_ASTDP_BIT) {
 		ret = ast_astdp_output_init(ast);
 		if (ret)
 			return ret;
-		physical_connector = &ast->output.astdp.connector;
+		physical_connector = &ast->output.astdp.connector.base;
 	}
 	ret = ast_bmc_output_init(ast, physical_connector);
 	if (ret)
