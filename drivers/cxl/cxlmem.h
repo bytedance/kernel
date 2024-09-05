@@ -7,7 +7,7 @@
 #include <linux/uuid.h>
 #include <linux/rcuwait.h>
 #include <linux/node.h>
-#include <linux/cxl-event.h>
+#include <cxl/event.h>
 #include "cxl.h"
 
 /* CXL 2.0 8.2.8.5.1.1 Memory Device Status Register */
