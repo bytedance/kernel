@@ -391,6 +391,7 @@ static void moom_callback(struct work_struct *ignored)
 		.memcg = NULL,
 		.gfp_mask = gfp_mask,
 		.order = -1,
+		.priority_oom = false,
 	};
 
 	mutex_lock(&oom_lock);
