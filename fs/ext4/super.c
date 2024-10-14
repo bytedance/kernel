@@ -5901,6 +5901,13 @@ static int ext4_remount(struct super_block *sb, int *flags, char *data)
 		goto restore_opts;
 	}
 
+	if ((old_opts.s_mount_opt & EXT4_MOUNT_DELALLOC) &&
+	    !test_opt(sb, DELALLOC)) {
+		ext4_msg(sb, KERN_ERR, "can't disable delalloc during remount");
+		err = -EINVAL;
+		goto restore_opts;
+	}
+
 	sb->s_flags = (sb->s_flags & ~SB_POSIXACL) |
 		(test_opt(sb, POSIX_ACL) ? SB_POSIXACL : 0);
 
