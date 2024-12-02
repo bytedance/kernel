@@ -1198,20 +1198,46 @@ static int acpi_idle_lpi_enter(struct cpuidle_device *dev,
 	return -EINVAL;
 }
 
+/* To correctly reflect the entered state if the poll state is enabled. */
+static int acpi_idle_lpi_enter_with_poll_state(struct cpuidle_device *dev,
+			       struct cpuidle_driver *drv, int index)
+{
+	int entered_state;
+
+	if (unlikely(index < 1))
+		return -EINVAL;
+
+	entered_state = acpi_idle_lpi_enter(dev, drv, index - 1);
+	if (entered_state < 0)
+		return entered_state;
+
+	return entered_state + 1;
+}
+
 static int acpi_processor_setup_lpi_states(struct acpi_processor *pr)
 {
-	int i;
+	int i, count;
 	struct acpi_lpi_state *lpi;
 	struct cpuidle_state *state;
 	struct cpuidle_driver *drv = &acpi_idle_driver;
+	typeof(state->enter) enter_method;
 
 	if (!pr->flags.has_lpi)
 		return -EOPNOTSUPP;
 
+	if (IS_ENABLED(CONFIG_ARCH_HAS_OPTIMIZED_POLL)) {
+		cpuidle_poll_state_init(drv);
+		count = 1;
+		enter_method = acpi_idle_lpi_enter_with_poll_state;
+	} else {
+		count = 0;
+		enter_method = acpi_idle_lpi_enter;
+	}
+
 	for (i = 0; i < pr->power.count && i < CPUIDLE_STATE_MAX; i++) {
 		lpi = &pr->power.lpi_states[i];
 
-		state = &drv->states[i];
+		state = &drv->states[count];
 		snprintf(state->name, CPUIDLE_NAME_LEN, "LPI-%d", i);
 		strscpy(state->desc, lpi->desc, CPUIDLE_DESC_LEN);
 		state->exit_latency = lpi->wake_latency;
@@ -1219,11 +1245,14 @@ static int acpi_processor_setup_lpi_states(struct acpi_processor *pr)
 		state->flags |= arch_get_idle_state_flags(lpi->arch_flags);
 		if (i != 0 && lpi->entry_method == ACPI_CSTATE_FFH)
 			state->flags |= CPUIDLE_FLAG_RCU_IDLE;
-		state->enter = acpi_idle_lpi_enter;
-		drv->safe_state_index = i;
+		state->enter = enter_method;
+		drv->safe_state_index = count;
+		count++;
+		if (count == CPUIDLE_STATE_MAX)
+			break;
 	}
 
-	drv->state_count = i;
+	drv->state_count = count;
 
 	return 0;
 }
