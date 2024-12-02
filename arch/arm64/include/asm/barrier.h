@@ -216,6 +216,60 @@ do {									\
 	(typeof(*ptr))VAL;						\
 })
 
+#define __smp_cond_load_timeout_spin(ptr, cond_expr,			\
+				     time_expr_ns, time_limit_ns)	\
+({									\
+	typeof(ptr) __PTR = (ptr);					\
+	__unqual_scalar_typeof(*ptr) VAL;				\
+	unsigned int __count = 0;					\
+	for (;;) {							\
+		VAL = READ_ONCE(*__PTR);				\
+		if (cond_expr)						\
+			break;						\
+		cpu_relax();						\
+		if (__count++ < smp_cond_time_check_count)		\
+			continue;					\
+		if ((time_expr_ns) >= time_limit_ns)			\
+			break;						\
+		__count = 0;						\
+	}								\
+	(typeof(*ptr))VAL;						\
+})
+
+#define __smp_cond_load_timeout_wait(ptr, cond_expr,			\
+				     time_expr_ns, time_limit_ns)	\
+({									\
+	typeof(ptr) __PTR = (ptr);					\
+	__unqual_scalar_typeof(*ptr) VAL;				\
+	for (;;) {							\
+		VAL = READ_ONCE(*__PTR);				\
+		if (cond_expr)						\
+			break;						\
+		__cmpwait_relaxed(__PTR, VAL);				\
+		if ((time_expr_ns) >= time_limit_ns)			\
+			break;						\
+	}								\
+	(typeof(*ptr))VAL;						\
+})
+
+#define smp_cond_load_relaxed_timeout(ptr, cond_expr,			\
+				      time_expr_ns, time_limit_ns)	\
+({									\
+	__unqual_scalar_typeof(*ptr) _val;				\
+									\
+	int __wfe = arch_timer_evtstrm_available();			\
+	if (likely(__wfe))						\
+		_val = __smp_cond_load_timeout_wait(ptr, cond_expr,	\
+						   time_expr_ns,	\
+						   time_limit_ns);	\
+	else								\
+		_val = __smp_cond_load_timeout_spin(ptr, cond_expr,	\
+						   time_expr_ns,	\
+						   time_limit_ns);	\
+	(typeof(*ptr))_val;						\
+})
+
+
 #include <asm-generic/barrier.h>
 
 #endif	/* __ASSEMBLY__ */
