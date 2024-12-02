@@ -12,6 +12,7 @@
 #include <linux/kasan-checks.h>
 
 #include <asm/alternative-macros.h>
+#include <asm/delay-const.h>
 
 #define __nops(n)	".rept	" #n "\nnop\n.endr\n"
 #define nops(n)		asm volatile(__nops(n))
@@ -198,7 +199,7 @@ do {									\
 		VAL = READ_ONCE(*__PTR);				\
 		if (cond_expr)						\
 			break;						\
-		__cmpwait_relaxed(__PTR, VAL);				\
+		__cmpwait_relaxed(__PTR, VAL, ~0UL);			\
 	}								\
 	(typeof(*ptr))VAL;						\
 })
@@ -211,7 +212,7 @@ do {									\
 		VAL = smp_load_acquire(__PTR);				\
 		if (cond_expr)						\
 			break;						\
-		__cmpwait_relaxed(__PTR, VAL);				\
+		__cmpwait_relaxed(__PTR, VAL, ~0UL);			\
 	}								\
 	(typeof(*ptr))VAL;						\
 })
@@ -241,11 +242,13 @@ do {									\
 ({									\
 	typeof(ptr) __PTR = (ptr);					\
 	__unqual_scalar_typeof(*ptr) VAL;				\
+	const unsigned long __time_limit_cycles =			\
+					NSECS_TO_CYCLES(time_limit_ns);	\
 	for (;;) {							\
 		VAL = READ_ONCE(*__PTR);				\
 		if (cond_expr)						\
 			break;						\
-		__cmpwait_relaxed(__PTR, VAL);				\
+		__cmpwait_relaxed(__PTR, VAL, __time_limit_cycles);	\
 		if ((time_expr_ns) >= time_limit_ns)			\
 			break;						\
 	}								\
@@ -257,7 +260,8 @@ do {									\
 ({									\
 	__unqual_scalar_typeof(*ptr) _val;				\
 									\
-	int __wfe = arch_timer_evtstrm_available();			\
+	int __wfe = arch_timer_evtstrm_available() ||			\
+		    alternative_has_cap_unlikely(ARM64_HAS_WFXT);	\
 	if (likely(__wfe))						\
 		_val = __smp_cond_load_timeout_wait(ptr, cond_expr,	\
 						   time_expr_ns,	\

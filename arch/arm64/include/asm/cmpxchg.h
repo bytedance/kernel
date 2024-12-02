@@ -210,7 +210,8 @@ __CMPXCHG_GEN(_mb)
 
 #define __CMPWAIT_CASE(w, sfx, sz)					\
 static inline void __cmpwait_case_##sz(volatile void *ptr,		\
-				       unsigned long val)		\
+				       unsigned long val,		\
+				       unsigned long time_limit_cycles)	\
 {									\
 	unsigned long tmp;						\
 									\
@@ -220,10 +221,12 @@ static inline void __cmpwait_case_##sz(volatile void *ptr,		\
 	"	ldxr" #sfx "\t%" #w "[tmp], %[v]\n"			\
 	"	eor	%" #w "[tmp], %" #w "[tmp], %" #w "[val]\n"	\
 	"	cbnz	%" #w "[tmp], 1f\n"				\
-	"	wfe\n"							\
+	ALTERNATIVE("wfe\n",						\
+		    "msr s0_3_c1_c0_0, %[time_limit_cycles]\n",		\
+		    ARM64_HAS_WFXT)					\
 	"1:"								\
 	: [tmp] "=&r" (tmp), [v] "+Q" (*(u##sz *)ptr)			\
-	: [val] "r" (val));						\
+	: [val] "r" (val), [time_limit_cycles] "r" (time_limit_cycles));\
 }
 
 __CMPWAIT_CASE(w, b, 8);
@@ -236,17 +239,22 @@ __CMPWAIT_CASE( ,  , 64);
 #define __CMPWAIT_GEN(sfx)						\
 static __always_inline void __cmpwait##sfx(volatile void *ptr,		\
 				  unsigned long val,			\
+				  unsigned long time_limit_cycles,	\
 				  int size)				\
 {									\
 	switch (size) {							\
 	case 1:								\
-		return __cmpwait_case##sfx##_8(ptr, (u8)val);		\
+		return __cmpwait_case##sfx##_8(ptr, (u8)val,		\
+					       time_limit_cycles);	\
 	case 2:								\
-		return __cmpwait_case##sfx##_16(ptr, (u16)val);		\
+		return __cmpwait_case##sfx##_16(ptr, (u16)val,		\
+						time_limit_cycles);	\
 	case 4:								\
-		return __cmpwait_case##sfx##_32(ptr, val);		\
+		return __cmpwait_case##sfx##_32(ptr, val,		\
+						time_limit_cycles);	\
 	case 8:								\
-		return __cmpwait_case##sfx##_64(ptr, val);		\
+		return __cmpwait_case##sfx##_64(ptr, val,		\
+						time_limit_cycles);	\
 	default:							\
 		BUILD_BUG();						\
 	}								\
@@ -258,7 +266,7 @@ __CMPWAIT_GEN()
 
 #undef __CMPWAIT_GEN
 
-#define __cmpwait_relaxed(ptr, val) \
-	__cmpwait((ptr), (unsigned long)(val), sizeof(*(ptr)))
+#define __cmpwait_relaxed(ptr, val, time_limit_cycles) \
+	__cmpwait((ptr), (unsigned long)(val), time_limit_cycles, sizeof(*(ptr)))
 
 #endif	/* __ASM_CMPXCHG_H */
