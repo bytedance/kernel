@@ -4820,7 +4820,7 @@ static void scx_ops_bypass(bool bypass)
 		 * sees scx_rq_bypassing() before moving tasks to SCX.
 		 */
 		if (!scx_enabled()) {
-			rq_unlock_irqrestore(rq, &rf);
+			rq_unlock(rq, &rf);
 			continue;
 		}
 
