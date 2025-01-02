@@ -2049,6 +2049,10 @@ static void __init iort_init_platform_devices(void)
 	}
 }
 
+#ifdef CONFIG_VIRT_PLAT_DEV
+void build_devid_pools(void);
+#endif
+
 void __init acpi_iort_init(void)
 {
 	acpi_status status;
@@ -2069,6 +2073,10 @@ void __init acpi_iort_init(void)
 	}
 
 	iort_init_platform_devices();
+
+#ifdef CONFIG_VIRT_PLAT_DEV
+	build_devid_pools();
+#endif
 }
 
 #ifdef CONFIG_ZONE_DMA
