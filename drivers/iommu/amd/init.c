@@ -417,6 +417,9 @@ static void iommu_set_device_table(struct amd_iommu *iommu)
 
 	BUG_ON(iommu->mmio_base == NULL);
 
+	if (is_kdump_kernel())
+		return;
+
 	entry = iommu_virt_to_phys(dev_table);
 	entry |= (dev_table_size >> 12) - 1;
 	memcpy_toio(iommu->mmio_base + MMIO_DEV_TABLE_OFFSET,
@@ -664,8 +667,11 @@ static inline int __init alloc_dev_table(struct amd_iommu_pci_seg *pci_seg)
 
 static inline void free_dev_table(struct amd_iommu_pci_seg *pci_seg)
 {
-	free_pages((unsigned long)pci_seg->dev_table,
+	if (!is_kdump_kernel())
+		free_pages((unsigned long)pci_seg->dev_table,
 		    get_order(pci_seg->dev_table_size));
+	else
+		memunmap((void *)pci_seg->dev_table);
 	pci_seg->dev_table = NULL;
 }
 
@@ -734,17 +740,20 @@ static void __init free_alias_table(struct amd_iommu_pci_seg *pci_seg)
 	pci_seg->alias_table = NULL;
 }
 
-/*
- * Allocates the command buffer. This buffer is per AMD IOMMU. We can
- * write commands to that buffer later and the IOMMU will execute them
- * asynchronously
- */
-static int __init alloc_command_buffer(struct amd_iommu *iommu)
+static inline void *iommu_memremap(unsigned long paddr, size_t size)
 {
-	iommu->cmd_buf = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
-						  get_order(CMD_BUFFER_SIZE));
+	phys_addr_t phys;
+	/*
+	 * When SME is enabled in the first kernel, the entry includes the
+	 * memory encryption mask(sme_me_mask), remove the memory encryption
+	 * mask to obtain the true physical address in kdump kernel.
+	 */
+	phys = __sme_clr(paddr) & PAGE_MASK;
 
-	return iommu->cmd_buf ? 0 : -ENOMEM;
+	if (cc_platform_has(CC_ATTR_HOST_MEM_ENCRYPT))
+		return ioremap_encrypted(phys, size);
+	else
+		return memremap(phys, size, MEMREMAP_WB);
 }
 
 /*
@@ -834,8 +843,9 @@ static void iommu_enable_command_buffer(struct amd_iommu *iommu)
 	entry = iommu_virt_to_phys(iommu->cmd_buf);
 	entry |= MMIO_CMD_SIZE_512;
 
-	memcpy_toio(iommu->mmio_base + MMIO_CMD_BUF_OFFSET,
-		    &entry, sizeof(entry));
+	if (!is_kdump_kernel())
+		memcpy_toio(iommu->mmio_base + MMIO_CMD_BUF_OFFSET,
+			    &entry, sizeof(entry));
 
 	amd_iommu_reset_cmd_buffer(iommu);
 }
@@ -846,11 +856,6 @@ static void iommu_enable_command_buffer(struct amd_iommu *iommu)
 static void iommu_disable_command_buffer(struct amd_iommu *iommu)
 {
 	iommu_feature_disable(iommu, CONTROL_CMDBUF_EN);
-}
-
-static void __init free_command_buffer(struct amd_iommu *iommu)
-{
-	free_pages((unsigned long)iommu->cmd_buf, get_order(CMD_BUFFER_SIZE));
 }
 
 static void *__init iommu_alloc_4k_pages(struct amd_iommu *iommu,
@@ -1011,17 +1016,77 @@ err_out:
 }
 #endif /* CONFIG_IRQ_REMAP */
 
-static int __init alloc_cwwb_sem(struct amd_iommu *iommu)
+static int __init alloc_iommu_buffers(struct amd_iommu *iommu)
 {
-	iommu->cmd_sem = iommu_alloc_4k_pages(iommu, GFP_KERNEL | __GFP_ZERO, 1);
+	/*
+	 * IOMMU Completion Store Base MMIO, Command Buffer Base Address MMIO
+	 * registers are locked if SNP is enabled during kdump, reuse the
+	 * previous kernel's allocated completion wait and command buffers
+	 * for kdump boot.
+	 */
+	if (is_kdump_kernel()) {
+		u64 paddr;
 
-	return iommu->cmd_sem ? 0 : -ENOMEM;
+		pr_info_once("Re-using command buffer, device table from previous kernel\n");
+
+		/*
+		 * Exclusion base register is used for Completion wait
+		 * only when SNP is enabled, readback and reuse CWB when
+		 * SNP is enabled otherwise allocate new.
+		 */
+		if (check_feature(FEATURE_SNP)) {
+			pr_info_once("Re-using CWB from previous kernel\n");
+			paddr = readq(iommu->mmio_base + MMIO_EXCL_BASE_OFFSET);
+			iommu->cmd_sem = iommu_memremap(paddr, PAGE_SIZE);
+			if (!iommu->cmd_sem)
+				return -ENOMEM;
+			iommu->cmd_sem_paddr = paddr;
+		} else {
+			iommu->cmd_sem = iommu_alloc_4k_pages(iommu, GFP_KERNEL | __GFP_ZERO, 1);
+			if (!iommu->cmd_sem)
+				return -ENOMEM;
+			iommu->cmd_sem_paddr = iommu_virt_to_phys((void *)iommu->cmd_sem);
+		}
+
+		paddr = readq(iommu->mmio_base + MMIO_CMD_BUF_OFFSET) & PM_ADDR_MASK;
+		iommu->cmd_buf = iommu_memremap(paddr, CMD_BUFFER_SIZE);
+		if (!iommu->cmd_buf)
+			return -ENOMEM;
+	} else {
+		iommu->cmd_sem = iommu_alloc_4k_pages(iommu, GFP_KERNEL | __GFP_ZERO, 1);
+		if (!iommu->cmd_sem)
+			return -ENOMEM;
+		iommu->cmd_sem_paddr = iommu_virt_to_phys((void *)iommu->cmd_sem);
+
+		/*
+		 * Allocates the command buffer. This buffer is per AMD IOMMU. We can
+		 * write commands to that buffer later and the IOMMU will execute them
+		 * asynchronously
+		 */
+		iommu->cmd_buf = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO,
+												get_order(CMD_BUFFER_SIZE));
+		if (!iommu->cmd_buf) {
+			return -ENOMEM;
+		}
+	}
+
+	return 0;
 }
 
-static void __init free_cwwb_sem(struct amd_iommu *iommu)
+static void __init free_iommu_buffers(struct amd_iommu *iommu)
 {
-	if (iommu->cmd_sem)
+	if (is_kdump_kernel()) {
+		if (iommu->cmd_sem) {
+			if (check_feature(FEATURE_SNP))
+				memunmap((void *)iommu->cmd_sem);
+			else
+				free_page((unsigned long)iommu->cmd_sem);
+		}
+		memunmap((void *)iommu->cmd_buf);
+	} else {
 		free_page((unsigned long)iommu->cmd_sem);
+		free_pages((unsigned long)iommu->cmd_buf, get_order(CMD_BUFFER_SIZE));
+	}
 }
 
 static void iommu_enable_xt(struct amd_iommu *iommu)
@@ -1078,16 +1143,13 @@ static int get_dev_entry_bit(struct amd_iommu *iommu, u16 devid, u8 bit)
 	return __get_dev_entry_bit(dev_table, devid, bit);
 }
 
-static bool __copy_device_table(struct amd_iommu *iommu)
+static bool __reuse_device_table(struct amd_iommu *iommu)
 {
-	u64 int_ctl, int_tab_len, entry = 0;
 	struct amd_iommu_pci_seg *pci_seg = iommu->pci_seg;
-	struct dev_table_entry *old_devtb = NULL;
-	u32 lo, hi, devid, old_devtb_size;
+	u32 lo, hi, old_devtb_size;
 	phys_addr_t old_devtb_phys;
-	u16 dom_id, dte_v, irq_v;
-	gfp_t gfp_flag;
-	u64 tmp;
+	u64 entry;
+
 
 	/* Each IOMMU use separate device table with the same size */
 	lo = readl(iommu->mmio_base + MMIO_DEV_TABLE_OFFSET);
@@ -1112,63 +1174,23 @@ static bool __copy_device_table(struct amd_iommu *iommu)
 		pr_err("The address of old device table is above 4G, not trustworthy!\n");
 		return false;
 	}
-	old_devtb = (cc_platform_has(CC_ATTR_HOST_MEM_ENCRYPT) && is_kdump_kernel())
-		    ? (__force void *)ioremap_encrypted(old_devtb_phys,
-							pci_seg->dev_table_size)
-		    : memremap(old_devtb_phys, pci_seg->dev_table_size, MEMREMAP_WB);
 
-	if (!old_devtb)
-		return false;
+	/*
+	 * IOMMU Device Table Base Address MMIO register is locked
+	 * if SNP is enabled during kdump, reuse the previous kernel's
+	 * device table.
+	 */
+	pci_seg->old_dev_tbl_cpy = iommu_memremap(old_devtb_phys, pci_seg->dev_table_size);
 
-	gfp_flag = GFP_KERNEL | __GFP_ZERO | GFP_DMA32;
-	pci_seg->old_dev_tbl_cpy = (void *)__get_free_pages(gfp_flag,
-						    get_order(pci_seg->dev_table_size));
 	if (pci_seg->old_dev_tbl_cpy == NULL) {
-		pr_err("Failed to allocate memory for copying old device table!\n");
-		memunmap(old_devtb);
+		pr_err("Failed to allocate memory for reusing old device table!\n");
 		return false;
 	}
-
-	for (devid = 0; devid <= pci_seg->last_bdf; ++devid) {
-		pci_seg->old_dev_tbl_cpy[devid] = old_devtb[devid];
-		dom_id = old_devtb[devid].data[1] & DEV_DOMID_MASK;
-		dte_v = old_devtb[devid].data[0] & DTE_FLAG_V;
-
-		if (dte_v && dom_id) {
-			pci_seg->old_dev_tbl_cpy[devid].data[0] = old_devtb[devid].data[0];
-			pci_seg->old_dev_tbl_cpy[devid].data[1] = old_devtb[devid].data[1];
-			__set_bit(dom_id, amd_iommu_pd_alloc_bitmap);
-			/* If gcr3 table existed, mask it out */
-			if (old_devtb[devid].data[0] & DTE_FLAG_GV) {
-				tmp = DTE_GCR3_VAL_B(~0ULL) << DTE_GCR3_SHIFT_B;
-				tmp |= DTE_GCR3_VAL_C(~0ULL) << DTE_GCR3_SHIFT_C;
-				pci_seg->old_dev_tbl_cpy[devid].data[1] &= ~tmp;
-				tmp = DTE_GCR3_VAL_A(~0ULL) << DTE_GCR3_SHIFT_A;
-				tmp |= DTE_FLAG_GV;
-				pci_seg->old_dev_tbl_cpy[devid].data[0] &= ~tmp;
-			}
-		}
-
-		irq_v = old_devtb[devid].data[2] & DTE_IRQ_REMAP_ENABLE;
-		int_ctl = old_devtb[devid].data[2] & DTE_IRQ_REMAP_INTCTL_MASK;
-		int_tab_len = old_devtb[devid].data[2] & DTE_INTTABLEN_MASK;
-		if (irq_v && (int_ctl || int_tab_len)) {
-			if ((int_ctl != DTE_IRQ_REMAP_INTCTL) ||
-			    (int_tab_len != DTE_INTTABLEN)) {
-				pr_err("Wrong old irq remapping flag: %#x\n", devid);
-				memunmap(old_devtb);
-				return false;
-			}
-
-			pci_seg->old_dev_tbl_cpy[devid].data[2] = old_devtb[devid].data[2];
-		}
-	}
-	memunmap(old_devtb);
 
 	return true;
 }
 
-static bool copy_device_table(void)
+static bool reuse_device_table(void)
 {
 	struct amd_iommu *iommu;
 	struct amd_iommu_pci_seg *pci_seg;
@@ -1176,17 +1198,17 @@ static bool copy_device_table(void)
 	if (!amd_iommu_pre_enabled)
 		return false;
 
-	pr_warn("Translation is already enabled - trying to copy translation structures\n");
+	pr_warn("Translation is already enabled - trying to reuse translation structures\n");
 
 	/*
 	 * All IOMMUs within PCI segment shares common device table.
-	 * Hence copy device table only once per PCI segment.
+	 * Hence reuse device table only once per PCI segment.
 	 */
 	for_each_pci_segment(pci_seg) {
 		for_each_iommu(iommu) {
 			if (pci_seg->id != iommu->pci_seg->id)
 				continue;
-			if (!__copy_device_table(iommu))
+			if (!__reuse_device_table(iommu))
 				return false;
 			break;
 		}
@@ -1703,8 +1725,7 @@ static void __init free_sysfs(struct amd_iommu *iommu)
 static void __init free_iommu_one(struct amd_iommu *iommu)
 {
 	free_sysfs(iommu);
-	free_cwwb_sem(iommu);
-	free_command_buffer(iommu);
+	free_iommu_buffers(iommu);
 	free_event_buffer(iommu);
 	free_ppr_log(iommu);
 	free_ga_log(iommu);
@@ -1876,10 +1897,7 @@ static int __init init_iommu_one_late(struct amd_iommu *iommu)
 {
 	int ret;
 
-	if (alloc_cwwb_sem(iommu))
-		return -ENOMEM;
-
-	if (alloc_command_buffer(iommu))
+	if (alloc_iommu_buffers(iommu))
 		return -ENOMEM;
 
 	if (alloc_event_buffer(iommu))
@@ -2815,8 +2833,8 @@ static void early_enable_iommu(struct amd_iommu *iommu)
  * This function finally enables all IOMMUs found in the system after
  * they have been initialized.
  *
- * Or if in kdump kernel and IOMMUs are all pre-enabled, try to copy
- * the old content of device table entries. Not this case or copy failed,
+ * Or if in kdump kernel and IOMMUs are all pre-enabled, try to reuse
+ * the old content of device table entries. Not this case or reuse failed,
  * just continue as normal kernel does.
  */
 static void early_enable_iommus(void)
@@ -2824,19 +2842,18 @@ static void early_enable_iommus(void)
 	struct amd_iommu *iommu;
 	struct amd_iommu_pci_seg *pci_seg;
 
-	if (!copy_device_table()) {
+	if (!reuse_device_table()) {
 		/*
-		 * If come here because of failure in copying device table from old
+		 * If come here because of failure in reusing device table from old
 		 * kernel with all IOMMUs enabled, print error message and try to
 		 * free allocated old_dev_tbl_cpy.
 		 */
 		if (amd_iommu_pre_enabled)
-			pr_err("Failed to copy DEV table from previous kernel.\n");
+			pr_err("Failed to reuse DEV table from previous kernel.\n");
 
 		for_each_pci_segment(pci_seg) {
 			if (pci_seg->old_dev_tbl_cpy != NULL) {
-				free_pages((unsigned long)pci_seg->old_dev_tbl_cpy,
-						get_order(pci_seg->dev_table_size));
+				memunmap((void *)pci_seg->old_dev_tbl_cpy);
 				pci_seg->old_dev_tbl_cpy = NULL;
 			}
 		}
@@ -2846,7 +2863,7 @@ static void early_enable_iommus(void)
 			early_enable_iommu(iommu);
 		}
 	} else {
-		pr_info("Copied DEV table from previous kernel.\n");
+		pr_info("Reused DEV table from previous kernel.\n");
 
 		for_each_pci_segment(pci_seg) {
 			free_pages((unsigned long)pci_seg->dev_table,
@@ -3261,6 +3278,10 @@ static void iommu_snp_enable(void)
 #ifdef CONFIG_KVM_AMD_SEV
 	if (!cc_platform_has(CC_ATTR_HOST_SEV_SNP))
 		return;
+
+	if (is_kdump_kernel())
+		return;
+
 	/*
 	 * The SNP support requires that IOMMU must be enabled, and is
 	 * not configured in the passthrough mode.
