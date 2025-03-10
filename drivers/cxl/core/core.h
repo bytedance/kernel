@@ -107,4 +107,7 @@ long cxl_pci_get_latency(struct pci_dev *pdev);
 int cxl_update_hmat_access_coordinates(int nid, struct cxl_region *cxlr,
 				       enum access_coordinate_class access);
 
+int cxl_ras_init(void);
+void cxl_ras_exit(void);
+
 #endif /* __CXL_CORE_H__ */
