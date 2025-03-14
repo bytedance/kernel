@@ -562,4 +562,13 @@ struct kvm_pmu_event_filter {
 /* x86-specific KVM_EXIT_HYPERCALL flags. */
 #define KVM_EXIT_HYPERCALL_LONG_MODE	BIT(0)
 
+struct kvm_tdx_cpuid_config {
+    __u32 leaf;
+    __u32 sub_leaf;
+    __u32 eax;
+    __u32 ebx;
+    __u32 ecx;
+    __u32 edx;
+};
+
 #endif /* _ASM_X86_KVM_H */

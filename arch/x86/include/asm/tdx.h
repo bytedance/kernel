@@ -33,6 +33,31 @@
 #ifndef __ASSEMBLY__
 
 #include <uapi/asm/mce.h>
+#include <uapi/asm/kvm.h>
+
+struct tdx_info {
+      u64 features0;
+      u64 attributes_fixed0;
+      u64 attributes_fixed1;
+      u64 xfam_fixed0;
+      u64 xfam_fixed1;
+
+      u8 nr_tdcs_pages;
+      u8 nr_tdvpx_pages;
+
+      u16 num_cpuid_config;
+      /* This must the last member. */
+      DECLARE_FLEX_ARRAY(struct kvm_tdx_cpuid_config, cpuid_configs);
+  };
+/* Info about the TDX module. */
+extern struct tdx_info *tdx_info;
+
+#ifdef CONFIG_SYSFS
+extern int tdx_sysfs_init(void);
+#else
+extern inline int tdx_sysfs_init(void) { return 0; }
+#endif
+
 
 enum tdx_notifier_event {
 	/*

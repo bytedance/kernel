@@ -1,0 +1,33 @@
+What:		/sys/firmware/tdx/tdx_module/metadata/
+Date:		December 2023
+KernelVersion:	6.7
+Contact:	Isaku Yamahata <isaku.yamahata@intel.com>, kvm@vger.kernel.org
+Users:		qemu, libvirt
+Description:
+		The TDX feature requires a firmware that is known as the TDX
+		module.  The TDX module exposes its metadata in the following
+		read-only files.  The information corresponds to the TDX global
+		metadata specified by 64bit field id.  The file name is hex
+		string in lower case.  The value is binary.
+		User space VMM like qemu needs refer to them to determine what
+		parameters are needed or allowed to configure guest TDs.
+
+		================ =============== ==============================
+		path name        value type      content
+		field id in hex
+		in lower case
+		================ =============== ==============================
+		1900000300000000 64bit value     ATTRIBUTES_FIXED0
+		1900000300000001 64bit value     ATTRIBUTES_FIXED1
+		1900000300000002 64bit value     XFAM_FIXED0
+		1900000300000003 64bit value     XFAM_FIXED1
+		9900000100000004 64bit value     NUM_CPUID_CONFIG
+		9900000300000400 array of        CPUID_LEAVES
+				 32bit leaf,     array size is NUM_CPUID_CONFIG
+				 32bit subleaf
+		9900000300000500 array of        CPUID_VALUES
+				 32bit eax,      array size is NUM_CPUID_CONFIG
+				 32bit ebx,
+				 32bit ecx,
+				 32bit edx
+		================ =============== ==============================

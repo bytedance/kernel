@@ -56,6 +56,8 @@ static DEFINE_PER_CPU(bool, tdx_lp_initialized);
 static struct tdmr_info_list tdx_tdmr_list;
 
 u64 tdx_features0;
+struct tdx_info *tdx_info;
+EXPORT_SYMBOL_GPL(tdx_info);
 
 enum tdx_module_status_t tdx_module_status;
 static DEFINE_MUTEX(module_lock);
@@ -210,6 +212,19 @@ static int tdx_cpu_disable(unsigned int cpu)
 {
 	return seamldr_flush_vmcs();
 }
+
+struct tdx_cpuid_config {
+	__struct_group(tdx_cpuid_config_leaf, leaf_sub_leaf, __packed,
+		       u32 leaf;
+		       u32 sub_leaf;
+		);
+	__struct_group(tdx_cpuid_config_value, value, __packed,
+		       u32 eax;
+		       u32 ebx;
+		       u32 ecx;
+		       u32 edx;
+		);
+} __packed;
 
 /*
  * Add a memory region as a TDX memory block.  The caller must make sure
@@ -1904,3 +1919,154 @@ void tdx_reset_memory(void)
 	 */
 	tdmrs_reset_pamt_all(&tdx_tdmr_list);
 }
+
+#ifdef CONFIG_SYSFS
+
+static struct kobject *tdx_kobj;
+static struct kobject *tdx_module_kobj;
+static struct kobject *tdx_metadata_kobj;
+
+#define TDX_METADATA_ATTR(_name, field_id_name, _size)		\
+static struct bin_attribute tdx_metadata_ ## _name = {		\
+	.attr = {						\
+		.name = field_id_name,				\
+		.mode = 0444,					\
+	},							\
+	.size = _size,						\
+	.read = tdx_metadata_ ## _name ## _show,		\
+}
+
+#define TDX_METADATA_ATTR_SHOW(_name, field_id_name)					\
+static ssize_t tdx_metadata_ ## _name ## _show(struct file *filp, struct kobject *kobj,	\
+					       struct bin_attribute *bin_attr,		\
+					       char *buf, loff_t offset, size_t count)	\
+{											\
+	return memory_read_from_buffer(buf, count, &offset,				\
+				       &tdx_info->_name,					\
+				       sizeof(tdx_info->_name));				\
+}											\
+TDX_METADATA_ATTR(_name, field_id_name, sizeof_field(struct tdx_info, _name))
+
+TDX_METADATA_ATTR_SHOW(attributes_fixed0, TDX_METADATA_ATTRIBUTES_FIXED0_NAME);
+TDX_METADATA_ATTR_SHOW(attributes_fixed1, TDX_METADATA_ATTRIBUTES_FIXED1_NAME);
+TDX_METADATA_ATTR_SHOW(xfam_fixed0, TDX_METADATA_XFAM_FIXED0_NAME);
+TDX_METADATA_ATTR_SHOW(xfam_fixed1, TDX_METADATA_XFAM_FIXED1_NAME);
+
+static ssize_t tdx_metadata_num_cpuid_config_show(struct file *filp, struct kobject *kobj,
+						  struct bin_attribute *bin_attr,
+						  char *buf, loff_t offset, size_t count)
+{
+	/*
+	 * Although tdsysinfo_struct.num_cpuid_config is defined as u32 for
+	 * alignment, TDX 1.5 defines metadata NUM_CONFIG_CPUID as u16.
+	 */
+	u16 tmp = (u16)tdx_info->num_cpuid_config;
+
+	WARN_ON_ONCE(tmp != tdx_info->num_cpuid_config);
+	return memory_read_from_buffer(buf, count, &offset, &tmp, sizeof(tmp));
+}
+TDX_METADATA_ATTR(num_cpuid_config, TDX_METADATA_NUM_CPUID_CONFIG_NAME, sizeof(u16));
+
+static ssize_t tdx_metadata_cpuid_leaves_show(struct file *filp, struct kobject *kobj,
+					      struct bin_attribute *bin_attr, char *buf,
+					      loff_t offset, size_t count)
+{
+	ssize_t r;
+	struct tdx_cpuid_config_leaf *tmp;
+	u32 i;
+
+	tmp = kmalloc(bin_attr->size, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	for (i = 0; i < tdx_info->num_cpuid_config; i++) {
+		struct kvm_tdx_cpuid_config *c = &tdx_info->cpuid_configs[i];
+		struct tdx_cpuid_config_leaf *leaf = (struct tdx_cpuid_config_leaf *)c;
+
+		memcpy(tmp + i, leaf, sizeof(*leaf));
+	}
+
+	r = memory_read_from_buffer(buf, count, &offset, tmp, bin_attr->size);
+	kfree(tmp);
+	return r;
+}
+
+TDX_METADATA_ATTR(cpuid_leaves, TDX_METADATA_CPUID_LEAVES_NAME, 0);
+
+static ssize_t tdx_metadata_cpuid_values_show(struct file *filp, struct kobject *kobj,
+					      struct bin_attribute *bin_attr, char *buf,
+					      loff_t offset, size_t count)
+{
+	struct tdx_cpuid_config_value *tmp;
+	ssize_t r;
+	u32 i;
+
+	tmp = kmalloc(bin_attr->size, GFP_KERNEL);
+	if (!tmp)
+		return -ENOMEM;
+
+	for (i = 0; i < tdx_info->num_cpuid_config; i++) {
+		struct kvm_tdx_cpuid_config *c = &tdx_info->cpuid_configs[i];
+		struct tdx_cpuid_config_value *value = (struct tdx_cpuid_config_value *)&c->eax;
+
+		memcpy(tmp + i, value, sizeof(*value));
+	}
+
+	r = memory_read_from_buffer(buf, count, &offset, tmp, bin_attr->size);
+	kfree(tmp);
+	return r;
+}
+
+TDX_METADATA_ATTR(cpuid_values, TDX_METADATA_CPUID_VALUES_NAME, 0);
+
+static struct bin_attribute *tdx_metadata_attrs[] = {
+	&tdx_metadata_attributes_fixed0,
+	&tdx_metadata_attributes_fixed1,
+	&tdx_metadata_xfam_fixed0,
+	&tdx_metadata_xfam_fixed1,
+	&tdx_metadata_num_cpuid_config,
+	&tdx_metadata_cpuid_leaves,
+	&tdx_metadata_cpuid_values,
+	NULL,
+};
+
+static const struct attribute_group tdx_metadata_attr_group = {
+	.bin_attrs = tdx_metadata_attrs,
+};
+
+int tdx_sysfs_init(void)
+{
+	int ret;
+
+	if (!tdx_info)
+		return 0;
+
+	tdx_kobj = kobject_create_and_add("tdx", firmware_kobj);
+	if (!tdx_kobj) {
+		pr_err("kobject_create_and_add tdx failed\n");
+		return -EINVAL;
+	}
+
+	tdx_module_kobj = kobject_create_and_add("tdx_module", tdx_kobj);
+	if (!tdx_module_kobj) {
+		pr_err("kobject_create_and_add tdx_module failed\n");
+		return -EINVAL;
+	}
+	tdx_metadata_kobj = kobject_create_and_add("metadata", tdx_module_kobj);
+	if (!tdx_metadata_kobj) {
+		pr_err("Sysfs exporting tdx global metadata failed %d\n", ret);
+		return -EINVAL;
+	}
+
+	tdx_metadata_cpuid_leaves.size = tdx_info->num_cpuid_config *
+		sizeof(struct tdx_cpuid_config_leaf);
+	tdx_metadata_cpuid_values.size = tdx_info->num_cpuid_config *
+		sizeof(struct tdx_cpuid_config_value);
+	ret = sysfs_create_group(tdx_metadata_kobj, &tdx_metadata_attr_group);
+	if (ret)
+		pr_err("Sysfs exporting tdx module attributes failed %d\n", ret);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(tdx_sysfs_init);
+#endif
