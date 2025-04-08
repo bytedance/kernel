@@ -114,8 +114,6 @@ FEATURE_DISPLAY ?=              \
          dwarf                  \
          dwarf_getlocations     \
          glibc                  \
-         libbfd                 \
-         libbfd-buildid		\
          libcap                 \
          libelf                 \
          libnuma                \
