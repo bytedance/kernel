@@ -18,4 +18,15 @@ config KUNPENG_HCCS
 	  Say M here if you want to include support for querying the
 	  health status and port information of HCCS on Kunpeng SoC.
 
+config HISI_SOC_CACHE
+	tristate "HiSilicon Cache driver for Kunpeng SoC"
+	depends on ARCH_HISI
+	help
+	  This driver provides the basic utilities for drivers of
+	  different part of Kunpeng SoC cache, including L3 cache and
+	  Hydra Home Agent etc.
+
+	  If either HiSilicon L3 cache driver or HiSilicon Hydra Home
+	  Agent driver is needed, say yes.
+
 endmenu
