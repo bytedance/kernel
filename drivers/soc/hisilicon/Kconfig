@@ -29,4 +29,15 @@ config HISI_SOC_CACHE
 	  If either HiSilicon L3 cache driver or HiSilicon Hydra Home
 	  Agent driver is needed, say yes.
 
+config HISI_SOC_HHA
+	tristate "HiSilicon Hydra Home Agent (HHA) device driver"
+	depends on ARM64 && ACPI || COMPILE_TEST
+	depends on HISI_SOC_CACHE
+	help
+	  The Hydra Home Agent (HHA) is responsible of cache coherency
+	  on SoC. This drivers provides cache maintenance functions of HHA.
+
+	  This driver can be built as a module. If so, the module will be
+	  called hisi_soc_hha.
+
 endmenu
