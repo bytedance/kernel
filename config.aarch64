@@ -402,6 +402,8 @@ CONFIG_HISILICON_ERRATUM_162100125=y
 # end of ARM errata workarounds via the alternatives framework
 
 CONFIG_ARM64_BRBE=y
+CONFIG_HISI_SOC_CACHE=m
+CONFIG_HISI_SOC_HHA=m
 
 CONFIG_ARM64_4K_PAGES=y
 # CONFIG_ARM64_16K_PAGES is not set
