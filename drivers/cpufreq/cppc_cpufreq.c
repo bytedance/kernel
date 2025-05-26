@@ -332,7 +332,7 @@ static unsigned int cppc_cpufreq_get_transition_delay_us(unsigned int cpu)
 
 static DEFINE_PER_CPU(unsigned int, efficiency_class);
 
-static int populate_efficiency_class(void)
+static void populate_efficiency_class(void)
 {
 	struct acpi_madt_generic_interrupt *gicc;
 	DECLARE_BITMAP(used_classes, 256) = {};
@@ -347,7 +347,7 @@ static int populate_efficiency_class(void)
 	if (bitmap_weight(used_classes, 256) <= 1) {
 		pr_debug("Efficiency classes are all equal (=%d). "
 			"No EM registered", class);
-		return -EINVAL;
+		return;
 	}
 
 	/*
@@ -363,8 +363,6 @@ static int populate_efficiency_class(void)
 		}
 		index++;
 	}
-
-	return 0;
 }
 
 #else
@@ -373,9 +371,9 @@ static unsigned int cppc_cpufreq_get_transition_delay_us(unsigned int cpu)
 {
 	return __cppc_cpufreq_get_transition_delay_us(cpu);
 }
-static int populate_efficiency_class(void)
+
+static void populate_efficiency_class(void)
 {
-	return 0;
 }
 #endif
 
