@@ -263,9 +263,13 @@ int kvm_sched_affinity_vcpu_init(struct kvm_vcpu *vcpu)
 	if (!kvm_dvmbm_support)
 		return 0;
 
-	if (!zalloc_cpumask_var(&vcpu->arch.sched_cpus, GFP_ATOMIC) ||
-	    !zalloc_cpumask_var(&vcpu->arch.pre_sched_cpus, GFP_ATOMIC))
+	if (!zalloc_cpumask_var(&vcpu->arch.sched_cpus, GFP_ATOMIC))
 		return -ENOMEM;
+
+	if (!zalloc_cpumask_var(&vcpu->arch.pre_sched_cpus, GFP_ATOMIC)) {
+		free_cpumask_var(vcpu->arch.sched_cpus);
+		return -ENOMEM;
+	}
 
 	return 0;
 }
