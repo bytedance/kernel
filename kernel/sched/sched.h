@@ -364,15 +364,15 @@ struct rt_rq;
 extern struct list_head task_groups;
 
 #ifdef CONFIG_CFS_BANDWIDTH
-extern const u64 max_cfs_quota_period;
+extern const u64 max_bw_quota_period_us;
 
 /*
- * default period for cfs group bandwidth.
- * default: 0.1s, units: nanoseconds
+ * default period for group bandwidth.
+ * default: 0.1s, units: microseconds
  */
-static inline u64 default_cfs_period(void)
+static inline u64 default_bw_period_us(void)
 {
-	return 100000000ULL;
+	return 100000ULL;
 }
 #endif /* CONFIG_CFS_BANDWIDTH */
 
