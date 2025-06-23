@@ -990,6 +990,7 @@ static struct attribute *default_attrs[] = {
 	&cpuinfo_min_freq.attr,
 	&cpuinfo_max_freq.attr,
 	&cpuinfo_transition_latency.attr,
+	&scaling_cur_freq.attr,
 	&scaling_min_freq.attr,
 	&scaling_max_freq.attr,
 	&affected_cpus.attr,
@@ -1105,10 +1106,6 @@ static int cpufreq_add_dev_interface(struct cpufreq_policy *policy)
 		if (ret)
 			return ret;
 	}
-
-	ret = sysfs_create_file(&policy->kobj, &scaling_cur_freq.attr);
-	if (ret)
-		return ret;
 
 	if (cpufreq_avg_freq_supported(policy)) {
 		ret = sysfs_create_file(&policy->kobj, &cpuinfo_avg_freq.attr);
