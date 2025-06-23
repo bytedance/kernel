@@ -1693,8 +1693,11 @@ static void __cpufreq_offline(unsigned int cpu, struct cpufreq_policy *policy)
 		policy->cdev = NULL;
 	}
 
-	if (has_target())
+	if (has_target()) {
 		cpufreq_exit_governor(policy);
+	} else {
+		policy->last_policy = policy->policy;
+	}
 
 	/*
 	 * Perform the ->offline() during light-weight tear-down, as
