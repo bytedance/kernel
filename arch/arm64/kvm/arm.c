@@ -49,6 +49,10 @@ static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
 
 #include "hisilicon/hisi_virt.h"
 
+#if IS_MODULE(CONFIG_KVM)
+#include "kvm_vhe.h"
+#endif
+
 DECLARE_KVM_HYP_PER_CPU(unsigned long, kvm_hyp_vector);
 
 DEFINE_PER_CPU(unsigned long, kvm_arm_hyp_stack_page);
@@ -1937,6 +1941,7 @@ bool lock_all_vcpus(struct kvm *kvm)
 	return true;
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 static unsigned long nvhe_percpu_size(void)
 {
 	return (unsigned long)CHOOSE_NVHE_SYM(__per_cpu_end) -
@@ -1949,6 +1954,7 @@ static unsigned long nvhe_percpu_order(void)
 
 	return size ? get_order(size) : 0;
 }
+#endif
 
 /* A lookup table holding the hypervisor VA for each vector slot */
 static void *hyp_spectre_vector_selector[BP_HARDEN_EL2_SLOTS];
@@ -1982,6 +1988,7 @@ static int kvm_init_vector_slots(void)
 	return 0;
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 static void __init cpu_prepare_hyp_mode(int cpu, u32 hyp_va_bits)
 {
 	struct kvm_nvhe_init_params *params = per_cpu_ptr_nvhe_sym(kvm_init_params, cpu);
@@ -2049,6 +2056,7 @@ static void hyp_install_host_vector(void)
 	arm_smccc_1_1_hvc(KVM_HOST_SMCCC_FUNC(__kvm_hyp_init), virt_to_phys(params), &res);
 	WARN_ON(res.a0 != SMCCC_RET_SUCCESS);
 }
+#endif
 
 static void cpu_init_hyp_mode(void)
 {
@@ -2097,8 +2105,10 @@ static void cpu_set_hyp_vector(void)
 
 	if (!is_protected_kvm_enabled())
 		*this_cpu_ptr_hyp_sym(kvm_hyp_vector) = (unsigned long)vector;
+#if !IS_MODULE(CONFIG_KVM)
 	else
 		kvm_call_hyp_nvhe(__pkvm_cpu_set_vector, data->slot);
+#endif
 }
 
 static void cpu_hyp_init_context(void)
@@ -2230,6 +2240,7 @@ static inline void __init hyp_cpu_pm_exit(void)
 }
 #endif
 
+#if !IS_MODULE(CONFIG_KVM)
 static void __init init_cpu_logical_map(void)
 {
 	unsigned int cpu;
@@ -2270,6 +2281,7 @@ static bool __init init_psci_relay(void)
 	}
 	return true;
 }
+#endif
 
 static int __init init_subsystems(void)
 {
@@ -2336,10 +2348,13 @@ static void __init teardown_hyp_mode(void)
 	free_hyp_pgds();
 	for_each_possible_cpu(cpu) {
 		free_page(per_cpu(kvm_arm_hyp_stack_page, cpu));
+#if !IS_MODULE(CONFIG_KVM)
 		free_pages(kvm_nvhe_sym(kvm_arm_hyp_percpu_base)[cpu], nvhe_percpu_order());
+#endif
 	}
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 static int __init do_pkvm_init(u32 hyp_va_bits)
 {
 	void *per_cpu_base = kvm_ksym_ref(kvm_nvhe_sym(kvm_arm_hyp_percpu_base));
@@ -2361,6 +2376,7 @@ static int __init do_pkvm_init(u32 hyp_va_bits)
 
 	return ret;
 }
+#endif
 
 static u64 get_hyp_id_aa64pfr0_el1(void)
 {
@@ -2401,6 +2417,7 @@ static void kvm_hyp_init_symbols(void)
 	kvm_nvhe_sym(kvm_arm_vmid_bits) = kvm_arm_vmid_bits;
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 static int __init kvm_hyp_init_protection(u32 hyp_va_bits)
 {
 	void *addr = phys_to_virt(hyp_mem_base);
@@ -2601,6 +2618,7 @@ out_err:
 	kvm_err("error initializing Hyp mode: %d\n", err);
 	return err;
 }
+#endif
 
 struct kvm_vcpu *kvm_mpidr_to_vcpu(struct kvm *kvm, unsigned long mpidr)
 {

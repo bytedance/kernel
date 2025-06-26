@@ -33,6 +33,7 @@ static u64 __early_kern_hyp_va(u64 addr)
 	return addr;
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 /*
  * Store a hyp VA <-> PA offset into a EL2-owned variable.
  */
@@ -184,6 +185,7 @@ void __init kvm_update_va_mask(struct alt_instr *alt,
 		updptr[i] = cpu_to_le32(insn);
 	}
 }
+#endif
 
 void kvm_patch_vector_branch(struct alt_instr *alt,
 			     __le32 *origptr, __le32 *updptr, int nr_inst)
@@ -241,6 +243,7 @@ void kvm_patch_vector_branch(struct alt_instr *alt,
 	*updptr++ = cpu_to_le32(insn);
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 static void generate_mov_q(u64 val, __le32 *origptr, __le32 *updptr, int nr_inst)
 {
 	u32 insn, oinsn, rd;
@@ -296,3 +299,4 @@ void kvm_compute_final_ctr_el0(struct alt_instr *alt,
 	generate_mov_q(read_sanitised_ftr_reg(SYS_CTR_EL0),
 		       origptr, updptr, nr_inst);
 }
+#endif

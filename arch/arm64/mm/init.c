@@ -461,7 +461,9 @@ void __init bootmem_init(void)
 	arm64_hugetlb_cma_reserve();
 #endif
 
+#ifdef CONFIG_KVM
 	kvm_hyp_reserve();
+#endif
 
 	/*
 	 * sparse_init() tries to allocate memory from memblock, so must be

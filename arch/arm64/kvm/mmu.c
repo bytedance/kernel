@@ -27,7 +27,9 @@ static DEFINE_MUTEX(kvm_hyp_pgd_mutex);
 
 static unsigned long __ro_after_init hyp_idmap_start;
 static unsigned long __ro_after_init hyp_idmap_end;
+#if !IS_MODULE(CONFIG_KVM)
 static phys_addr_t __ro_after_init hyp_idmap_vector;
+#endif
 
 static unsigned long __ro_after_init io_map_base;
 
@@ -1860,10 +1862,12 @@ phys_addr_t kvm_mmu_get_httbr(void)
 	return __pa(hyp_pgtable->pgd);
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 phys_addr_t kvm_get_idmap_vector(void)
 {
 	return hyp_idmap_vector;
 }
+#endif
 
 static int kvm_map_idmap_text(void)
 {
@@ -1900,7 +1904,9 @@ int __init kvm_mmu_init(u32 *hyp_va_bits)
 	hyp_idmap_start = ALIGN_DOWN(hyp_idmap_start, PAGE_SIZE);
 	hyp_idmap_end = __pa_symbol(__hyp_idmap_text_end);
 	hyp_idmap_end = ALIGN(hyp_idmap_end, PAGE_SIZE);
+#if !IS_MODULE(CONFIG_KVM)
 	hyp_idmap_vector = __pa_symbol(__kvm_hyp_init);
+#endif
 
 	/*
 	 * We rely on the linker script to ensure at build time that the HYP

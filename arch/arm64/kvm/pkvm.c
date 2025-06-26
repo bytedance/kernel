@@ -265,4 +265,6 @@ static int __init finalize_pkvm(void)
 
 	return ret;
 }
+#if !IS_MODULE(CONFIG_KVM)
 device_initcall_sync(finalize_pkvm);
+#endif

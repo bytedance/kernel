@@ -90,18 +90,28 @@ enum __kvm_host_smccc_func {
  * Define a pair of symbols sharing the same name but one defined in
  * VHE and the other in nVHE hyp implementations.
  */
+#if IS_MODULE(CONFIG_KVM)
+#define DECLARE_KVM_HYP_SYM(sym)               \
+	DECLARE_KVM_VHE_SYM(sym);
+#else
 #define DECLARE_KVM_HYP_SYM(sym)		\
 	DECLARE_KVM_VHE_SYM(sym);		\
 	DECLARE_KVM_NVHE_SYM(sym)
+#endif
 
 #define DECLARE_KVM_VHE_PER_CPU(type, sym)	\
 	DECLARE_PER_CPU(type, sym)
 #define DECLARE_KVM_NVHE_PER_CPU(type, sym)	\
 	DECLARE_PER_CPU(type, kvm_nvhe_sym(sym))
 
+#if IS_MODULE(CONFIG_KVM)
+#define DECLARE_KVM_HYP_PER_CPU(type, sym)     \
+	DECLARE_KVM_VHE_PER_CPU(type, sym);
+#else
 #define DECLARE_KVM_HYP_PER_CPU(type, sym)	\
 	DECLARE_KVM_VHE_PER_CPU(type, sym);	\
 	DECLARE_KVM_NVHE_PER_CPU(type, sym)
+#endif
 
 /*
  * Compute pointer to a symbol defined in nVHE percpu region.
@@ -152,6 +162,11 @@ extern void *__vhe_undefined_symbol;
  * - Don't let the nVHE hypervisor have access to this, as it will
  *   pick the *wrong* symbol (yes, it runs at EL2...).
  */
+#if IS_MODULE(CONFIG_KVM)
+#define CHOOSE_HYP_SYM(sym)		sym
+#define this_cpu_ptr_hyp_sym(sym)	this_cpu_ptr(&sym)
+#define per_cpu_ptr_hyp_sym(sym, cpu)	per_cpu_ptr(&sym, cpu)
+#else
 #define CHOOSE_HYP_SYM(sym)		(is_kernel_in_hyp_mode()	\
 					   ? CHOOSE_VHE_SYM(sym)	\
 					   : CHOOSE_NVHE_SYM(sym))
@@ -166,6 +181,7 @@ extern void *__vhe_undefined_symbol;
 
 #define CHOOSE_VHE_SYM(sym)	sym
 #define CHOOSE_NVHE_SYM(sym)	kvm_nvhe_sym(sym)
+#endif
 
 #endif
 
@@ -211,10 +227,14 @@ struct kvm;
 struct kvm_vcpu;
 struct kvm_s2_mmu;
 
-DECLARE_KVM_NVHE_SYM(__kvm_hyp_init);
 DECLARE_KVM_HYP_SYM(__kvm_hyp_vector);
-#define __kvm_hyp_init		CHOOSE_NVHE_SYM(__kvm_hyp_init)
 #define __kvm_hyp_vector	CHOOSE_HYP_SYM(__kvm_hyp_vector)
+
+#if !IS_MODULE(CONFIG_KVM)
+DECLARE_KVM_NVHE_SYM(__kvm_hyp_init);
+#define __kvm_hyp_init		CHOOSE_NVHE_SYM(__kvm_hyp_init)
+#endif
+
 
 extern unsigned long kvm_nvhe_sym(kvm_arm_hyp_percpu_base)[];
 DECLARE_KVM_NVHE_SYM(__per_cpu_start);

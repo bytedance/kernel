@@ -49,7 +49,11 @@ DECLARE_KVM_NVHE_PER_CPU(unsigned long [OVERFLOW_STACK_SIZE/sizeof(long)], overf
 DECLARE_KVM_NVHE_PER_CPU(struct kvm_nvhe_stacktrace_info, kvm_stacktrace_info);
 DECLARE_PER_CPU(unsigned long, kvm_arm_hyp_stack_page);
 
+#if IS_MODULE(CONFIG_KVM)
+void kvm_nvhe_dump_backtrace(unsigned long hyp_offset) { }
+#else
 void kvm_nvhe_dump_backtrace(unsigned long hyp_offset);
+#endif
 
 #endif	/* __KVM_NVHE_HYPERVISOR__ */
 #endif	/* __ASM_STACKTRACE_NVHE_H */
