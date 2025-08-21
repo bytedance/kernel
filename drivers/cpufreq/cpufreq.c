@@ -2894,13 +2894,17 @@ static void remove_boost_sysfs_file(void)
 
 int cpufreq_enable_boost_support(void)
 {
+	unsigned long flags;
+
 	if (!cpufreq_driver)
 		return -EINVAL;
 
 	if (cpufreq_boost_supported())
 		return 0;
 
+	write_lock_irqsave(&cpufreq_driver_lock, flags);
 	cpufreq_driver->set_boost = cpufreq_boost_set_sw;
+	write_unlock_irqrestore(&cpufreq_driver_lock, flags);
 
 	/* This will get removed on driver unregister */
 	return create_boost_sysfs_file();
