@@ -320,12 +320,22 @@ static const struct attribute_group armv8_pmuv3_events_attr_group = {
 #define ATTR_CFG_FLD_threshold_LO		5
 #define ATTR_CFG_FLD_threshold_HI		16
 
+#ifdef CONFIG_HISILICON_HW_METRIC
+#define ATTR_CFG_FLD_hw_metric_CFG		config2
+#define ATTR_CFG_FLD_hw_metric_LO		0
+#define ATTR_CFG_FLD_hw_metric_HI		0
+#endif
+
 GEN_PMU_FORMAT_ATTR(event);
 GEN_PMU_FORMAT_ATTR(long);
 GEN_PMU_FORMAT_ATTR(rdpmc);
 GEN_PMU_FORMAT_ATTR(threshold_count);
 GEN_PMU_FORMAT_ATTR(threshold_compare);
 GEN_PMU_FORMAT_ATTR(threshold);
+
+#ifdef CONFIG_HISILICON_HW_METRIC
+GEN_PMU_FORMAT_ATTR(hw_metric);
+#endif
 
 static int sysctl_perf_user_access __read_mostly;
 
@@ -358,6 +368,29 @@ static u8 armv8pmu_event_threshold_control(struct perf_event_attr *attr)
 	return (th_compare << 1) | th_count;
 }
 
+#ifdef CONFIG_HISILICON_HW_METRIC
+static inline bool armv8pmu_event_is_hw_metric(struct perf_event *event)
+{
+	return ATTR_CFG_GET_FLD(&event->attr, hw_metric);
+}
+
+static bool armpmu_support_hisi_hw_metric(void)
+{
+	static const struct midr_range hip12_cpus[] = {
+		MIDR_ALL_VERSIONS(MIDR_HISI_HIP12),
+		{ }
+	};
+
+	/*
+	 * Feature of hw metric requires access to EL1 registers to accomplish,
+	 * which will cause kernel panic in virtual machine because of lack of
+	 * authority.  Thus, this feature is banned for virtual machines.
+	 */
+	return is_midr_in_range_list(read_cpuid_id(), hip12_cpus) &&
+		is_kernel_in_hyp_mode();
+}
+#endif
+
 static struct attribute *armv8_pmuv3_format_attrs[] = {
 	&format_attr_event.attr,
 	&format_attr_long.attr,
@@ -365,11 +398,29 @@ static struct attribute *armv8_pmuv3_format_attrs[] = {
 	&format_attr_threshold.attr,
 	&format_attr_threshold_compare.attr,
 	&format_attr_threshold_count.attr,
+#ifdef CONFIG_HISILICON_HW_METRIC
+	&format_attr_hw_metric.attr,
+#endif
 	NULL,
 };
 
+#ifdef CONFIG_HISILICON_HW_METRIC
+static umode_t
+armv8pmu_format_attr_is_visible(struct kobject *kobj,
+			       struct attribute *attr, int unused)
+{
+	if (attr == &format_attr_hw_metric.attr && !armpmu_support_hisi_hw_metric())
+		return 0;
+
+	return attr->mode;
+}
+#endif
+
 static const struct attribute_group armv8_pmuv3_format_attr_group = {
 	.name = "format",
+#ifdef CONFIG_HISILICON_HW_METRIC
+	.is_visible = armv8pmu_format_attr_is_visible,
+#endif
 	.attrs = armv8_pmuv3_format_attrs,
 };
 
@@ -603,6 +654,41 @@ static void armv8pmu_write_evcntr(int idx, u64 value)
 	write_pmevcntrn(counter, value);
 }
 
+#ifdef CONFIG_HISILICON_HW_METRIC
+static inline void armv8pmu_write_reload_counter(struct perf_event *event,
+						 u64 value)
+{
+	/* Need to be event->hw.idx - 1 since counter 0 is PMCCNTR_EL0 */
+	int idx = event->hw.idx - 1;
+
+#define HW_METRIC_RELOAD_CNTR(n)	sys_reg(3, 3, 15, 3, (2 + n))
+#define write_hw_metric_reload_cntr(_value, _n)					\
+	do {									\
+		switch (_n) {							\
+		case 0:								\
+		write_sysreg_s(_value, HW_METRIC_RELOAD_CNTR(0)); break;	\
+		case 1:								\
+		write_sysreg_s(_value, HW_METRIC_RELOAD_CNTR(1)); break;	\
+		case 2:								\
+		write_sysreg_s(_value, HW_METRIC_RELOAD_CNTR(2)); break;	\
+		case 3:								\
+		write_sysreg_s(_value, HW_METRIC_RELOAD_CNTR(3)); break;	\
+		case 4:								\
+		write_sysreg_s(_value, HW_METRIC_RELOAD_CNTR(4)); break;	\
+		case 5:								\
+		write_sysreg_s(_value, HW_METRIC_RELOAD_CNTR(5)); break;	\
+		default:							\
+			WARN(1, "Invalid hw_metric reload counter index\n");	\
+			dev_err(event->pmu->dev, "event is 0x%lx index is %x\n",\
+				event->hw.config_base, event->hw.idx);		\
+		}								\
+	} while (0)
+	write_hw_metric_reload_cntr(value, idx);
+#undef write_hw_metric_reload_cntr
+#undef HW_METRIC_RELOAD_CNTR
+}
+#endif
+
 static void armv8pmu_write_hw_counter(struct perf_event *event,
 					     u64 value)
 {
@@ -614,6 +700,11 @@ static void armv8pmu_write_hw_counter(struct perf_event *event,
 	} else {
 		armv8pmu_write_evcntr(idx, value);
 	}
+
+#ifdef CONFIG_HISILICON_HW_METRIC
+	if (armv8pmu_event_is_hw_metric(event))
+		armv8pmu_write_reload_counter(event, value);
+#endif
 }
 
 static void armv8pmu_write_counter(struct perf_event *event, u64 value)
@@ -688,6 +779,38 @@ static void armv8pmu_enable_counter(u32 mask)
 	write_pmcntenset(mask);
 }
 
+#ifdef CONFIG_HISILICON_HW_METRIC
+static inline void armv8pmu_enable_hw_metric(struct perf_event *event, bool enable)
+{
+	int idx = event->hw.idx;
+	u64 reg;
+
+	/*
+	 * Configure the chicken bit on leader event enabling.
+	 */
+	if (event != event->group_leader)
+		return;
+
+	/* Convert the idx since we only use general counters, counter 0 is
+	 * used for PMCCNTR_EL0.
+	 */
+	idx -= 1;
+
+#define HISI_DTU_CTLR_EL1	sys_reg(3, 0, 15, 8, 4)
+#define HISI_DTU_CTLR_EL1_CHK_GROUP0	BIT(15)
+
+	reg = read_sysreg_s(HISI_DTU_CTLR_EL1);
+	if (enable)
+		reg |= HISI_DTU_CTLR_EL1_CHK_GROUP0 << (idx >> 1);
+	else
+		reg &= ~(HISI_DTU_CTLR_EL1_CHK_GROUP0 << (idx >> 1));
+
+	write_sysreg_s(reg, HISI_DTU_CTLR_EL1);
+
+	reg = read_sysreg_s(HISI_DTU_CTLR_EL1);
+}
+#endif
+
 static void armv8pmu_enable_event_counter(struct perf_event *event)
 {
 	struct perf_event_attr *attr = &event->attr;
@@ -696,8 +819,14 @@ static void armv8pmu_enable_event_counter(struct perf_event *event)
 	kvm_set_pmu_events(mask, attr);
 
 	/* We rely on the hypervisor switch code to enable guest counters */
-	if (!kvm_pmu_counter_deferred(attr))
+	if (!kvm_pmu_counter_deferred(attr)) {
 		armv8pmu_enable_counter(mask);
+
+#ifdef CONFIG_HISILICON_HW_METRIC
+		if (armv8pmu_event_is_hw_metric(event))
+			armv8pmu_enable_hw_metric(event, true);
+#endif
+	}
 }
 
 static void armv8pmu_disable_counter(u32 mask)
@@ -718,8 +847,14 @@ static void armv8pmu_disable_event_counter(struct perf_event *event)
 	kvm_clr_pmu_events(mask);
 
 	/* We rely on the hypervisor switch code to disable guest counters */
-	if (!kvm_pmu_counter_deferred(attr))
+	if (!kvm_pmu_counter_deferred(attr)) {
 		armv8pmu_disable_counter(mask);
+
+#ifdef CONFIG_HISILICON_HW_METRIC
+		if (armv8pmu_event_is_hw_metric(event))
+			armv8pmu_enable_hw_metric(event, false);
+#endif
+	}
 }
 
 static void armv8pmu_enable_intens(u32 mask)
@@ -1007,12 +1142,75 @@ static int armv8pmu_get_chain_idx(struct pmu_hw_events *cpuc,
 	return -EAGAIN;
 }
 
+#ifdef CONFIG_HISILICON_HW_METRIC
+static int armv8pmu_check_hw_metric_event(struct pmu_hw_events *cpuc,
+					  struct perf_event *event)
+{
+	struct perf_event *sibling, *leader = event->group_leader;
+	int hw_metric_cnt = 0;
+
+	if (cpuc->percpu_pmu) {
+		for_each_sibling_event(sibling, leader) {
+			if (armv8pmu_event_is_hw_metric(sibling))
+				hw_metric_cnt++;
+		}
+
+		if (hw_metric_cnt != 1)
+			return -EINVAL;
+	} else {
+		if (event == leader)
+			return 0;
+
+		if (!armv8pmu_event_is_hw_metric(leader))
+			return -EINVAL;
+
+		for_each_sibling_event(sibling, leader) {
+			if (armv8pmu_event_is_hw_metric(sibling))
+				hw_metric_cnt++;
+		}
+
+		if (hw_metric_cnt > 0)
+			return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int armv8pmu_get_hw_metric_event_idx(struct pmu_hw_events *cpuc,
+					    struct perf_event *event)
+{
+	struct arm_pmu *cpu_pmu = to_arm_pmu(event->pmu);
+	struct perf_event *leader = event->group_leader;
+	int leader_idx;
+
+	if (armv8pmu_check_hw_metric_event(cpuc, event))
+		return -EINVAL;
+
+	if (event == leader || leader->hw.idx < 1)
+		return armv8pmu_get_chain_idx(cpuc, cpu_pmu);
+
+	leader_idx = leader->hw.idx;
+	if (cpuc->events[leader_idx - 1])
+		return -EAGAIN;
+
+	return leader_idx - 1;
+}
+#endif
+
 static int armv8pmu_get_event_idx(struct pmu_hw_events *cpuc,
 				  struct perf_event *event)
 {
 	struct arm_pmu *cpu_pmu = to_arm_pmu(event->pmu);
 	struct hw_perf_event *hwc = &event->hw;
 	unsigned long evtype = hwc->config_base & ARMV8_PMU_EVTYPE_EVENT;
+
+#ifdef CONFIG_HISILICON_HW_METRIC
+	if (armv8pmu_event_is_hw_metric(event))
+		return armv8pmu_get_hw_metric_event_idx(cpuc, event);
+	else if (event != event->group_leader &&
+		 armv8pmu_event_is_hw_metric(event->group_leader))
+		return -EINVAL;
+#endif
 
 	/* Always prefer to place a cycle counter into the cycle counter. */
 	if ((evtype == ARMV8_PMUV3_PERFCTR_CPU_CYCLES) &&
@@ -1236,6 +1434,11 @@ static int __armv8_pmuv3_map_event(struct perf_event *event,
 
 	if (armv8pmu_event_is_64bit(event))
 		event->hw.flags |= ARMPMU_EVT_64BIT;
+
+#ifdef CONFIG_HISILICON_HW_METRIC
+	if (armv8pmu_event_is_hw_metric(event) && !armpmu_support_hisi_hw_metric())
+		return -EOPNOTSUPP;
+#endif
 
 	/*
 	 * User events must be allocated into a single counter, and so

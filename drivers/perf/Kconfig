@@ -246,4 +246,11 @@ config CXL_PMU
 
 	  If unsure say 'm'.
 
+config HISILICON_HW_METRIC
+	bool "HiSilicon hardware metric sampling support"
+	depends on ARM64
+	help
+	  Support hardware metric that allows filter of sampling for specific
+	  sampling period ratio.
+
 endmenu
