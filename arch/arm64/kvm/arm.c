@@ -126,6 +126,29 @@ int kvm_arch_vcpu_should_kick(struct kvm_vcpu *vcpu)
 }
 
 #ifdef CONFIG_ARM64_HDBSS
+static void kvm_clear_hdbss(struct kvm *kvm)
+{
+	unsigned long i;
+	struct kvm_vcpu *vcpu;
+	struct page *hdbss_pg;
+
+	kvm->arch.vtcr &= ~(VTCR_EL2_HD | VTCR_EL2_HDBSS);
+
+	kvm_for_each_vcpu(i, vcpu, kvm) {
+		/* Kick vcpus to flush hdbss buffer. */
+		kvm_vcpu_kick(vcpu);
+
+		hdbss_pg = phys_to_page(HDBSSBR_BADDR(vcpu->arch.hdbss.br_el2));
+		if (hdbss_pg)
+			__free_pages(hdbss_pg, HDBSSBR_SZ(vcpu->arch.hdbss.br_el2));
+
+		vcpu->arch.hdbss.br_el2 = 0;
+		vcpu->arch.hdbss.prod_el2 = 0;
+	}
+
+	kvm->enable_hdbss = false;
+}
+
 static int kvm_cap_arm_enable_hdbss(struct kvm *kvm,
 				    struct kvm_enable_cap *cap)
 {
@@ -158,6 +181,7 @@ static int kvm_cap_arm_enable_hdbss(struct kvm *kvm,
 			hdbss_pg = alloc_pages(GFP_KERNEL, size);
 			if (!hdbss_pg) {
 				kvm_err("Alloc HDBSS buffer failed!\n");
+				kvm_clear_hdbss(kvm);
 				return -EINVAL;
 			}
 
@@ -174,21 +198,7 @@ static int kvm_cap_arm_enable_hdbss(struct kvm *kvm,
 
 		kvm_info("Enable HDBSS success, HDBSS buffer size: %d\n", size);
 	} else if (kvm->enable_hdbss) {
-		kvm->arch.vtcr &= ~(VTCR_EL2_HD | VTCR_EL2_HDBSS);
-
-		kvm_for_each_vcpu(i, vcpu, kvm) {
-			/* Kick vcpus to flush hdbss buffer. */
-			kvm_vcpu_kick(vcpu);
-
-			hdbss_pg = phys_to_page(HDBSSBR_BADDR(vcpu->arch.hdbss.br_el2));
-			if (hdbss_pg)
-				__free_pages(hdbss_pg, HDBSSBR_SZ(vcpu->arch.hdbss.br_el2));
-
-			vcpu->arch.hdbss.br_el2 = 0;
-			vcpu->arch.hdbss.prod_el2 = 0;
-		}
-
-		kvm->enable_hdbss = false;
+		kvm_clear_hdbss(kvm);
 		kvm_info("Disable HDBSS success\n");
 	}
 
