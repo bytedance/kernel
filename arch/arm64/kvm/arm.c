@@ -139,6 +139,11 @@ static int kvm_cap_arm_enable_hdbss(struct kvm *kvm,
 		return -EINVAL;
 	}
 
+	if (!is_kernel_in_hyp_mode()) {
+		kvm_err("Do not support HDBSS in non-VHE mode!\n");
+		return -EINVAL;
+	}
+
 	if (size < 0 || size > HDBSS_MAX_SIZE) {
 		kvm_err("Invalid HDBSS buffer size: %d!\n", size);
 		return -EINVAL;
