@@ -1295,6 +1295,19 @@ config HISILICON_ERRATUM_162102203
 
 	  If unsure, say N.
 
+config HISILICON_ERRATUM_162100803
+	bool "Hip09/10/10c/12 162100803/162200807/162400807/165010802 erratum support"
+	default y
+	help
+	  There is a hardware conflict between vSGI and vLPI, fix it by
+	  configure a max ITS ITT size 0xf when doing MAPD with V = 1, clear V
+	  field in ITS device table and clear ITS cache to implement MAPD with
+	  V = 0 instead. Hip09/10/10c/12 have this same problem, just use
+	  HISILICON_ERRATUM_162100803 as the compile macro and
+	  ITS_FLAGS_WORKAROUND_HISILICON_162100803 as ITS flag for convenience
+
+	  If unsure, say Y.
+
 config HISILICON_ERRATUM_162100602
 	bool "Hisilicon erratum 162100602"
 	depends on ARM_SMMU_V3 && ARCH_HISI
