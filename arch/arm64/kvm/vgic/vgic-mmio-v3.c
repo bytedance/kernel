@@ -643,6 +643,12 @@ static unsigned long vgic_mmio_read_nmi(struct kvm_vcpu *vcpu,
 	return value;
 }
 
+static unsigned long vgic_uaccess_read_nmi(struct kvm_vcpu *vcpu,
+					gpa_t addr, unsigned int len)
+{
+	return vgic_mmio_read_nmi(vcpu, addr, len);
+}
+
 static void vgic_mmio_write_nmi(struct kvm_vcpu *vcpu, gpa_t addr,
 				unsigned int len, unsigned long val)
 {
@@ -670,6 +676,13 @@ static void vgic_mmio_write_nmi(struct kvm_vcpu *vcpu, gpa_t addr,
 
 		vgic_put_irq(vcpu->kvm, irq);
 	}
+}
+
+static int vgic_uaccess_write_nmi(struct kvm_vcpu *vcpu, gpa_t addr,
+				unsigned int len, unsigned long val)
+{
+	vgic_mmio_write_nmi(vcpu, addr, len, val);
+	return 0;
 }
 
 /*
@@ -832,8 +845,9 @@ static const struct vgic_register_region vgic_v3_rd_registers[] = {
 	REGISTER_DESC_WITH_LENGTH(SZ_64K + GICR_NSACR,
 		vgic_mmio_read_raz, vgic_mmio_write_wi, 4,
 		VGIC_ACCESS_32bit),
-	REGISTER_DESC_WITH_LENGTH(SZ_64K + GICR_INMIR0,
-		vgic_mmio_read_nmi, vgic_mmio_write_nmi, 4,
+	REGISTER_DESC_WITH_LENGTH_UACCESS(SZ_64K + GICR_INMIR0,
+		vgic_mmio_read_nmi, vgic_mmio_write_nmi,
+		vgic_uaccess_read_nmi, vgic_uaccess_write_nmi, 4,
 		VGIC_ACCESS_32bit),
 };
 
