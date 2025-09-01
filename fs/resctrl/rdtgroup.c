@@ -1198,7 +1198,7 @@ static ssize_t max_threshold_occ_write(struct kernfs_open_file *of,
 	int ret;
 
 	if (r->cache_level != 3)
-		return 0;
+		goto out;
 
 	ret = kstrtouint(buf, 0, &bytes);
 	if (ret)
@@ -1209,6 +1209,7 @@ static ssize_t max_threshold_occ_write(struct kernfs_open_file *of,
 
 	resctrl_rmid_realloc_threshold = resctrl_arch_round_mon_val(bytes);
 
+out:
 	return nbytes;
 }
 
