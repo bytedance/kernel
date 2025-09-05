@@ -100,16 +100,20 @@ bool resctrl_arch_get_cdp_enabled(enum resctrl_res_level rid)
 	}
 }
 
-int resctrl_arch_set_cdp_enabled(enum resctrl_res_level rid, bool enable)
+int resctrl_arch_set_cdp_enabled(enum resctrl_res_level ignored, bool enable)
 {
 	u64 regval;
 	struct rdt_resource *r;
-	u32 partid, partid_i, partid_d;
+	u32 i, partid, partid_i, partid_d;
 
-	r = resctrl_arch_get_resource(rid);
-	r->num_rmid = resctrl_arch_system_num_rmid_idx();
-	if (enable)
-		r->num_rmid >>= 1;
+	for (i = 0; i < RDT_NUM_RESOURCES; i++) {
+		r = resctrl_arch_get_resource(i);
+		if (r->mon_capable) {
+			r->num_rmid = resctrl_arch_system_num_rmid_idx();
+			if (enable)
+				r->num_rmid >>= 1;
+		}
+	}
 
 	cdp_enabled = enable;
 
