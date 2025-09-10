@@ -639,6 +639,39 @@ static u16 percent_to_mbw_max(u32 pc, u8 wd)
 	return value;
 }
 
+static u16 percent_to_ca_max(u32 pc, u8 wd)
+{
+	struct rdt_resource *l3 = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+	u32 valid_max;
+
+	if (read_cpuid_implementor() != ARM_CPU_IMP_HISI)
+		return percent_to_mbw_max(pc, wd);
+
+	valid_max = l3->cache.cbm_len;
+
+	if (pc >= MAX_MBA_BW)
+		return valid_max << (16 - wd);
+
+	return ((pc * valid_max + 50) / 100) << (16 - wd);
+}
+
+static u16 ca_max_to_percent(u16 ca_max, u8 wd)
+{
+	struct rdt_resource *l3 = resctrl_arch_get_resource(RDT_RESOURCE_L3);
+	u32 valid_max;
+
+	if (read_cpuid_implementor() != ARM_CPU_IMP_HISI)
+		return mbw_max_to_percent(ca_max, wd);
+
+	valid_max = l3->cache.cbm_len;
+
+	ca_max = ca_max >> (16 - wd);
+	if (ca_max >= valid_max)
+		return MAX_MBA_BW;
+
+	return (ca_max * 100 + valid_max / 2) / valid_max;
+}
+
 /* Test whether we can export MPAM_CLASS_CACHE:{2,3}? */
 static void mpam_resctrl_pick_caches(void)
 {
@@ -840,6 +873,20 @@ void resctrl_arch_reset_rmid_all(struct rdt_resource *r, struct rdt_domain *d)
 	mpam_msmon_reset_all_mbwu(dom->comp);
 }
 
+static void mpam_llc_gran_hisi_workaround(struct rdt_resource *r)
+{
+	int cbm_len;
+
+	if (read_cpuid_implementor() != ARM_CPU_IMP_HISI)
+		return;
+
+	if (r->fflags != RFTYPE_RES_CACHE || r->cache_level != 3)
+		return;
+
+	cbm_len = resctrl_arch_get_resource(RDT_RESOURCE_L3)->cache.cbm_len;
+	r->membw.bw_gran = max(100 / cbm_len, 1);
+}
+
 static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
 {
 	struct mpam_class *class = res->class;
@@ -957,6 +1004,7 @@ static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
 
 		r->membw.min_bw = 1;
 		r->membw.bw_gran = max(100 / (1 << cprops->cmax_wd), 1);
+		mpam_llc_gran_hisi_workaround(r);
 		break;
 
 	case RDT_RESOURCE_L3_MIN:
@@ -974,6 +1022,7 @@ static int mpam_resctrl_resource_init(struct mpam_resctrl_res *res)
 
 		r->membw.min_bw = 0;
 		r->membw.bw_gran = max(100 / (1 << cprops->cmax_wd), 1);
+		mpam_llc_gran_hisi_workaround(r);
 		break;
 
 	case RDT_RESOURCE_MB_MIN:
@@ -1204,9 +1253,9 @@ u32 resctrl_arch_get_config(struct rdt_resource *r, struct rdt_domain *d,
 		/* TODO: Scaling is not yet supported */
 		return cfg->cpbm;
 	case mpam_feat_ccap_part:
-		return mbw_max_to_percent(cfg->cmax, cprops->cmax_wd);
+		return ca_max_to_percent(cfg->cmax, cprops->cmax_wd);
 	case mpam_feat_cmin:
-		return mbw_max_to_percent(cfg->cmin, cprops->cmax_wd);
+		return ca_max_to_percent(cfg->cmin, cprops->cmax_wd);
 	case mpam_feat_intpri_part:
 		return cfg->intpri;
 	case mpam_feat_mbw_part:
@@ -1257,12 +1306,12 @@ int resctrl_arch_update_one(struct rdt_resource *r, struct rdt_domain *d,
 		break;
 	case RDT_RESOURCE_L2_MAX:
 	case RDT_RESOURCE_L3_MAX:
-		cfg.cmax = percent_to_mbw_max(cfg_val, cprops->cmax_wd);
+		cfg.cmax = percent_to_ca_max(cfg_val, cprops->cmax_wd);
 		mpam_set_feature(mpam_feat_ccap_part, &cfg);
 		break;
 	case RDT_RESOURCE_L2_MIN:
 	case RDT_RESOURCE_L3_MIN:
-		cfg.cmin = percent_to_mbw_max(cfg_val, cprops->cmax_wd);
+		cfg.cmin = percent_to_ca_max(cfg_val, cprops->cmax_wd);
 		mpam_set_feature(mpam_feat_cmin, &cfg);
 		break;
 	case RDT_RESOURCE_L2_PRI:
