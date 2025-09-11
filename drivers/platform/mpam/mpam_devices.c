@@ -934,6 +934,23 @@ static bool mpam_ris_has_nrdy_bit(struct mpam_msc_ris *ris)
 	return true;
 }
 
+static u64 mpam_csu_hisi_need_halved(struct mpam_msc_ris *ris, u64 now)
+{
+	static const struct midr_range cpus[] = {
+		MIDR_ALL_VERSIONS(MIDR_HISI_HIP12),
+		{ /* sentinel */ }
+	};
+
+	if (!is_midr_in_range_list(read_cpuid_id(), cpus))
+		return now;
+
+	if (ris->comp->class->type != MPAM_CLASS_CACHE ||
+	    ris->comp->class->level != 3)
+		return now;
+
+	return now >> 1;
+}
+
 static void __ris_msmon_read(void *arg)
 {
 	bool nrdy = false;
@@ -989,6 +1006,7 @@ static void __ris_msmon_read(void *arg)
 		now = mpam_read_monsel_reg(msc, CSU);
 		nrdy = now & MSMON___NRDY;
 		now = FIELD_GET(MSMON___VALUE, now);
+		now = mpam_csu_hisi_need_halved(ris, now);
 		break;
 	case mpam_feat_msmon_mbwu:
 		/*
