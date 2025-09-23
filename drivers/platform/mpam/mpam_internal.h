@@ -324,6 +324,8 @@ int mpam_resctrl_offline_cpu(unsigned int cpu);
 int mpam_resctrl_setup(void);
 void mpam_resctrl_exit(void);
 
+u16 mpam_cpbm_wd_hisi_workaround(u16 cpbm_wd, enum mpam_device_features feat, u8 cache_level);
+
 /*
  * MPAM MSCs have the following register layout. See:
  * Arm Architecture Reference Manual Supplement - Memory System Resource
