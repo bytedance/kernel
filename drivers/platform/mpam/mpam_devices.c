@@ -1256,12 +1256,37 @@ static u32 mpam_cpbm_hisi_workaround(u32 cpbm, u8 cache_level)
 	return cpbm;
 }
 
+static u16 mpam_intpri_default_val(struct mpam_msc_ris *ris)
+{
+	struct mpam_class *class = ris->comp->class;
+
+	switch (class->type) {
+	case MPAM_CLASS_MEMORY:
+		return resctrl_arch_get_resource(RDT_RESOURCE_MB_PRI)->default_ctrl;
+
+	case MPAM_CLASS_CACHE:
+		if (class->level == 3)
+			return resctrl_arch_get_resource(RDT_RESOURCE_L3_PRI)->default_ctrl;
+
+		if (class->level == 2)
+			return resctrl_arch_get_resource(RDT_RESOURCE_L2_PRI)->default_ctrl;
+
+	default:
+		break;
+	}
+
+	if (mpam_has_feature(mpam_feat_intpri_part_0_low, &ris->props))
+		return GENMASK(ris->props.intpri_wd - 1, 0);
+
+	return 0;
+}
+
 static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
 				      struct mpam_config *cfg)
 {
+	u16 dspri;
 	bool limit;
 	u32 pri_val = 0;
-	u16 intpri, dspri;
 	u16 cmax = MPAMCFG_CMAX_CMAX;
 	struct mpam_msc *msc = ris->msc;
 	u16 bwa_fract = MPAMCFG_MBW_MAX_MAX;
@@ -1323,7 +1348,7 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
 		if (mpam_has_feature(mpam_feat_max_limit, cfg))
 			limit = cfg->max_limit;
 		else
-			limit = false;
+			limit = true;
 
 		if (limit)
 			mpam_write_partsel_reg(msc, MBW_MAX, bwa_fract |
@@ -1335,16 +1360,12 @@ static void mpam_reprogram_ris_partid(struct mpam_msc_ris *ris, u16 partid,
 	if (mpam_has_feature(mpam_feat_mbw_prop, rprops))
 		mpam_write_partsel_reg(msc, MBW_PROP, bwa_fract);
 
-	if (mpam_has_feature(mpam_feat_intpri_part_0_low, rprops))
-		intpri = GENMASK(rprops->intpri_wd - 1, 0);
-	else
-		intpri = 0;
-
 	if (mpam_has_feature(mpam_feat_intpri_part, rprops)) {
 		if (mpam_has_feature(mpam_feat_intpri_part, cfg))
 			pri_val |= FIELD_PREP(MPAMCFG_PRI_INTPRI, cfg->intpri);
 		else
-			pri_val |= FIELD_PREP(MPAMCFG_PRI_INTPRI, intpri);
+			pri_val |= FIELD_PREP(MPAMCFG_PRI_INTPRI,
+					      mpam_intpri_default_val(ris));
 	}
 
 	if (mpam_has_feature(mpam_feat_dspri_part_0_low, rprops))
