@@ -8,6 +8,7 @@
 #include <linux/init.h>
 #include <linux/kvm_host.h>
 #include "hisi_virt.h"
+#include <linux/bitfield.h>
 
 static enum hisi_cpu_type cpu_type = UNKNOWN_HI_TYPE;
 
@@ -475,12 +476,27 @@ out_update:
 	kvm->arch.tlbi_dvmbm = val;
 }
 
+static u64 convert_aff3_to_die_hip12(u64 aff3)
+{
+	/*
+	 * On HIP12, we use 4 bits to represent a die in SYS_LSUDVMBM_EL2.
+	 *
+	 * die1: socket ID (bits[60:59]) + die ID (bits[58:57])
+	 * die2: socket ID (bits[56:55]) + die ID (bits[54:53])
+	 *
+	 * We therefore need to properly encode Aff3 into it.
+	 */
+	return FIELD_GET(MPIDR_AFF3_SOCKET_ID_MASK, aff3) << 2 |
+	       FIELD_GET(MPIDR_AFF3_DIE_ID_MASK, aff3);
+}
+
 static void kvm_update_vm_lsudvmbm_hip12(struct kvm *kvm)
 {
 	u64 mpidr, aff3, aff2;
 	u64 vm_aff3s[DVMBM_MAX_DIES_HIP12];
 	u64 val;
 	int cpu, nr_dies;
+	u64 die1, die2;
 
 	nr_dies = kvm_dvmbm_get_dies_info(kvm, vm_aff3s, DVMBM_MAX_DIES_HIP12);
 	if (nr_dies > 2) {
@@ -489,8 +505,9 @@ static void kvm_update_vm_lsudvmbm_hip12(struct kvm *kvm)
 	}
 
 	if (nr_dies == 1) {
+		die1 = convert_aff3_to_die_hip12(vm_aff3s[0]);
 		val = DVMBM_RANGE_ONE_DIE << DVMBM_RANGE_SHIFT	|
-		      vm_aff3s[0] << DVMBM_DIE1_VDIE_SHIFT_HIP12;
+		      die1 << DVMBM_DIE1_SHIFT_HIP12;
 
 		/* fulfill bits [11:6] */
 		for_each_cpu(cpu, kvm->arch.sched_cpus) {
@@ -504,10 +521,12 @@ static void kvm_update_vm_lsudvmbm_hip12(struct kvm *kvm)
 	}
 
 	/* nr_dies == 2 */
+	die1 = convert_aff3_to_die_hip12(vm_aff3s[0]);
+	die2 = convert_aff3_to_die_hip12(vm_aff3s[1]);
 	val = DVMBM_RANGE_TWO_DIES << DVMBM_RANGE_SHIFT	|
 	      DVMBM_GRAN_CLUSTER << DVMBM_GRAN_SHIFT	|
-	      vm_aff3s[0] << DVMBM_DIE1_VDIE_SHIFT_HIP12    |
-	      vm_aff3s[1] << DVMBM_DIE2_VDIE_SHIFT_HIP12;
+	      die1 << DVMBM_DIE1_SHIFT_HIP12		|
+	      die2 << DVMBM_DIE2_SHIFT_HIP12;
 
 	/* and fulfill bits [11:0] */
 	for_each_cpu(cpu, kvm->arch.sched_cpus) {
