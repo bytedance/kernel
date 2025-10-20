@@ -311,7 +311,7 @@ static int klp_check_and_switch_task(struct task_struct *task, void *arg)
  * running, or it's sleeping on a to-be-patched or to-be-unpatched function, or
  * if the stack is unreliable, return false.
  */
-static bool klp_try_switch_task(struct task_struct *task)
+static bool klp_try_switch_task(struct task_struct *task, int *busy_cpu)
 {
 	const char *old_name;
 	int ret;
@@ -344,6 +344,8 @@ static bool klp_try_switch_task(struct task_struct *task)
 	case -EBUSY:	/* klp_check_and_switch_task() */
 		pr_debug("%s: %s:%d is running\n",
 			 __func__, task->comm, task->pid);
+		if ((task != current) && busy_cpu && klp_signals_cnt)
+			*busy_cpu = task_cpu(task);
 		break;
 	case -EINVAL:	/* klp_check_and_switch_task() */
 		pr_debug("%s: %s:%d has an unreliable stack\n",
@@ -394,7 +396,7 @@ void __klp_sched_try_switch(void)
 	 */
 	smp_rmb();
 
-	klp_try_switch_task(current);
+	klp_try_switch_task(current, NULL);
 
 out:
 	preempt_enable();
@@ -454,6 +456,7 @@ void klp_try_complete_transition(void)
 	struct task_struct *g, *task;
 	struct klp_patch *patch;
 	bool complete = true;
+	int busy_cpu = -1;
 
 	WARN_ON_ONCE(klp_target_state == KLP_UNDEFINED);
 
@@ -468,7 +471,7 @@ void klp_try_complete_transition(void)
 	 */
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, task)
-		if (!klp_try_switch_task(task))
+		if (!klp_try_switch_task(task, &busy_cpu))
 			complete = false;
 	read_unlock(&tasklist_lock);
 
@@ -479,7 +482,7 @@ void klp_try_complete_transition(void)
 	for_each_possible_cpu(cpu) {
 		task = idle_task(cpu);
 		if (cpu_online(cpu)) {
-			if (!klp_try_switch_task(task)) {
+			if (!klp_try_switch_task(task, NULL)) {
 				complete = false;
 				/* Make idle task go through the main loop. */
 				wake_up_if_idle(cpu);
@@ -502,8 +505,11 @@ void klp_try_complete_transition(void)
 		 * later and/or wait for other methods like kernel exit
 		 * switching.
 		 */
-		schedule_delayed_work(&klp_transition_work,
-				      round_jiffies_relative(HZ));
+		if (unlikely(busy_cpu != -1))
+			schedule_delayed_work_on(busy_cpu, &klp_transition_work, 1);
+		else
+			schedule_delayed_work(&klp_transition_work,
+					      round_jiffies_relative(HZ));
 		return;
 	}
 
