@@ -706,3 +706,26 @@ int kvm_vgic_hyp_init(void)
 
 	return 0;
 }
+
+#ifdef CONFIG_ARM64_HISI_IPIV
+static void disable_ipiv_irq(void *data)
+{
+	disable_percpu_irq(ipiv_irq);
+}
+#endif
+
+void kvm_vgic_hyp_uninit(void)
+{
+	free_percpu_irq(kvm_vgic_global_state.maint_irq,
+			kvm_get_running_vcpus());
+
+#ifdef CONFIG_ARM64_HISI_IPIV
+	if (static_branch_unlikely(&ipiv_enable)) {
+		on_each_cpu(disable_ipiv_irq, NULL, 1);
+
+		free_percpu_irq(ipiv_irq, kvm_get_running_vcpus());
+		acpi_unregister_gsi(18);
+
+	}
+#endif
+}

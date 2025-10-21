@@ -1600,6 +1600,31 @@ out_free_vtimer_irq:
 	return err;
 }
 
+static void disable_percpu_irq_wrapper(void *data)
+{
+	unsigned int irq = (unsigned int)(uintptr_t)data;
+
+	disable_percpu_irq(irq);
+}
+
+void kvm_timer_hyp_uninit(void)
+{
+	struct arch_timer_kvm_info *info = arch_timer_get_kvm_info();
+
+	if (info->physical_irq > 0) {
+		on_each_cpu(disable_percpu_irq_wrapper,
+		(void *)(uintptr_t)host_ptimer_irq, 1);
+		free_percpu_irq(host_ptimer_irq, kvm_get_running_vcpus());
+	}
+#ifdef CONFIG_VIRT_VTIMER_IRQ_BYPASS
+	if (vtimer_is_irqbypass())
+		return;
+#endif
+	on_each_cpu(disable_percpu_irq_wrapper,
+	(void *)(uintptr_t)host_vtimer_irq, 1);
+	free_percpu_irq(host_vtimer_irq, kvm_get_running_vcpus());
+}
+
 void kvm_timer_vcpu_terminate(struct kvm_vcpu *vcpu)
 {
 	struct arch_timer_cpu *timer = vcpu_timer(vcpu);

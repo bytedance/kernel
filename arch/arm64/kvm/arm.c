@@ -2226,7 +2226,7 @@ static void __init hyp_cpu_pm_init(void)
 	if (!is_protected_kvm_enabled())
 		cpu_pm_register_notifier(&hyp_init_cpu_pm_nb);
 }
-static void __init hyp_cpu_pm_exit(void)
+static void hyp_cpu_pm_exit(void)
 {
 	if (!is_protected_kvm_enabled())
 		cpu_pm_unregister_notifier(&hyp_init_cpu_pm_nb);
@@ -2335,7 +2335,7 @@ out:
 	return err;
 }
 
-static void __init teardown_subsystems(void)
+static void teardown_subsystems(void)
 {
 	kvm_unregister_perf_callbacks();
 	hyp_cpu_pm_exit();
@@ -2783,6 +2783,20 @@ out_err:
 	return err;
 }
 
+static void __exit kvm_arm_exit(void)
+{
+#ifdef CONFIG_VIRT_PLAT_DEV
+	kvm_shadow_dev_uninit();
+#endif
+	kvm_exit();
+	teardown_subsystems();
+
+	kvm_arm_vmid_alloc_free();
+
+	kvm_timer_hyp_uninit();
+	kvm_vgic_hyp_uninit();
+}
+
 #if !IS_MODULE(CONFIG_KVM)
 static int __init early_kvm_mode_cfg(char *arg)
 {
@@ -2829,3 +2843,4 @@ enum kvm_mode kvm_get_mode(void)
 #endif
 
 module_init(kvm_arm_init);
+module_exit(kvm_arm_exit);

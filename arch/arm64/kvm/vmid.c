@@ -189,7 +189,7 @@ int __init kvm_arm_vmid_alloc_init(void)
 	return 0;
 }
 
-void __init kvm_arm_vmid_alloc_free(void)
+void kvm_arm_vmid_alloc_free(void)
 {
 	bitmap_free(vmid_map);
 }

@@ -329,3 +329,9 @@ void kvm_shadow_dev_init(void)
 
 	kvm_info("Shadow device %sabled\n", sdev_enable ? "en" : "dis");
 }
+
+void kvm_shadow_dev_uninit(void)
+{
+	if (sdev_enable)
+		destroy_workqueue(sdev_cleanup_wq);
+}
