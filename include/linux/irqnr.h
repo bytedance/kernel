@@ -7,6 +7,9 @@
 
 extern int nr_irqs;
 extern struct irq_desc *irq_to_desc(unsigned int irq);
+#if IS_ENABLED(CONFIG_KVM)
+extern struct irq_desc *kvm_irq_to_desc(unsigned int irq);
+#endif
 unsigned int irq_get_next_irq(unsigned int offset);
 
 # define for_each_irq_desc(irq, desc)					\

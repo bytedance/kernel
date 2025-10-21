@@ -87,7 +87,7 @@ static irqreturn_t vgic_v4_doorbell_handler(int irq, void *info)
 
 	/* We got the message, no need to fire again */
 	if (!kvm_vgic_global_state.has_gicv4_1 &&
-	    !irqd_irq_disabled(&irq_to_desc(irq)->irq_data))
+	    !irqd_irq_disabled(&kvm_irq_to_desc(irq)->irq_data))
 		disable_irq_nosync(irq);
 
 	/*
@@ -139,7 +139,7 @@ static void vgic_v4_enable_vsgis(struct kvm_vcpu *vcpu)
 
 		/* Transfer the full irq state to the vPE */
 		vgic_v4_sync_sgi_config(vpe, irq);
-		desc = irq_to_desc(irq->host_irq);
+		desc = kvm_irq_to_desc(irq->host_irq);
 		ret = irq_domain_activate_irq(irq_desc_get_irq_data(desc),
 					      false);
 		if (!WARN_ON(ret)) {
@@ -177,7 +177,7 @@ static void vgic_v4_disable_vsgis(struct kvm_vcpu *vcpu)
 					    &irq->pending_latch);
 		WARN_ON(ret);
 
-		desc = irq_to_desc(irq->host_irq);
+		desc = kvm_irq_to_desc(irq->host_irq);
 		irq_domain_deactivate_irq(irq_desc_get_irq_data(desc));
 	unlock:
 		raw_spin_unlock_irqrestore(&irq->irq_lock, flags);
@@ -220,7 +220,7 @@ static void vgic_v4_enable_vtimer(struct kvm_vcpu *vcpu)
 
 	/* Transfer the full irq state to the vPE */
 	vgic_v4_sync_sgi_config(vpe, irq);
-	desc = irq_to_desc(irq->host_irq);
+	desc = kvm_irq_to_desc(irq->host_irq);
 	ret = irq_domain_activate_irq(irq_desc_get_irq_data(desc),
 				      false);
 	if (!WARN_ON(ret)) {

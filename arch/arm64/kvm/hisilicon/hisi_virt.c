@@ -138,11 +138,15 @@ bool hisi_ncsnp_supported(void)
 	return supported;
 }
 
+#if IS_MODULE(CONFIG_KVM)
+module_param_named(dvmbm_enabled, dvmbm_enabled, bool, 0444);
+#else
 static int __init early_dvmbm_enable(char *buf)
 {
 	return strtobool(buf, &dvmbm_enabled);
 }
 early_param("kvm-arm.dvmbm_enabled", early_dvmbm_enable);
+#endif
 
 static void hardware_enable_dvmbm(void *data)
 {
@@ -163,11 +167,15 @@ static void hardware_disable_dvmbm(void *data)
 }
 
 #ifdef CONFIG_ARM64_HISI_IPIV
+#if IS_MODULE(CONFIG_KVM)
+module_param_named(ipiv_enabled, ipiv_enabled, bool, 0444);
+#else
 static int __init early_ipiv_enable(char *buf)
 {
 	return strtobool(buf, &ipiv_enabled);
 }
 early_param("kvm-arm.ipiv_enabled", early_ipiv_enable);
+#endif
 
 bool hisi_ipiv_supported(void)
 {

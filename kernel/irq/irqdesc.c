@@ -387,6 +387,14 @@ struct irq_desc *irq_to_desc(unsigned int irq)
 EXPORT_SYMBOL_GPL(irq_to_desc);
 #endif
 
+#if IS_ENABLED(CONFIG_KVM)
+struct irq_desc *kvm_irq_to_desc(unsigned int irq)
+{
+	return irq_to_desc(irq);
+}
+EXPORT_SYMBOL(kvm_irq_to_desc);
+#endif
+
 #ifdef CONFIG_SMP
 static void free_masks(struct irq_desc *desc)
 {

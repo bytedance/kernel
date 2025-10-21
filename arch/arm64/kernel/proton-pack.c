@@ -1175,7 +1175,7 @@ void noinstr spectre_bhb_patch_wa3(struct alt_instr *alt,
 }
 
 /* Patched to NOP when not supported */
-void __init spectre_bhb_patch_clearbhb(struct alt_instr *alt,
+void spectre_bhb_patch_clearbhb(struct alt_instr *alt,
 				   __le32 *origptr, __le32 *updptr, int nr_inst)
 {
 	BUG_ON(nr_inst != 2);

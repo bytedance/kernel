@@ -8,12 +8,11 @@ ccflags-y += -I $(srctree)/$(src)
 include $(srctree)/virt/kvm/Makefile.kvm
 
 obj-$(CONFIG_KVM) += kvm.o
-obj-$(CONFIG_KVM) += hyp/
 
 kvm-y += arm.o mmu.o mmio.o psci.o hypercalls.o pvtime.o \
 	 inject_fault.o va_layout.o handle_exit.o \
-	 guest.o debug.o reset.o sys_regs.o stacktrace.o \
-	 vgic-sys-reg-v3.o fpsimd.o pkvm.o \
+	 guest.o debug.o reset.o sys_regs.o \
+	 vgic-sys-reg-v3.o fpsimd.o \
 	 arch_timer.o trng.o vmid.o emulate-nested.o nested.o \
 	 vgic/vgic.o vgic/vgic-init.o \
 	 vgic/vgic-irqfd.o vgic/vgic-v2.o \
@@ -24,7 +23,13 @@ kvm-y += arm.o mmu.o mmio.o psci.o hypercalls.o pvtime.o \
 
 kvm-$(CONFIG_VIRT_PLAT_DEV)  += vgic/shadow_dev.o
 kvm-$(CONFIG_HW_PERF_EVENTS)  += pmu-emul.o pmu.o
+
+# build kvm as in-tree module
+ifeq ($(CONFIG_KVM), y)
+obj-$(CONFIG_KVM) += hyp/
 obj-$(CONFIG_KVM_HISI_VIRT) += hisilicon/
+
+kvm-y += pkvm.o stacktrace.o
 
 always-y := hyp_constants.h hyp-constants.s
 
@@ -41,3 +46,23 @@ $(obj)/hyp_constants.h: $(obj)/hyp-constants.s FORCE
 
 obj-kvm := $(addprefix $(obj)/, $(kvm-y))
 $(obj-kvm): $(obj)/hyp_constants.h
+
+# build kvm as out-of-tree module
+else
+hyp_incdir := $(srctree)/$(src)/hyp/include
+
+kvm-y += hyp/pgtable.o
+kvm_hyp :=  $(addprefix hyp/, vgic-v3-sr.o aarch32.o vgic-v2-cpuif-proxy.o entry.o \
+                  fpsimd.o hyp-entry.o exception.o)
+kvm_hyp += $(addprefix hyp/vhe/, timer-sr.o sysreg-sr.o debug-sr.o switch.o tlb.o)
+
+$(foreach file, $(kvm_hyp), $(eval CFLAGS_$(file) += -I$(hyp_incdir)             \
+                                                    -D__KVM_VHE_HYPERVISOR__))
+$(foreach file, $(kvm_hyp), $(eval AFLAGS_$(file) += -I$(hyp_incdir) -D__KVM_VHE_HYPERVISOR__))
+
+kvm-y += $(kvm_hyp)
+
+ifeq ($(CONFIG_KVM_HISI_VIRT), y)
+kvm-y += hisilicon/hisi_virt.o
+endif
+endif

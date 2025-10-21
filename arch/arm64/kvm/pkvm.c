@@ -15,8 +15,6 @@
 
 #include "hyp_constants.h"
 
-DEFINE_STATIC_KEY_FALSE(kvm_protected_mode_initialized);
-
 static struct memblock_region *hyp_memory = kvm_nvhe_sym(hyp_memory);
 static unsigned int *hyp_memblock_nr_ptr = &kvm_nvhe_sym(hyp_memblock_nr);
 

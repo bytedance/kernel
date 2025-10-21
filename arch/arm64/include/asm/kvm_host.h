@@ -71,7 +71,15 @@ enum kvm_mode {
 #ifdef CONFIG_KVM
 enum kvm_mode kvm_get_mode(void);
 #else
+#if IS_MODULE(CONFIG_KVM)
+/*
+ * Other kvm mode need kvm start with nVHE which not
+ * supported on modularized kvm.
+ */
+static inline enum kvm_mode kvm_get_mode(void) { return KVM_MODE_DEFAULT; };
+#else
 static inline enum kvm_mode kvm_get_mode(void) { return KVM_MODE_NONE; };
+#endif
 #endif
 
 extern unsigned int __ro_after_init kvm_sve_max_vl;

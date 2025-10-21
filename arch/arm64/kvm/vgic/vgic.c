@@ -495,7 +495,7 @@ static int kvm_vgic_map_irq(struct kvm_vcpu *vcpu, struct vgic_irq *irq,
 	/*
 	 * Find the physical IRQ number corresponding to @host_irq
 	 */
-	desc = irq_to_desc(host_irq);
+	desc = kvm_irq_to_desc(host_irq);
 	if (!desc) {
 		kvm_err("%s: no interrupt descriptor\n", __func__);
 		return -EINVAL;

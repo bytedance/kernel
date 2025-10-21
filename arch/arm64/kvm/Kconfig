@@ -20,7 +20,7 @@ menuconfig VIRTUALIZATION
 if VIRTUALIZATION
 
 menuconfig KVM
-	bool "Kernel-based Virtual Machine (KVM) support"
+	tristate "Kernel-based Virtual Machine (KVM) support"
 	depends on HAVE_KVM
 	select KVM_GENERIC_HARDWARE_ENABLING
 	select MMU_NOTIFIER
@@ -47,7 +47,8 @@ menuconfig KVM
 	help
 	  Support hosting virtualized guest machines.
 
-	  If unsure, say N.
+	  To compile this as a module, choose M here: the module
+	  will be called kvm.
 
 config NVHE_EL2_DEBUG
 	bool "Debug mode for non-VHE EL2 object"

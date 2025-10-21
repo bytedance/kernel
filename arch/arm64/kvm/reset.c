@@ -31,7 +31,7 @@
 #include <asm/virt.h>
 
 /* Maximum phys_shift supported for any VM on this host */
-static u32 __ro_after_init kvm_ipa_limit;
+extern u32 kvm_ipa_limit;
 
 /*
  * ARMv8 Reset Values
@@ -326,52 +326,4 @@ out:
 		kvm_arch_vcpu_load(vcpu, smp_processor_id());
 	preempt_enable();
 	return ret;
-}
-
-u32 get_kvm_ipa_limit(void)
-{
-	return kvm_ipa_limit;
-}
-
-int __init kvm_set_ipa_limit(void)
-{
-	unsigned int parange;
-	u64 mmfr0;
-
-	mmfr0 = read_sanitised_ftr_reg(SYS_ID_AA64MMFR0_EL1);
-	parange = cpuid_feature_extract_unsigned_field(mmfr0,
-				ID_AA64MMFR0_EL1_PARANGE_SHIFT);
-	/*
-	 * IPA size beyond 48 bits for 4K and 16K page size is only supported
-	 * when LPA2 is available. So if we have LPA2, enable it, else cap to 48
-	 * bits, in case it's reported as larger on the system.
-	 */
-	if (!kvm_lpa2_is_enabled() && PAGE_SIZE != SZ_64K)
-		parange = min(parange, (unsigned int)ID_AA64MMFR0_EL1_PARANGE_48);
-
-	/*
-	 * Check with ARMv8.5-GTG that our PAGE_SIZE is supported at
-	 * Stage-2. If not, things will stop very quickly.
-	 */
-	switch (cpuid_feature_extract_unsigned_field(mmfr0, ID_AA64MMFR0_EL1_TGRAN_2_SHIFT)) {
-	case ID_AA64MMFR0_EL1_TGRAN_2_SUPPORTED_NONE:
-		kvm_err("PAGE_SIZE not supported at Stage-2, giving up\n");
-		return -EINVAL;
-	case ID_AA64MMFR0_EL1_TGRAN_2_SUPPORTED_DEFAULT:
-		kvm_debug("PAGE_SIZE supported at Stage-2 (default)\n");
-		break;
-	case ID_AA64MMFR0_EL1_TGRAN_2_SUPPORTED_MIN ... ID_AA64MMFR0_EL1_TGRAN_2_SUPPORTED_MAX:
-		kvm_debug("PAGE_SIZE supported at Stage-2 (advertised)\n");
-		break;
-	default:
-		kvm_err("Unsupported value for TGRAN_2, giving up\n");
-		return -EINVAL;
-	}
-
-	kvm_ipa_limit = id_aa64mmfr0_parange_to_phys_shift(parange);
-	kvm_info("IPA Size Limit: %d bits%s\n", kvm_ipa_limit,
-		 ((kvm_ipa_limit < KVM_PHYS_SHIFT) ?
-		  " (Reduced IPA size, limited VM/VMM compatibility)" : ""));
-
-	return 0;
 }

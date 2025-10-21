@@ -148,3 +148,18 @@ void gic_cpu_config(void __iomem *base, int nr, void (*sync_access)(void))
 	if (sync_access)
 		sync_access();
 }
+
+#if IS_ENABLED(CONFIG_KVM)
+struct gic_kvm_info *gic_kvm_info;
+EXPORT_SYMBOL(gic_kvm_info);
+
+void __init vgic_set_kvm_info(const struct gic_kvm_info *info)
+{
+	WARN_ON_ONCE(gic_kvm_info != NULL);
+	if (!info)
+		return;
+	gic_kvm_info = kmalloc(sizeof(*info), GFP_KERNEL);
+	if (gic_kvm_info)
+		*gic_kvm_info = *info;
+}
+#endif

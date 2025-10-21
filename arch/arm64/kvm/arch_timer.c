@@ -30,13 +30,7 @@ static u32 host_vtimer_irq_flags;
 static u32 host_ptimer_irq_flags;
 
 #ifdef CONFIG_VIRT_VTIMER_IRQ_BYPASS
-bool vtimer_irqbypass;
-
-static int __init early_vtimer_irqbypass(char *buf)
-{
-	return strtobool(buf, &vtimer_irqbypass);
-}
-early_param("kvm-arm.vtimer_irqbypass", early_vtimer_irqbypass);
+extern bool vtimer_irqbypass;
 
 static inline bool vtimer_is_irqbypass(void)
 {

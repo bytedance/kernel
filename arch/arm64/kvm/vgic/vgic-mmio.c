@@ -132,7 +132,7 @@ void vgic_mmio_write_senable(struct kvm_vcpu *vcpu,
 				struct irq_data *data;
 
 				irq->enabled = true;
-				data = &irq_to_desc(irq->host_irq)->irq_data;
+				data = &kvm_irq_to_desc(irq->host_irq)->irq_data;
 				while (irqd_irq_disabled(data))
 					enable_irq(irq->host_irq);
 			}

@@ -2705,10 +2705,6 @@ static __init int kvm_arm_init(void)
 		kvm_info("Guests without required CPU erratum workarounds can deadlock system!\n" \
 			 "Only trusted guests should be used on this system.\n");
 
-	err = kvm_set_ipa_limit();
-	if (err)
-		return err;
-
 	err = kvm_arm_init_sve();
 	if (err)
 		return err;
@@ -2769,6 +2765,7 @@ out_err:
 	return err;
 }
 
+#if !IS_MODULE(CONFIG_KVM)
 static int __init early_kvm_mode_cfg(char *arg)
 {
 	if (!arg)
@@ -2811,5 +2808,6 @@ enum kvm_mode kvm_get_mode(void)
 {
 	return kvm_mode;
 }
+#endif
 
 module_init(kvm_arm_init);
