@@ -549,6 +549,30 @@ static bool armv8pmu_event_is_chained(struct perf_event *event)
 	       (idx != ARMV8_IDX_CYCLE_COUNTER);
 }
 
+static void (*kvm_set_pmu_events_fn)(u32 set, struct perf_event_attr *attr);
+static void (*kvm_clr_pmu_events_fn)(u32 clr);
+static bool (*kvm_set_pmuserenr_fn)(u64 val);
+static void (*kvm_vcpu_pmu_resync_fn)(void);
+
+void perf_event_register_kvm_pmu_events_handler(void *set, void *clr)
+{
+	kvm_set_pmu_events_fn = set;
+	kvm_clr_pmu_events_fn = clr;
+}
+EXPORT_SYMBOL(perf_event_register_kvm_pmu_events_handler);
+
+void perf_event_register_kvm_set_pmuserenr(void *set)
+{
+	kvm_set_pmuserenr_fn = set;
+}
+EXPORT_SYMBOL(perf_event_register_kvm_set_pmuserenr);
+
+void perf_event_register_kvm_pmu_resync(void *resync_fn)
+{
+	kvm_vcpu_pmu_resync_fn = resync_fn;
+}
+EXPORT_SYMBOL(perf_event_register_kvm_pmu_resync);
+
 /*
  * ARMv8 low level PMU access
  */
@@ -819,7 +843,8 @@ static void armv8pmu_enable_event_counter(struct perf_event *event)
 	struct perf_event_attr *attr = &event->attr;
 	u32 mask = armv8pmu_event_cnten_mask(event);
 
-	kvm_set_pmu_events(mask, attr);
+	if (kvm_set_pmu_events_fn)
+		kvm_set_pmu_events_fn(mask, attr);
 
 	/* We rely on the hypervisor switch code to enable guest counters */
 	if (!kvm_pmu_counter_deferred(attr)) {
@@ -847,7 +872,8 @@ static void armv8pmu_disable_event_counter(struct perf_event *event)
 	struct perf_event_attr *attr = &event->attr;
 	u32 mask = armv8pmu_event_cnten_mask(event);
 
-	kvm_clr_pmu_events(mask);
+	if (kvm_clr_pmu_events_fn)
+		kvm_clr_pmu_events_fn(mask);
 
 	/* We rely on the hypervisor switch code to disable guest counters */
 	if (!kvm_pmu_counter_deferred(attr)) {
@@ -910,8 +936,9 @@ static void update_pmuserenr(u64 val)
 	 * for the host EL0 so that KVM can restore it before returning to
 	 * the host EL0. Otherwise, update the register now.
 	 */
-	if (kvm_set_pmuserenr(val))
-		return;
+	if (kvm_set_pmuserenr_fn)
+		if (kvm_set_pmuserenr_fn(val))
+			return;
 
 	write_pmuserenr(val);
 }
@@ -969,12 +996,15 @@ static void armv8pmu_start(struct arm_pmu *cpu_pmu)
 	else
 		armv8pmu_disable_user_access();
 
-	kvm_vcpu_pmu_resync_el0();
+	if (kvm_vcpu_pmu_resync_fn)
+		kvm_vcpu_pmu_resync_fn();
 
 	/* Enable all counters */
 	armv8pmu_pmcr_write(armv8pmu_pmcr_read() | ARMV8_PMU_PMCR_E);
 
-	kvm_vcpu_pmu_resync_el0();
+	if (kvm_vcpu_pmu_resync_fn)
+		kvm_vcpu_pmu_resync_fn();
+
 	if (cpu_pmu->has_branch_stack)
 		armv8pmu_branch_enable(cpu_pmu);
 }
@@ -1375,7 +1405,8 @@ static void armv8pmu_reset(void *info)
 	armv8pmu_disable_intens(U32_MAX);
 
 	/* Clear the counters we flip at guest entry/exit */
-	kvm_clr_pmu_events(U32_MAX);
+	if (kvm_clr_pmu_events_fn)
+		kvm_clr_pmu_events_fn(U32_MAX);
 
 	/*
 	 * Initialize & Reset PMNC. Request overflow interrupt for

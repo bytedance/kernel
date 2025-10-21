@@ -25,3 +25,7 @@ extern unsigned long perf_misc_flags(struct pt_regs *regs);
 }
 
 #endif
+
+void perf_event_register_kvm_pmu_events_handler(void *set, void *clr);
+extern void perf_event_register_kvm_set_pmuserenr(void *set);
+void perf_event_register_kvm_pmu_resync(void *resync);

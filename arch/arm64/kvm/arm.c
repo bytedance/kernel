@@ -2323,6 +2323,11 @@ static int __init init_subsystems(void)
 	if (err)
 		goto out;
 
+	perf_event_register_kvm_pmu_events_handler(kvm_set_pmu_events,
+						   kvm_clr_pmu_events);
+	perf_event_register_kvm_set_pmuserenr(kvm_set_pmuserenr);
+	perf_event_register_kvm_pmu_resync(kvm_vcpu_pmu_resync_el0);
+
 	kvm_register_perf_callbacks(NULL);
 
 out:
@@ -2792,6 +2797,10 @@ static void __exit kvm_arm_exit(void)
 	teardown_subsystems();
 
 	kvm_arm_vmid_alloc_free();
+
+	perf_event_register_kvm_pmu_events_handler(NULL, NULL);
+	perf_event_register_kvm_set_pmuserenr(NULL);
+	perf_event_register_kvm_pmu_resync(NULL);
 
 	kvm_timer_hyp_uninit();
 	kvm_vgic_hyp_uninit();
