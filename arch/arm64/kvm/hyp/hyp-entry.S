@@ -224,6 +224,7 @@ SYM_CODE_END(__kvm_hyp_vector)
 	mitigate_spectre_bhb_clear_insn
 	.endif
 	.if \indirect != 0
+#if !IS_MODULE(CONFIG_KVM)
 	alternative_cb ARM64_ALWAYS_SYSTEM, kvm_patch_vector_branch
 	/*
 	 * For ARM64_SPECTRE_V3A configurations, these NOPs get replaced with:
@@ -242,6 +243,7 @@ SYM_CODE_END(__kvm_hyp_vector)
 	nop
 	nop
 	alternative_cb_end
+#endif
 	.endif
 	b	__kvm_hyp_vector + (1b - 0b + KVM_VECTOR_PREAMBLE)
 .endm
