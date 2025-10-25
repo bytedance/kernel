@@ -178,7 +178,7 @@ bool has_busy_rmid(struct rdt_domain *d)
 	return find_first_bit(d->rmid_busy_llc, idx_limit) != idx_limit;
 }
 
-static struct rmid_entry *resctrl_find_free_rmid(u32 closid)
+struct rmid_entry *resctrl_find_free_rmid(u32 closid)
 {
 	struct rmid_entry *itr;
 	u32 itr_idx, cmp_idx;

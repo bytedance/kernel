@@ -3654,6 +3654,8 @@ static void mongrp_reparent(struct rdtgroup *rdtgrp,
 	list_move_tail(&rdtgrp->mon.crdtgrp_list,
 		       &new_prdtgrp->mon.crdtgrp_list);
 
+	free_rmid(rdtgrp->closid, rdtgrp->mon.rmid);
+	rdtgrp->mon.rmid = alloc_rmid(new_prdtgrp->closid);
 	rdtgrp->mon.parent = new_prdtgrp;
 	rdtgrp->closid = new_prdtgrp->closid;
 
@@ -3667,6 +3669,7 @@ static int rdtgroup_rename(struct kernfs_node *kn,
 			   struct kernfs_node *new_parent, const char *new_name)
 {
 	struct rdtgroup *new_prdtgrp;
+	struct rmid_entry *entry;
 	struct rdtgroup *rdtgrp;
 	cpumask_var_t tmpmask;
 	int ret;
@@ -3723,6 +3726,20 @@ static int rdtgroup_rename(struct kernfs_node *kn,
 		rdt_last_cmd_puts("Cannot move a MON group that monitors CPUs\n");
 		ret = -EPERM;
 		goto out;
+	}
+
+	/*
+	 * Unlike RDT, the rmid and closid in MPAM have a hierarchical
+	 * relationship. Therefore, first check whether there are still
+	 * free rmids available under the target closid.
+	 */
+	if (IS_ENABLED(CONFIG_ARM64_MPAM)) {
+		entry = resctrl_find_free_rmid(new_prdtgrp->closid);
+		if (IS_ERR(entry)) {
+			rdt_last_cmd_puts("Destination has been out of RMIDs\n");
+			ret = PTR_ERR(entry);
+			goto out;
+		}
 	}
 
 	/*

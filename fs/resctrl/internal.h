@@ -291,5 +291,6 @@ bool has_busy_rmid(struct rdt_domain *d);
 void __check_limbo(struct rdt_domain *d, bool force_free);
 void rdt_staged_configs_clear(void);
 int resctrl_find_cleanest_closid(void);
+struct rmid_entry *resctrl_find_free_rmid(u32 closid);
 
 #endif /* _FS_RESCTRL_INTERNAL_H */
