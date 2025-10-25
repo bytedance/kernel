@@ -975,6 +975,21 @@ static u64 mpam_csu_hisi_need_halved(struct mpam_msc_ris *ris, u64 now)
 	return now >> 1;
 }
 
+static bool read_msmon_mbwu_is_overflow(struct mpam_msc *msc)
+{
+	u32 ctl;
+	bool overflow;
+
+	ctl = mpam_read_monsel_reg(msc, CFG_MBWU_CTL);
+	overflow = ctl & MSMON_CFG_x_CTL_OFLOW_STATUS ? true : false;
+
+	if (overflow)
+		mpam_write_monsel_reg(msc, CFG_MBWU_CTL, ctl &
+				     ~MSMON_CFG_x_CTL_OFLOW_STATUS);
+
+	return overflow;
+}
+
 static void __ris_msmon_read(void *arg)
 {
 	bool nrdy = false;
@@ -982,6 +997,7 @@ static void __ris_msmon_read(void *arg)
 	bool config_mismatch;
 	struct mon_read *m = arg;
 	u64 now, overflow_val = 0;
+	bool mbwu_overflow = false;
 	struct mon_cfg *ctx = m->ctx;
 	bool reset_on_next_read = false;
 	struct mpam_msc_ris *ris = m->ris;
@@ -1005,6 +1021,8 @@ static void __ris_msmon_read(void *arg)
 			reset_on_next_read = mbwu_state->reset_on_next_read;
 			mbwu_state->reset_on_next_read = false;
 		}
+
+		mbwu_overflow = read_msmon_mbwu_is_overflow(msc);
 	}
 
 	/*
@@ -1072,8 +1090,8 @@ static void __ris_msmon_read(void *arg)
 		}
 
 		/* Add any pre-overflow value to the mbwu_state->val */
-		if (mbwu_state->prev_val > now)
-			overflow_val = mpam_msmon_overflow_val(ris) - mbwu_state->prev_val;
+		if (mbwu_overflow)
+			overflow_val = mpam_msmon_overflow_val(ris);
 
 		mbwu_state->prev_val = now;
 		mbwu_state->correction += overflow_val;
