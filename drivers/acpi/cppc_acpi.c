@@ -1235,6 +1235,7 @@ int cppc_get_nominal_perf(int cpunum, u64 *nominal_perf)
 {
 	return cppc_get_perf(cpunum, NOMINAL_PERF, nominal_perf);
 }
+EXPORT_SYMBOL_GPL(cppc_get_nominal_perf);
 
 /**
  * cppc_get_highest_perf - Get the highest performance register value.
