@@ -913,6 +913,26 @@ static void cppc_check_hisi_workaround(void)
 	acpi_put_table(tbl);
 }
 
+static bool cppc_cpufreq_default_boost_init(void)
+{
+	u64 highest_perf, nominal_perf;
+	int cpu, rc;
+	
+	for_each_online_cpu(cpu) {
+		rc = cppc_get_highest_perf(cpu, &highest_perf);
+		if(rc)
+			continue;
+		
+		rc = cppc_get_nominal_perf(cpu, &nominal_perf);
+		if(rc)
+			continue;
+		if(highest_perf > nominal_perf)
+			return true;
+	}
+
+	return false;
+}
+
 static int __init cppc_cpufreq_init(void)
 {
 	int ret;
@@ -923,6 +943,7 @@ static int __init cppc_cpufreq_init(void)
 	cppc_check_hisi_workaround();
 	cppc_freq_invariance_init();
 	populate_efficiency_class();
+	cppc_cpufreq_driver.boost_enabled = cppc_cpufreq_default_boost_init();
 
 	ret = cpufreq_register_driver(&cppc_cpufreq_driver);
 	if (ret)
