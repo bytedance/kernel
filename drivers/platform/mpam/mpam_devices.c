@@ -1013,7 +1013,7 @@ static void __ris_msmon_read(void *arg)
 	bool reset_on_next_read = false;
 	struct mpam_msc_ris *ris = m->ris;
 	struct mpam_msc *msc = m->ris->msc;
-	struct msmon_mbwu_state *mbwu_state;
+	struct msmon_mbwu_state *mbwu_state = NULL;
 	u32 mon_sel, ctl_val, flt_val, cur_ctl, cur_flt;
 
 	lockdep_assert_held(&msc->lock);
@@ -1045,8 +1045,14 @@ static void __ris_msmon_read(void *arg)
 	config_mismatch = cur_flt != flt_val ||
 			  cur_ctl != (ctl_val | MSMON_CFG_x_CTL_EN);
 
-	if (config_mismatch || reset_on_next_read)
+	if (config_mismatch || reset_on_next_read) {
 		write_msmon_ctl_flt_vals(m, ctl_val, flt_val);
+		if (mbwu_state) {
+			mbwu_state->prev_val = 0;
+			mbwu_state->correction = 0;
+			mbwu_overflow = false;
+		}
+	}
 
 	/*
 	 * Selects the monitor instance associated to the specified PARTID
