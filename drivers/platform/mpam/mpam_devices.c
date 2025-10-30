@@ -907,6 +907,27 @@ static void read_msmon_ctl_flt_vals(struct mon_read *m, u32 *ctl_val,
 	}
 }
 
+static bool mpam_csu_hisi_need_retrigger(struct mpam_msc_ris *ris,
+					 bool read_again)
+{
+	static const struct midr_range cpus[] = {
+		MIDR_ALL_VERSIONS(MIDR_HISI_HIP12),
+		{ /* sentinel */ }
+	};
+
+	if (ris->comp->class->type != MPAM_CLASS_CACHE ||
+	    ris->comp->class->level != 3)
+		return false;
+
+	if (!is_midr_in_range_list(read_cpuid_id(), cpus))
+		return false;
+
+	if (read_again)
+		return false;
+
+	return true;
+}
+
 static void write_msmon_ctl_flt_vals(struct mon_read *m, u32 ctl_val,
 				     u32 flt_val)
 {
@@ -1045,7 +1066,8 @@ static void __ris_msmon_read(void *arg)
 	config_mismatch = cur_flt != flt_val ||
 			  cur_ctl != (ctl_val | MSMON_CFG_x_CTL_EN);
 
-	if (config_mismatch || reset_on_next_read) {
+	if (config_mismatch || reset_on_next_read ||
+	    mpam_csu_hisi_need_retrigger(ris, m->err == -EBUSY)) {
 		write_msmon_ctl_flt_vals(m, ctl_val, flt_val);
 		if (mbwu_state) {
 			mbwu_state->prev_val = 0;
@@ -1188,6 +1210,7 @@ int mpam_msmon_read(struct mpam_component *comp, struct mon_cfg *ctx,
 	arg.ctx = ctx;
 	arg.type = type;
 	arg.val = val;
+	arg.err = 0;
 	*val = 0;
 
 	return _msmon_read(comp, &arg);
@@ -1446,7 +1469,7 @@ static int mpam_reprogram_ris(void *_arg)
 static int mpam_restore_mbwu_state(void *_ris)
 {
 	int i;
-	struct mon_read mwbu_arg;
+	struct mon_read mwbu_arg = {};
 	struct mpam_msc_ris *ris = _ris;
 
 	for (i = 0; i < ris->props.num_mbwu_mon; i++) {
