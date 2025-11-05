@@ -93,9 +93,11 @@ EXPORT_SYMBOL(vl_info);
 EXPORT_SYMBOL(get_arm64_ftr_reg);
 EXPORT_SYMBOL(arm64_ftr_safe_value);
 
+#ifdef CONFIG_ARM64_MTE
 EXPORT_SYMBOL(mte_copy_tags_to_user);
 EXPORT_SYMBOL(mte_copy_tags_from_user);
 EXPORT_SYMBOL(mte_clear_page_tags);
+#endif
 
 EXPORT_SYMBOL(cpu_logical_map);
 EXPORT_SYMBOL(arm64_mpam_has_hcr);
