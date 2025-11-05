@@ -45,7 +45,9 @@
 #include <kvm/arm_pmu.h>
 #include <kvm/arm_psci.h>
 
+#if !IS_MODULE(CONFIG_KVM)
 static enum kvm_mode kvm_mode = KVM_MODE_DEFAULT;
+#endif
 
 #include "hisilicon/hisi_virt.h"
 
@@ -2381,7 +2383,6 @@ static int __init do_pkvm_init(u32 hyp_va_bits)
 
 	return ret;
 }
-#endif
 
 static u64 get_hyp_id_aa64pfr0_el1(void)
 {
@@ -2422,7 +2423,6 @@ static void kvm_hyp_init_symbols(void)
 	kvm_nvhe_sym(kvm_arm_vmid_bits) = kvm_arm_vmid_bits;
 }
 
-#if !IS_MODULE(CONFIG_KVM)
 static int __init kvm_hyp_init_protection(u32 hyp_va_bits)
 {
 	void *addr = phys_to_virt(hyp_mem_base);
