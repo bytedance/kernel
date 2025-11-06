@@ -69,7 +69,11 @@ static bool bw_validate(char *buf, u32 *data, struct rdt_resource *r)
 		return false;
 	}
 
-	*data = roundup(bw, (unsigned long)r->membw.bw_gran);
+	if (!IS_ENABLED(CONFIG_ARM64_MPAM))
+		*data = roundup(bw, (unsigned long)r->membw.bw_gran);
+	else
+		*data = bw;
+
 	return true;
 }
 
