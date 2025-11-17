@@ -166,6 +166,8 @@ struct irq_domain_ops;
 int its_init_v4(struct irq_domain *domain,
 		const struct irq_domain_ops *vpe_ops,
 		const struct irq_domain_ops *sgi_ops);
+int its_reinit_v4(const struct irq_domain_ops *vpe_ops,
+		  const struct irq_domain_ops *sgi_ops);
 #ifdef CONFIG_VIRT_VTIMER_IRQ_BYPASS
 int vtimer_irqbypass_init(struct irq_domain *domain,
 		bool has_vtimer_irqbypass);

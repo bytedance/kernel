@@ -33,6 +33,7 @@
 #include <linux/irqchip.h>
 #include <linux/irqchip/arm-gic-v3.h>
 #include <linux/irqchip/arm-gic-v4.h>
+#include <linux/irqchip/arm-gic-kvm.h>
 
 #include <asm/cputype.h>
 #include <asm/exception.h>
@@ -177,13 +178,6 @@ static int probe_devid_pool_one(void)
 }
 #endif
 
-#define ITS_FLAGS_CMDQ_NEEDS_FLUSHING		(1ULL << 0)
-#define ITS_FLAGS_WORKAROUND_CAVIUM_22375	(1ULL << 1)
-#define ITS_FLAGS_WORKAROUND_CAVIUM_23144	(1ULL << 2)
-#define ITS_FLAGS_FORCE_NON_SHAREABLE		(1ULL << 3)
-#define ITS_FLAGS_WORKAROUND_HISILICON_162100801	(1ULL << 4)
-#define ITS_FLAGS_WORKAROUND_HISILICON_162100803	(1ULL << 5)
-
 #define RD_LOCAL_LPI_ENABLED                    BIT(0)
 #define RD_LOCAL_PENDTABLE_PREALLOCATED         BIT(1)
 #define RD_LOCAL_MEMRESERVE_DONE                BIT(2)
@@ -199,80 +193,12 @@ static u32 lpi_id_bits;
 #define LPI_PROPBASE_SZ		ALIGN(BIT(LPI_NRBITS), SZ_64K)
 #define LPI_PENDBASE_SZ		ALIGN(BIT(LPI_NRBITS) / 8, SZ_64K)
 
-#define LPI_PROP_DEFAULT_PRIO	GICD_INT_DEF_PRI
-
-/*
- * Collection structure - just an ID, and a redistributor address to
- * ping. We use one per CPU as a bag of interrupts assigned to this
- * CPU.
- */
-struct its_collection {
-	u64			target_address;
-	u16			col_id;
-};
-
-/*
- * The ITS_BASER structure - contains memory information, cached
- * value of BASER register configuration and ITS page size.
- */
-struct its_baser {
-	void		*base;
-	u64		val;
-	u32		order;
-	u32		psz;
-};
-
-struct its_device;
-
-/*
- * The ITS structure - contains most of the infrastructure, with the
- * top-level MSI domain, the command queue, the collections, and the
- * list of devices writing to it.
- *
- * dev_alloc_lock has to be taken for device allocations, while the
- * spinlock must be taken to parse data structures such as the device
- * list.
- */
-struct its_node {
-	raw_spinlock_t		lock;
-	struct mutex		dev_alloc_lock;
-	struct list_head	entry;
-	void __iomem		*base;
-	void __iomem		*sgir_base;
-	phys_addr_t		phys_base;
-	struct its_cmd_block	*cmd_base;
-	struct its_cmd_block	*cmd_write;
-	struct its_baser	tables[GITS_BASER_NR_REGS];
-	struct its_collection	*collections;
-	struct fwnode_handle	*fwnode_handle;
-	u64			(*get_msi_base)(struct its_device *its_dev);
-	u64			typer;
-	u64			cbaser_save;
-	u32			ctlr_save;
-	u32			mpidr;
-	struct list_head	its_device_list;
-	u64			flags;
-	unsigned long		list_nr;
-	int			numa_node;
-	unsigned int		msi_domain_flags;
-	u32			pre_its_base; /* for Socionext Synquacer */
-#ifdef CONFIG_VIRT_VTIMER_IRQ_BYPASS
-	u32			version;
-#endif
-	int			vlpi_redist_offset;
-};
-
 static DEFINE_PER_CPU(struct its_node *, local_4_1_its);
 
-#define is_v4(its)		(!!((its)->typer & GITS_TYPER_VLPIS))
-#define is_v4_1(its)		(!!((its)->typer & GITS_TYPER_VMAPP))
 #define device_ids(its)		(FIELD_GET(GITS_TYPER_DEVBITS, (its)->typer) + 1)
 
 #ifdef CONFIG_VIRT_VTIMER_IRQ_BYPASS
 #define is_vtimer_irqbypass(its)	(!!((its)->version & GITS_VERSION_VTIMER))
-
-/* Fetch it from gtdt->virtual_timer_interrupt. */
-#define is_vtimer_irq(irq)	((irq) == 27)
 
 static inline bool is_its_vsgi_cmd_valid(struct its_node *its, u8 hwirq)
 {
@@ -305,39 +231,6 @@ static inline bool is_its_vsgi_cmd_valid(struct its_node *its, u8 hwirq)
 /* Convert page order to size in bytes */
 #define PAGE_ORDER_TO_SIZE(o)	(PAGE_SIZE << (o))
 
-struct event_lpi_map {
-	unsigned long		*lpi_map;
-	u16			*col_map;
-	irq_hw_number_t		lpi_base;
-	int			nr_lpis;
-	raw_spinlock_t		vlpi_lock;
-	struct its_vm		*vm;
-	struct its_vlpi_map	*vlpi_maps;
-	int			nr_vlpis;
-};
-
-/*
- * The ITS view of a device - belongs to an ITS, owns an interrupt
- * translation table, and a list of interrupts.  If it some of its
- * LPIs are injected into a guest (GICv4), the event_map.vm field
- * indicates which one.
- */
-struct its_device {
-	struct list_head	entry;
-	struct its_node		*its;
-	struct event_lpi_map	event_map;
-	void			*itt;
-	u32			nr_ites;
-	u32			device_id;
-	bool			shared;
-
-#ifdef CONFIG_VIRT_PLAT_DEV
-	/* For virtual devices which needed the devid managed */
-	bool			is_vdev;
-	struct rsv_devid_pool	*devid_pool;
-#endif
-};
-
 static struct {
 	raw_spinlock_t		lock;
 	struct its_device	*dev;
@@ -352,12 +245,15 @@ struct cpu_lpi_count {
 
 static DEFINE_PER_CPU(struct cpu_lpi_count, cpu_lpi_count);
 
-static LIST_HEAD(its_nodes);
+LIST_HEAD(its_nodes);
+EXPORT_SYMBOL(its_nodes);
 static DEFINE_RAW_SPINLOCK(its_lock);
-static struct rdists *gic_rdists;
+struct rdists *gic_rdists;
+EXPORT_SYMBOL(gic_rdists);
 static struct irq_domain *its_parent;
 
-static unsigned long its_list_map;
+unsigned long its_list_map;
+EXPORT_SYMBOL(its_list_map);
 static u16 vmovp_seq_num;
 static DEFINE_RAW_SPINLOCK(vmovp_lock);
 
@@ -417,11 +313,6 @@ static int alloc_devid_from_rsv_pools(struct rsv_devid_pool **devid_pool,
 }
 #endif
 
-#define gic_data_rdist()		(raw_cpu_ptr(gic_rdists->rdist))
-#define gic_data_rdist_cpu(cpu)		(per_cpu_ptr(gic_rdists->rdist, cpu))
-#define gic_data_rdist_rd_base()	(gic_data_rdist()->rd_base)
-#define gic_data_rdist_vlpi_base()	(gic_data_rdist_rd_base() + SZ_128K)
-
 #ifdef CONFIG_ARM64_HISI_IPIV
 void __iomem *gic_data_rdist_get_vlpi_base(void)
 {
@@ -453,10 +344,11 @@ static bool require_its_list_vmovp(struct its_vm *vm, struct its_node *its)
 	return (gic_rdists->has_rvpeid || vm->vlpi_count[its->list_nr]);
 }
 
-static bool rdists_support_shareable(void)
+bool rdists_support_shareable(void)
 {
 	return !(gic_rdists->flags & RDIST_FLAGS_FORCE_NON_SHAREABLE);
 }
+EXPORT_SYMBOL(rdists_support_shareable);
 
 static u16 get_its_list(struct its_vm *vm)
 {
@@ -497,7 +389,7 @@ static struct its_vlpi_map *dev_event_to_vlpi_map(struct its_device *its_dev,
 	return &its_dev->event_map.vlpi_maps[event];
 }
 
-static struct its_vlpi_map *get_vlpi_map(struct irq_data *d)
+struct its_vlpi_map *get_vlpi_map(struct irq_data *d)
 {
 	if (irqd_is_forwarded_to_vcpu(d)) {
 		struct its_device *its_dev = irq_data_get_irq_chip_data(d);
@@ -508,6 +400,7 @@ static struct its_vlpi_map *get_vlpi_map(struct irq_data *d)
 
 	return NULL;
 }
+EXPORT_SYMBOL(get_vlpi_map);
 
 static int vpe_to_cpuid_lock(struct its_vpe *vpe, unsigned long *flags)
 {
@@ -677,16 +570,6 @@ struct its_cmd_desc {
 			bool group;
 			bool clear;
 		} its_vsgi_cmd;
-	};
-};
-
-/*
- * The ITS command block, which is what the ITS actually parses.
- */
-struct its_cmd_block {
-	union {
-		u64	raw_cmd[4];
-		__le64	raw_cmd_le[4];
 	};
 };
 
@@ -1513,7 +1396,7 @@ static void its_build_vsync_cmd(struct its_node *its,
 static BUILD_SINGLE_CMD_FUNC(its_send_single_vcommand, its_cmd_vbuilder_t,
 			     struct its_vpe, its_build_vsync_cmd)
 
-static void its_send_int(struct its_device *dev, u32 event_id)
+void its_send_int(struct its_device *dev, u32 event_id)
 {
 	struct its_cmd_desc desc;
 
@@ -1522,8 +1405,9 @@ static void its_send_int(struct its_device *dev, u32 event_id)
 
 	its_send_single_command(dev->its, its_build_int_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_int);
 
-static void its_send_clear(struct its_device *dev, u32 event_id)
+void its_send_clear(struct its_device *dev, u32 event_id)
 {
 	struct its_cmd_desc desc;
 
@@ -1532,6 +1416,7 @@ static void its_send_clear(struct its_device *dev, u32 event_id)
 
 	its_send_single_command(dev->its, its_build_clear_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_clear);
 
 static void its_send_inv(struct its_device *dev, u32 event_id)
 {
@@ -1571,7 +1456,7 @@ static void its_send_mapc(struct its_node *its, struct its_collection *col,
 	its_send_single_command(its, its_build_mapc_cmd, &desc);
 }
 
-static void its_send_mapti(struct its_device *dev, u32 irq_id, u32 id)
+void its_send_mapti(struct its_device *dev, u32 irq_id, u32 id)
 {
 	struct its_cmd_desc desc;
 
@@ -1581,6 +1466,7 @@ static void its_send_mapti(struct its_device *dev, u32 irq_id, u32 id)
 
 	its_send_single_command(dev->its, its_build_mapti_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_mapti);
 
 static void its_send_movi(struct its_device *dev,
 			  struct its_collection *col, u32 id)
@@ -1594,7 +1480,7 @@ static void its_send_movi(struct its_device *dev,
 	its_send_single_command(dev->its, its_build_movi_cmd, &desc);
 }
 
-static void its_send_discard(struct its_device *dev, u32 id)
+void its_send_discard(struct its_device *dev, u32 id)
 {
 	struct its_cmd_desc desc;
 
@@ -1603,6 +1489,7 @@ static void its_send_discard(struct its_device *dev, u32 id)
 
 	its_send_single_command(dev->its, its_build_discard_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_discard);
 
 static void its_send_invall(struct its_node *its, struct its_collection *col)
 {
@@ -1613,7 +1500,7 @@ static void its_send_invall(struct its_node *its, struct its_collection *col)
 	its_send_single_command(its, its_build_invall_cmd, &desc);
 }
 
-static void its_send_vmapti(struct its_device *dev, u32 id)
+void its_send_vmapti(struct its_device *dev, u32 id)
 {
 	struct its_vlpi_map *map = dev_event_to_vlpi_map(dev, id);
 	struct its_cmd_desc desc;
@@ -1626,8 +1513,9 @@ static void its_send_vmapti(struct its_device *dev, u32 id)
 
 	its_send_single_vcommand(dev->its, its_build_vmapti_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_vmapti);
 
-static void its_send_vmovi(struct its_device *dev, u32 id)
+void its_send_vmovi(struct its_device *dev, u32 id)
 {
 	struct its_vlpi_map *map = dev_event_to_vlpi_map(dev, id);
 	struct its_cmd_desc desc;
@@ -1639,8 +1527,9 @@ static void its_send_vmovi(struct its_device *dev, u32 id)
 
 	its_send_single_vcommand(dev->its, its_build_vmovi_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_vmovi);
 
-static void its_send_vmapp(struct its_node *its,
+void its_send_vmapp(struct its_node *its,
 			   struct its_vpe *vpe, bool valid)
 {
 	struct its_cmd_desc desc;
@@ -1651,16 +1540,18 @@ static void its_send_vmapp(struct its_node *its,
 
 	its_send_single_vcommand(its, its_build_vmapp_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_vmapp);
 
-static void its_send_vinvall(struct its_node *its, struct its_vpe *vpe)
+void its_send_vinvall(struct its_node *its, struct its_vpe *vpe)
 {
 	struct its_cmd_desc desc;
 
 	desc.its_vinvall_cmd.vpe = vpe;
 	its_send_single_vcommand(its, its_build_vinvall_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_vinvall);
 
-static void its_send_vmovp(struct its_vpe *vpe)
+void its_send_vmovp(struct its_vpe *vpe)
 {
 	struct its_cmd_desc desc = {};
 	struct its_node *its;
@@ -1708,6 +1599,7 @@ static void its_send_vmovp(struct its_vpe *vpe)
 			its_send_vinvall(its, vpe);
 	}
 }
+EXPORT_SYMBOL(its_send_vmovp);
 
 static void its_send_vinv(struct its_device *dev, u32 event_id)
 {
@@ -1751,18 +1643,19 @@ static void its_send_vclear(struct its_device *dev, u32 event_id)
 	its_send_single_vcommand(dev->its, its_build_vclear_cmd, &desc);
 }
 
-static void its_send_invdb(struct its_node *its, struct its_vpe *vpe)
+void its_send_invdb(struct its_node *its, struct its_vpe *vpe)
 {
 	struct its_cmd_desc desc;
 
 	desc.its_invdb_cmd.vpe = vpe;
 	its_send_single_vcommand(its, its_build_invdb_cmd, &desc);
 }
+EXPORT_SYMBOL(its_send_invdb);
 
 /*
  * irqchip functions - assumes MSI, mostly.
  */
-static void lpi_write_config(struct irq_data *d, u8 clr, u8 set)
+void lpi_write_config(struct irq_data *d, u8 clr, u8 set)
 {
 	struct its_vlpi_map *map = get_vlpi_map(d);
 	irq_hw_number_t hwirq;
@@ -1795,6 +1688,7 @@ static void lpi_write_config(struct irq_data *d, u8 clr, u8 set)
 	else
 		dsb(ishst);
 }
+EXPORT_SYMBOL(lpi_write_config);
 
 static void wait_for_syncr(void __iomem *rdbase)
 {
@@ -1840,7 +1734,7 @@ static void direct_lpi_inv(struct irq_data *d)
 	__direct_lpi_inv(d, val);
 }
 
-static void lpi_update_config(struct irq_data *d, u8 clr, u8 set)
+void lpi_update_config(struct irq_data *d, u8 clr, u8 set)
 {
 	struct its_device *its_dev = irq_data_get_irq_chip_data(d);
 
@@ -1853,8 +1747,9 @@ static void lpi_update_config(struct irq_data *d, u8 clr, u8 set)
 	else
 		its_send_vinv(its_dev, its_get_event_id(d));
 }
+EXPORT_SYMBOL(lpi_update_config);
 
-static void its_vlpi_set_doorbell(struct irq_data *d, bool enable)
+void its_vlpi_set_doorbell(struct irq_data *d, bool enable)
 {
 	struct its_device *its_dev = irq_data_get_irq_chip_data(d);
 	u32 event = its_get_event_id(d);
@@ -1886,6 +1781,7 @@ static void its_vlpi_set_doorbell(struct irq_data *d, bool enable)
 	 */
 	its_send_vmovi(its_dev, event);
 }
+EXPORT_SYMBOL(its_vlpi_set_doorbell);
 
 static void its_mask_irq(struct irq_data *d)
 {
@@ -2125,15 +2021,16 @@ static int its_irq_retrigger(struct irq_data *d)
  * If neither (a) nor (b) is true, then we map vPEs on demand.
  *
  */
-static bool gic_requires_eager_mapping(void)
+bool gic_requires_eager_mapping(void)
 {
 	if (!its_list_map || gic_rdists->has_rvpeid)
 		return true;
 
 	return false;
 }
+EXPORT_SYMBOL(gic_requires_eager_mapping);
 
-static void its_map_vm(struct its_node *its, struct its_vm *vm)
+void its_map_vm(struct its_node *its, struct its_vm *vm)
 {
 	if (gic_requires_eager_mapping())
 		return;
@@ -2159,8 +2056,9 @@ static void its_map_vm(struct its_node *its, struct its_vm *vm)
 		}
 	}
 }
+EXPORT_SYMBOL(its_map_vm);
 
-static void its_unmap_vm(struct its_node *its, struct its_vm *vm)
+void its_unmap_vm(struct its_node *its, struct its_vm *vm)
 {
 	/* Not using the ITS list? Everything is always mapped. */
 	if (gic_requires_eager_mapping())
@@ -2177,6 +2075,7 @@ static void its_unmap_vm(struct its_node *its, struct its_vm *vm)
 		}
 	}
 }
+EXPORT_SYMBOL(its_unmap_vm);
 
 static int its_vlpi_map(struct irq_data *d, struct its_cmd_info *info)
 {
@@ -2232,7 +2131,7 @@ static int its_vlpi_map(struct irq_data *d, struct its_cmd_info *info)
 	return 0;
 }
 
-static int its_vlpi_get(struct irq_data *d, struct its_cmd_info *info)
+int its_vlpi_get(struct irq_data *d, struct its_cmd_info *info)
 {
 	struct its_device *its_dev = irq_data_get_irq_chip_data(d);
 	struct its_vlpi_map *map;
@@ -2247,6 +2146,7 @@ static int its_vlpi_get(struct irq_data *d, struct its_cmd_info *info)
 
 	return 0;
 }
+EXPORT_SYMBOL(its_vlpi_get);
 
 static int its_vlpi_unmap(struct irq_data *d)
 {
@@ -2477,7 +2377,7 @@ static int __init its_lpi_init(u32 id_bits)
 	return err;
 }
 
-static unsigned long *its_lpi_alloc(int nr_irqs, u32 *base, int *nr_ids)
+unsigned long *its_lpi_alloc(int nr_irqs, u32 *base, int *nr_ids)
 {
 	unsigned long *bitmap = NULL;
 	int err = 0;
@@ -2508,14 +2408,16 @@ out:
 
 	return bitmap;
 }
+EXPORT_SYMBOL(its_lpi_alloc);
 
-static void its_lpi_free(unsigned long *bitmap, u32 base, u32 nr_ids)
+void its_lpi_free(unsigned long *bitmap, u32 base, u32 nr_ids)
 {
 	WARN_ON(free_lpi_range(base, nr_ids));
 	bitmap_free(bitmap);
 }
+EXPORT_SYMBOL(its_lpi_free);
 
-static void gic_reset_prop_table(void *va)
+void gic_reset_prop_table(void *va)
 {
 	/* Priority 0xa0, Group-1, disabled */
 	memset(va, LPI_PROP_DEFAULT_PRIO | LPI_PROP_GROUP1, LPI_PROPBASE_SZ);
@@ -2523,6 +2425,7 @@ static void gic_reset_prop_table(void *va)
 	/* Make sure the GIC will observe the written configuration */
 	gic_flush_dcache_to_poc(va, LPI_PROPBASE_SZ);
 }
+EXPORT_SYMBOL(gic_reset_prop_table);
 
 static struct page *its_allocate_prop_table(gfp_t gfp_flags)
 {
@@ -3402,7 +3305,7 @@ static u64 read_vpend_dirty_clear(void __iomem *vlpi_base)
 	return val;
 }
 
-static u64 its_clear_vpend_valid(void __iomem *vlpi_base, u64 clr, u64 set)
+u64 its_clear_vpend_valid(void __iomem *vlpi_base, u64 clr, u64 set)
 {
 	u64 val;
 
@@ -3419,6 +3322,7 @@ static u64 its_clear_vpend_valid(void __iomem *vlpi_base, u64 clr, u64 set)
 
 	return val;
 }
+EXPORT_SYMBOL(its_clear_vpend_valid);
 
 static void its_cpu_init_lpis(void)
 {
@@ -3677,7 +3581,7 @@ static bool its_alloc_device_table(struct its_node *its, u32 dev_id)
 	return its_alloc_table_entry(its, baser, dev_id);
 }
 
-static bool its_alloc_vpe_table(u32 vpe_id)
+bool its_alloc_vpe_table(u32 vpe_id)
 {
 	struct its_node *its;
 	int cpu;
@@ -3718,6 +3622,7 @@ static bool its_alloc_vpe_table(u32 vpe_id)
 
 	return true;
 }
+EXPORT_SYMBOL(its_alloc_vpe_table);
 
 static struct its_device *its_create_device(struct its_node *its, u32 dev_id,
 					    int nvecs, bool alloc_lpis)
@@ -3919,7 +3824,7 @@ static struct msi_domain_ops its_msi_domain_ops = {
 	.msi_prepare	= its_msi_prepare,
 };
 
-static int its_irq_gic_domain_alloc(struct irq_domain *domain,
+int its_irq_gic_domain_alloc(struct irq_domain *domain,
 				    unsigned int virq,
 				    irq_hw_number_t hwirq)
 {
@@ -3942,6 +3847,7 @@ static int its_irq_gic_domain_alloc(struct irq_domain *domain,
 
 	return irq_domain_alloc_irqs_parent(domain, virq, 1, &fwspec);
 }
+EXPORT_SYMBOL(its_irq_gic_domain_alloc);
 
 static int its_irq_domain_alloc(struct irq_domain *domain, unsigned int virq,
 				unsigned int nr_irqs, void *args)
@@ -4106,7 +4012,7 @@ static void its_vpe_db_proxy_unmap_locked(struct its_vpe *vpe)
 	vpe->vpe_proxy_event = -1;
 }
 
-static void its_vpe_db_proxy_unmap(struct its_vpe *vpe)
+void its_vpe_db_proxy_unmap(struct its_vpe *vpe)
 {
 	/* GICv4.1 doesn't use a proxy, so nothing to do here */
 	if (gic_rdists->has_rvpeid)
@@ -4120,6 +4026,7 @@ static void its_vpe_db_proxy_unmap(struct its_vpe *vpe)
 		raw_spin_unlock_irqrestore(&vpe_proxy.lock, flags);
 	}
 }
+EXPORT_SYMBOL(its_vpe_db_proxy_unmap);
 
 static void its_vpe_db_proxy_map_locked(struct its_vpe *vpe)
 {
@@ -4144,7 +4051,7 @@ static void its_vpe_db_proxy_map_locked(struct its_vpe *vpe)
 	its_send_mapti(vpe_proxy.dev, vpe->vpe_db_lpi, vpe->vpe_proxy_event);
 }
 
-static void its_vpe_db_proxy_move(struct its_vpe *vpe, int from, int to)
+void its_vpe_db_proxy_move(struct its_vpe *vpe, int from, int to)
 {
 	unsigned long flags;
 	struct its_collection *target_col;
@@ -4173,6 +4080,7 @@ static void its_vpe_db_proxy_move(struct its_vpe *vpe, int from, int to)
 
 	raw_spin_unlock_irqrestore(&vpe_proxy.lock, flags);
 }
+EXPORT_SYMBOL(its_vpe_db_proxy_move);
 
 static int its_vpe_set_affinity(struct irq_data *d,
 				const struct cpumask *mask_val,
@@ -4240,7 +4148,7 @@ out:
 	return IRQ_SET_MASK_OK_DONE;
 }
 
-static void its_wait_vpt_parse_complete(void)
+void its_wait_vpt_parse_complete(void)
 {
 	void __iomem *vlpi_base = gic_data_rdist_vlpi_base();
 	u64 val;
@@ -4253,6 +4161,7 @@ static void its_wait_vpt_parse_complete(void)
 						       !(val & GICR_VPENDBASER_Dirty),
 						       1, 500));
 }
+EXPORT_SYMBOL(its_wait_vpt_parse_complete);
 
 static void its_vpe_schedule(struct its_vpe *vpe)
 {
@@ -4350,7 +4259,7 @@ static int its_vpe_set_vcpu_affinity(struct irq_data *d, void *vcpu_info)
 	}
 }
 
-static void its_vpe_send_cmd(struct its_vpe *vpe,
+void its_vpe_send_cmd(struct its_vpe *vpe,
 			     void (*cmd)(struct its_device *, u32))
 {
 	unsigned long flags;
@@ -4362,8 +4271,9 @@ static void its_vpe_send_cmd(struct its_vpe *vpe,
 
 	raw_spin_unlock_irqrestore(&vpe_proxy.lock, flags);
 }
+EXPORT_SYMBOL(its_vpe_send_cmd);
 
-static void its_vpe_send_inv(struct irq_data *d)
+void its_vpe_send_inv(struct irq_data *d)
 {
 	struct its_vpe *vpe = irq_data_get_irq_chip_data(d);
 
@@ -4372,6 +4282,7 @@ static void its_vpe_send_inv(struct irq_data *d)
 	else
 		its_vpe_send_cmd(vpe, its_send_inv);
 }
+EXPORT_SYMBOL(its_vpe_send_inv);
 
 static void its_vpe_mask_irq(struct irq_data *d)
 {
@@ -4437,7 +4348,7 @@ static struct irq_chip its_vpe_irq_chip = {
 	.irq_set_vcpu_affinity	= its_vpe_set_vcpu_affinity,
 };
 
-static struct its_node *find_4_1_its(void)
+struct its_node *find_4_1_its(void)
 {
 	struct its_node *its = *this_cpu_ptr(&local_4_1_its);
 
@@ -4453,6 +4364,7 @@ static struct its_node *find_4_1_its(void)
 
 	return its;
 }
+EXPORT_SYMBOL(find_4_1_its);
 
 static void its_vpe_4_1_send_inv(struct irq_data *d)
 {
@@ -4664,7 +4576,7 @@ static struct irq_chip its_vpe_4_1_irq_chip = {
 	.irq_set_vcpu_affinity	= its_vpe_4_1_set_vcpu_affinity,
 };
 
-static void its_configure_sgi(struct irq_data *d, bool clear)
+void its_configure_sgi(struct irq_data *d, bool clear)
 {
 	struct its_vpe *vpe = irq_data_get_irq_chip_data(d);
 	struct its_cmd_desc desc;
@@ -4696,6 +4608,7 @@ static void its_configure_sgi(struct irq_data *d, bool clear)
 	its_send_single_vcommand(find_4_1_its(), its_build_vsgi_cmd, &desc);
 #endif
 }
+EXPORT_SYMBOL(its_configure_sgi);
 
 static void its_sgi_mask_irq(struct irq_data *d)
 {
@@ -6322,3 +6235,62 @@ int __init its_init(struct fwnode_handle *handle, struct rdists *rdists,
 
 	return 0;
 }
+
+inline unsigned long its_get_lpi_pendbase_sz(void)
+{
+	return LPI_PROPBASE_SZ;
+}
+EXPORT_SYMBOL(its_get_lpi_pendbase_sz);
+
+inline unsigned long its_get_lpi_propbase_sz(void)
+{
+	return LPI_PROPBASE_SZ;
+}
+EXPORT_SYMBOL(its_get_lpi_propbase_sz);
+
+inline u32 its_get_lpi_nr_bits(void)
+{
+	return LPI_NRBITS;
+}
+EXPORT_SYMBOL(its_get_lpi_nr_bits);
+
+/*
+ * Set the irq_set_vcpu_affinity from kvm.
+ */
+void its_set_kvm_vcpu_affinity(vcpu_affinity_func_t affinity_func)
+{
+	if (affinity_func)
+		its_irq_chip.irq_set_vcpu_affinity = affinity_func;
+	else
+		its_irq_chip.irq_set_vcpu_affinity = its_irq_set_vcpu_affinity;
+}
+EXPORT_SYMBOL(its_set_kvm_vcpu_affinity);
+
+/*
+ * Set the gic v4 vpe domain ops and sgi domain ops from kvm.
+ */
+int its_set_kvm_v4_domain_ops(const struct irq_domain_ops *vpe_ops,
+			  const struct irq_domain_ops *sgi_ops)
+{
+	const struct irq_domain_ops *kvm_sgi_ops;
+	int ret;
+
+	if (!gic_rdists->has_vlpis)
+		return -ENODEV;
+
+	if (gic_rdists->has_rvpeid) {
+		if (!sgi_ops)
+			return -ENODEV;
+
+		kvm_sgi_ops = &its_sgi_domain_ops;
+	} else
+		kvm_sgi_ops = NULL;
+
+	if (vpe_ops)
+		ret = its_reinit_v4(vpe_ops, sgi_ops);
+	else
+		ret = its_reinit_v4(&its_vpe_domain_ops, kvm_sgi_ops);
+
+	return ret;
+}
+EXPORT_SYMBOL(its_set_kvm_v4_domain_ops);

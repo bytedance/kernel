@@ -435,3 +435,17 @@ int vtimer_irqbypass_init(struct irq_domain *domain,
 	return -ENODEV;
 }
 #endif
+
+int its_reinit_v4(const struct irq_domain_ops *vpe_ops,
+		  const struct irq_domain_ops *sgi_ops)
+{
+	if (!gic_domain) {
+		pr_err("ITS: No GICv4 support\n");
+		return -ENODEV;
+	}
+
+	vpe_domain_ops = vpe_ops;
+	sgi_domain_ops = sgi_ops;
+
+	return 0;
+}
