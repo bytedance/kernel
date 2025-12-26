@@ -371,7 +371,10 @@ static u8 armv8pmu_event_threshold_control(struct perf_event_attr *attr)
 #ifdef CONFIG_HISILICON_HW_METRIC
 static inline bool armv8pmu_event_is_hw_metric(struct perf_event *event)
 {
-	return ATTR_CFG_GET_FLD(&event->attr, hw_metric);
+	bool hardware_event = event->attr.type & PERF_TYPE_HARDWARE;
+	bool hwmetric_event = ATTR_CFG_GET_FLD(&event->attr, hw_metric);
+
+	return hardware_event && hwmetric_event;
 }
 
 static bool armpmu_support_hisi_hw_metric(void)
@@ -1161,7 +1164,8 @@ static int armv8pmu_check_hw_metric_event(struct pmu_hw_events *cpuc,
 		if (event == leader)
 			return 0;
 
-		if (!armv8pmu_event_is_hw_metric(leader))
+		if (leader->pmu != event->pmu ||
+			!armv8pmu_event_is_hw_metric(leader))
 			return -EINVAL;
 
 		for_each_sibling_event(sibling, leader) {
