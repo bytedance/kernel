@@ -452,6 +452,10 @@ void tcp_init_sock(struct sock *sk)
 	tp->tsoffset = 0;
 	tp->rack.reo_wnd_steps = 1;
 
+	tp->local_classid = 0;
+	tp->remote_classid = 0;
+	tp->classid_len = 0;
+
 	sk->sk_write_space = sk_stream_write_space;
 	sock_set_flag(sk, SOCK_USE_WRITE_QUEUE);
 
@@ -3474,6 +3478,9 @@ int tcp_disconnect(struct sock *sk, int flags)
 	tp->rx_opt.num_sacks = 0;
 	tp->rcv_ooopack = 0;
 
+	tp->local_classid = 0;
+	tp->remote_classid = 0;
+	tp->classid_len = 0;
 
 	/* Clean up fastopen related fields */
 	tcp_free_fastopen_req(tp);

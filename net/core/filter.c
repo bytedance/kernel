@@ -10247,10 +10247,36 @@ const struct bpf_prog_ops xdp_prog_ops = {
 	.test_run		= bpf_prog_test_run_xdp,
 };
 
+#if IS_ENABLED(CONFIG_BPF_SYSCALL)
+noinline void bpf_tcp_set_classid(struct sock *sk, u32 local, u32 remote)
+{
+	struct tcp_sock *tp;
+
+	if (!sk || !sk_fullsock(sk) || sk->sk_protocol != IPPROTO_TCP)
+		return;
+
+	tp = tcp_sk(sk);
+	tp->local_classid = local;
+	tp->remote_classid = remote;
+}
+
+BTF_SET_START(bpf_tcp_kfunc_ids)
+BTF_ID(func, bpf_tcp_set_classid)
+BTF_SET_END(bpf_tcp_kfunc_ids)
+
+static bool bpf_tcp_check_kfunc_call(u32 kfunc_btf_id)
+{
+	return btf_id_set_contains(&bpf_tcp_kfunc_ids, kfunc_btf_id);
+}
+#endif
+
 const struct bpf_verifier_ops cg_skb_verifier_ops = {
 	.get_func_proto		= cg_skb_func_proto,
 	.is_valid_access	= cg_skb_is_valid_access,
 	.convert_ctx_access	= bpf_convert_ctx_access,
+#if IS_ENABLED(CONFIG_BPF_SYSCALL)
+	.check_kfunc_call	= bpf_tcp_check_kfunc_call,
+#endif
 };
 
 const struct bpf_prog_ops cg_skb_prog_ops = {
@@ -10320,6 +10346,9 @@ const struct bpf_verifier_ops sock_ops_verifier_ops = {
 	.get_func_proto		= sock_ops_func_proto,
 	.is_valid_access	= sock_ops_is_valid_access,
 	.convert_ctx_access	= sock_ops_convert_ctx_access,
+#if IS_ENABLED(CONFIG_BPF_SYSCALL)
+	.check_kfunc_call	= bpf_tcp_check_kfunc_call,
+#endif
 };
 
 const struct bpf_prog_ops sock_ops_prog_ops = {
