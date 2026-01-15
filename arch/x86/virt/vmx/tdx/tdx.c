@@ -1270,7 +1270,7 @@ static int tdx_read_md_##rtype(u64 id, rtype *value)	\
 	struct tdx_module_args args = { .rdx = id };	\
 	int ret;					\
 							\
-	ret = seamcall(TDH_SYS_RD, &args);		\
+	ret = seamcall_prerr_ret(TDH_SYS_RD, &args);	\
 	if (!ret)					\
 		*value = args.r8;			\
 	else						\
