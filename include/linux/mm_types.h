@@ -319,6 +319,13 @@ struct vm_userfaultfd_ctx {
 struct vm_userfaultfd_ctx {};
 #endif /* CONFIG_USERFAULTFD */
 
+/* page entry size for vm->huge_fault() */
+enum page_entry_size {
+	PE_SIZE_PTE = 0,
+	PE_SIZE_PMD,
+	PE_SIZE_PUD,
+};
+
 /*
  * This struct describes a virtual memory area. There is one of these
  * per VM-area/task. A VM area is any part of the process virtual memory
@@ -397,6 +404,8 @@ struct vm_area_struct {
 #ifdef CONFIG_BYTEDANCE_ASYNC_FORK
 	struct vm_area_struct *child_vma;
 #endif
+	bool vfio_pci_huge_fault;
+
 } __randomize_layout;
 
 struct core_thread {

@@ -2386,6 +2386,40 @@ vm_fault_t vmf_insert_mixed_mkwrite(struct vm_area_struct *vma,
 }
 EXPORT_SYMBOL(vmf_insert_mixed_mkwrite);
 
+static inline unsigned int pe_order(enum page_entry_size pe_size)
+{
+	if (pe_size == PE_SIZE_PTE)
+		return PAGE_SHIFT - PAGE_SHIFT;
+	if (pe_size == PE_SIZE_PMD)
+		return PMD_SHIFT - PAGE_SHIFT;
+	if (pe_size == PE_SIZE_PUD)
+		return PUD_SHIFT - PAGE_SHIFT;
+	return ~0;
+}
+
+static inline bool is_aligned_for_order(struct vm_area_struct *vma,
+					unsigned long addr,
+					unsigned long pfn,
+					unsigned int order)
+{
+	return !(order && (addr < vma->vm_start ||
+			   addr + (PAGE_SIZE << order) > vma->vm_end ||
+			   !IS_ALIGNED(pfn, 1 << order)));
+}
+
+static inline bool hugepfn_fault_check(struct vm_area_struct *vma,
+					unsigned long addr,
+					unsigned long pfn,
+					enum page_entry_size pe_size)
+{
+	unsigned int order = pe_order(pe_size);
+
+	if (!IS_ALIGNED(addr, PAGE_SIZE << order))
+		return false;
+
+	return is_aligned_for_order(vma, addr, pfn, order);
+}
+
 /*
  * maps a range of physical memory into the requested pages. the old
  * mappings are removed. any references to nonexistent pages results
@@ -2417,13 +2451,14 @@ static int remap_pte_range(struct mm_struct *mm, pmd_t *pmd,
 	return err;
 }
 
-static inline int remap_pmd_range(struct mm_struct *mm, pud_t *pud,
+static inline int remap_pmd_range(struct vm_area_struct *vma, pud_t *pud,
 			unsigned long addr, unsigned long end,
 			unsigned long pfn, pgprot_t prot)
 {
 	pmd_t *pmd;
 	unsigned long next;
-	int err;
+	struct mm_struct *mm = vma->vm_mm;
+	int err = 0;
 
 	pfn -= addr >> PAGE_SHIFT;
 	pmd = pmd_alloc(mm, pud, addr);
@@ -2432,20 +2467,46 @@ static inline int remap_pmd_range(struct mm_struct *mm, pud_t *pud,
 	VM_BUG_ON(pmd_trans_huge(*pmd));
 	do {
 		next = pmd_addr_end(addr, end);
+#ifdef CONFIG_ARCH_SUPPORTS_PMD_PFNMAP
+		if (vma->vfio_pci_huge_fault) {
+			pmd_t entry;
+			spinlock_t *ptl;
+
+			ptl = pmd_lock(mm, pmd);
+
+			if (pmd_none(*pmd) && hugepfn_fault_check(vma, addr, pfn, PE_SIZE_PMD)) {
+				if (!pfn_modify_allowed(pfn, prot)) {
+					err = -EACCES;
+					spin_unlock(ptl);
+					break;
+				}
+
+				entry = pmd_mkhuge(pfn_pmd(pfn + (addr >> PAGE_SHIFT), prot));
+				entry = pmd_mkspecial(entry);
+
+				set_pmd_at(mm, addr, pmd, entry);
+				update_mmu_cache_pmd(vma, addr, pmd);
+				spin_unlock(ptl);
+				continue;
+			}
+			spin_unlock(ptl);
+		}
+#endif
 		err = remap_pte_range(mm, pmd, addr, next,
 				pfn + (addr >> PAGE_SHIFT), prot);
 		if (err)
 			return err;
 	} while (pmd++, addr = next, addr != end);
-	return 0;
+	return err;
 }
 
-static inline int remap_pud_range(struct mm_struct *mm, p4d_t *p4d,
+static inline int remap_pud_range(struct vm_area_struct *vma, p4d_t *p4d,
 			unsigned long addr, unsigned long end,
 			unsigned long pfn, pgprot_t prot)
 {
 	pud_t *pud;
 	unsigned long next;
+	struct mm_struct *mm = vma->vm_mm;
 	int err;
 
 	pfn -= addr >> PAGE_SHIFT;
@@ -2454,7 +2515,32 @@ static inline int remap_pud_range(struct mm_struct *mm, p4d_t *p4d,
 		return -ENOMEM;
 	do {
 		next = pud_addr_end(addr, end);
-		err = remap_pmd_range(mm, pud, addr, next,
+#ifdef CONFIG_ARCH_SUPPORTS_PUD_PFNMAP
+		if (vma->vfio_pci_huge_fault) {
+			spinlock_t *ptl;
+			pud_t entry;
+
+			ptl = pud_lock(mm, pud);
+
+			if (pud_none(*pud) && hugepfn_fault_check(vma, addr, pfn, PE_SIZE_PUD)) {
+				if (!pfn_modify_allowed(pfn, prot)) {
+					err = -EACCES;
+					spin_unlock(ptl);
+					break;
+				}
+
+				entry = pud_mkhuge(pfn_pud(pfn + (addr >> PAGE_SHIFT), prot));
+				entry = pud_mkspecial(entry);
+
+				set_pud_at(mm, addr, pud, entry);
+				update_mmu_cache_pud(vma, addr, pud);
+				spin_unlock(ptl);
+				continue;
+			}
+			spin_unlock(ptl);
+		}
+#endif
+		err = remap_pmd_range(vma, pud, addr, next,
 				pfn + (addr >> PAGE_SHIFT), prot);
 		if (err)
 			return err;
@@ -2462,12 +2548,13 @@ static inline int remap_pud_range(struct mm_struct *mm, p4d_t *p4d,
 	return 0;
 }
 
-static inline int remap_p4d_range(struct mm_struct *mm, pgd_t *pgd,
+static inline int remap_p4d_range(struct vm_area_struct *vma, pgd_t *pgd,
 			unsigned long addr, unsigned long end,
 			unsigned long pfn, pgprot_t prot)
 {
 	p4d_t *p4d;
 	unsigned long next;
+	struct mm_struct *mm = vma->vm_mm;
 	int err;
 
 	pfn -= addr >> PAGE_SHIFT;
@@ -2476,7 +2563,7 @@ static inline int remap_p4d_range(struct mm_struct *mm, pgd_t *pgd,
 		return -ENOMEM;
 	do {
 		next = p4d_addr_end(addr, end);
-		err = remap_pud_range(mm, p4d, addr, next,
+		err = remap_pud_range(vma, p4d, addr, next,
 				pfn + (addr >> PAGE_SHIFT), prot);
 		if (err)
 			return err;
@@ -2528,7 +2615,7 @@ static int remap_pfn_range_internal(struct vm_area_struct *vma, unsigned long ad
 	flush_cache_range(vma, addr, end);
 	do {
 		next = pgd_addr_end(addr, end);
-		err = remap_p4d_range(mm, pgd, addr, next,
+		err = remap_p4d_range(vma, pgd, addr, next,
 				pfn + (addr >> PAGE_SHIFT), prot);
 		if (err)
 			return err;

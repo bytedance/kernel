@@ -1400,7 +1400,8 @@ static void vfio_pci_mmap_close(struct vm_area_struct *vma)
 	mutex_unlock(&vdev->vma_lock);
 }
 
-static vm_fault_t vfio_pci_mmap_fault(struct vm_fault *vmf)
+static vm_fault_t vfio_pci_mmap_huge_fault(struct vm_fault *vmf,
+					   enum page_entry_size pe_size)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	struct vfio_pci_core_device *vdev = vma->vm_private_data;
@@ -1426,6 +1427,8 @@ static vm_fault_t vfio_pci_mmap_fault(struct vm_fault *vmf)
 			goto up_out;
 	}
 
+	vma->vfio_pci_huge_fault = pe_size ? true : false;
+
 	if (io_remap_pfn_range(vma, vma->vm_start, vma->vm_pgoff,
 			       vma->vm_end - vma->vm_start,
 			       vma->vm_page_prot)) {
@@ -1445,10 +1448,18 @@ up_out:
 	return ret;
 }
 
+static vm_fault_t vfio_pci_mmap_fault(struct vm_fault *vmf)
+{
+	return vfio_pci_mmap_huge_fault(vmf, 0);
+}
+
 static const struct vm_operations_struct vfio_pci_mmap_ops = {
 	.open = vfio_pci_mmap_open,
 	.close = vfio_pci_mmap_close,
 	.fault = vfio_pci_mmap_fault,
+#ifdef CONFIG_ARCH_SUPPORTS_HUGE_PFNMAP
+	.huge_fault = vfio_pci_mmap_huge_fault,
+#endif
 };
 
 int vfio_pci_core_mmap(struct vfio_device *core_vdev, struct vm_area_struct *vma)
