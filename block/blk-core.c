@@ -1543,7 +1543,7 @@ void blk_start_plug_nr_ios(struct blk_plug *plug, unsigned short nr_ios)
 
 	INIT_LIST_HEAD(&plug->mq_list);
 	plug->cached_rq = NULL;
-	plug->nr_ios = min_t(unsigned short, nr_ios, BLK_MAX_REQUEST_COUNT);
+	plug->nr_ios = 1;
 	plug->rq_count = 0;
 	plug->multiple_queues = false;
 	plug->nowait = false;
