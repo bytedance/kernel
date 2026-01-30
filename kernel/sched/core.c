@@ -10012,7 +10012,8 @@ void sched_move_task(struct task_struct *tsk)
 		 * resched to make sure that task can still run.
 		 */
 		resched_curr(rq);
-	}
+	} else if (queued)
+		check_preempt_curr(rq, tsk, 0);
 
 	task_rq_unlock(rq, tsk, &rf);
 }
