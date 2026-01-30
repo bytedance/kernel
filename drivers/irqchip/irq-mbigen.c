@@ -127,15 +127,12 @@ struct mbigen_device {
 bool vtimer_irqbypass;
 static LIST_HEAD(vtimer_mgn_list);
 
-#if IS_MODULE(CONFIG_KVM)
-module_param(vtimer_irqbypass, bool, 0444);
-#else
 static int __init early_vtimer_irqbypass(char *buf)
 {
 	return strtobool(buf, &vtimer_irqbypass);
 }
 early_param("kvm-arm.vtimer_irqbypass", early_vtimer_irqbypass);
-#endif
+
 /**
  * Due to the existence of hyper-threading technology, We need to get the
  * absolute offset of a cpu relative to the base cpu.
