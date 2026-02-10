@@ -782,7 +782,7 @@ void kvm_set_cpu_caps(void)
 		F(NO_NESTED_DATA_BP) | F(LFENCE_RDTSC) | 0 /* SmmPgCfgLock */ |
 		F(VERW_CLEAR) |
 		F(NULL_SEL_CLR_BASE) | 0 /* PrefetchCtlMsr */ |
-		F(WRMSR_XX_BASE_NS) | F(PREFETCHI)
+		F(WRMSR_XX_BASE_NS) | F(PREFETCHI) | F(AVX512_BMM)
 	);
 
 	if (cpu_feature_enabled(X86_FEATURE_SRSO_NO))
