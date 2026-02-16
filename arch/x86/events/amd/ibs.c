@@ -411,7 +411,10 @@ static int perf_ibs_init(struct perf_event *event)
 		ldlat >>= 7;
 
 		config |= (ldlat - 1) << IBS_OP_LDLAT_THRSH_SHIFT;
-		config |= IBS_OP_L3MISSONLY | IBS_OP_LDLAT_EN;
+
+		config |= IBS_OP_LDLAT_EN;
+		if (cpu_feature_enabled(X86_FEATURE_ZEN5))
+			config |= IBS_OP_L3MISSONLY;
 	}
 
 	if (perf_ibs_fetch_lat_event(perf_ibs, event)) {
