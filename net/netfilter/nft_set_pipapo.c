@@ -1628,6 +1628,8 @@ static void pipapo_gc_scan(struct nft_set *set, struct nft_pipapo_match *m)
 	struct nft_pipapo_elem *e;
 	struct nft_trans_gc *gc = NULL;
 
+	list_add(&gc->list, &priv->gc_head);
+
 	while ((rules_f0 = pipapo_rules_same_key(m->f, first_rule))) {
 		union nft_pipapo_map_bucket rulemap[NFT_PIPAPO_MAX_FIELDS];
 		const struct nft_pipapo_field *f;
@@ -2326,6 +2328,8 @@ static void nft_pipapo_destroy(const struct nft_ctx *ctx,
 	struct nft_pipapo *priv = nft_set_priv(set);
 	struct nft_pipapo_match *m;
 	int cpu;
+
+	WARN_ON_ONCE(!list_empty(&priv->gc_head));
 
 	m = rcu_dereference_protected(priv->match, true);
 	if (m) {
