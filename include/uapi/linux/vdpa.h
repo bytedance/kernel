@@ -34,6 +34,7 @@ enum vdpa_attr {
 	VDPA_ATTR_DEV_MAX_VQ_SIZE,		/* u16 */
 
 	VDPA_ATTR_DEV_DEL_TIMEOUT,		/* u16 */
+	VDPA_ATTR_DEV_NET_CFG_MAX_VQP,		/* u16 */
 
 	/* new attributes must be added above here */
 	VDPA_ATTR_MAX,
