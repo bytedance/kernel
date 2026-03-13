@@ -1030,9 +1030,14 @@ found:
 			preq->cqe.user_data = poll_update->new_user_data;
 
 		ret2 = io_poll_add(preq, issue_flags & ~IO_URING_F_UNLOCKED);
-		/* successfully updated, don't complete poll request */
-		if (!ret2 || ret2 == -EIOCBQUEUED)
+		/* successfully updated and the poll request remains pending */
+		if (ret2 == IOU_ISSUE_SKIP_COMPLETE)
 			goto out;
+		if (ret2 == IOU_OK) {
+			preq->io_task_work.func = io_req_task_complete;
+			io_req_task_work_add(preq);
+			goto out;
+		}
 	}
 
 	req_set_fail(preq);
