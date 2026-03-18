@@ -91,8 +91,9 @@ static u8 virtio_vdpa_get_status(struct virtio_device *vdev)
 static void virtio_vdpa_set_status(struct virtio_device *vdev, u8 status)
 {
 	struct vdpa_device *vdpa = vd_get_vdpa(vdev);
+	const struct vdpa_config_ops *ops = vdpa->config;
 
-	vdpa_set_status(vdpa, status);
+	return ops->set_status(vdpa, status);
 }
 
 static void virtio_vdpa_reset(struct virtio_device *vdev)
