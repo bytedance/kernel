@@ -198,6 +198,7 @@ int vm_swappiness = 60;
  */
 static bool proactive_swappiness_enabled __read_mostly;
 
+#ifdef CONFIG_SWAP
 inline long get_total_swap_pages(void)
 {
 	return proactive_swappiness_enabled ? 0 : total_swap_pages;
@@ -221,6 +222,7 @@ static __init int kernel_proactive_swappiness_sysctls_init(void)
 }
 module_init(kernel_proactive_swappiness_sysctls_init);
 
+#endif
 
 LIST_HEAD(shrinker_list);
 DECLARE_RWSEM(shrinker_rwsem);
