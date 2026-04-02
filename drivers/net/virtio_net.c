@@ -199,6 +199,9 @@ struct receive_queue {
 
 	/* Do dma by self */
 	bool do_dma;
+
+	/* Is this queue needed to refill due to OOM or? */
+	bool refill_needed;
 };
 
 /* This structure can contain rss message with maximum settings for indirection table and keysize
@@ -2125,8 +2128,17 @@ static void refill_work(struct work_struct *work)
 	for (i = 0; i < vi->curr_queue_pairs; i++) {
 		struct receive_queue *rq = &vi->rq[i];
 
+		if (!READ_ONCE(rq->refill_needed))
+			continue;
+
 		napi_disable(&rq->napi);
 		still_empty = !try_fill_recv(vi, rq, GFP_KERNEL);
+		/*
+		 * Avoid racing the rq->refill_needed if virtnet_receive still
+		 * under memory pressure, which will set to true.
+		 */
+		if (!still_empty)
+			WRITE_ONCE(rq->refill_needed, false);
 		virtnet_napi_enable(rq->vq, &rq->napi);
 
 		/* In theory, this can happen: if we don't get any buffers in
@@ -2166,8 +2178,10 @@ static int virtnet_receive(struct receive_queue *rq, int budget,
 	if (rq->vq->num_free > min((unsigned int)budget, virtqueue_get_vring_size(rq->vq)) / 2) {
 		if (!try_fill_recv(vi, rq, GFP_ATOMIC)) {
 			spin_lock(&vi->refill_lock);
-			if (vi->refill_enabled)
+			if (vi->refill_enabled) {
+				WRITE_ONCE(rq->refill_needed, true);
 				schedule_delayed_work(&vi->refill, 0);
+			}
 			spin_unlock(&vi->refill_lock);
 		}
 	}
@@ -2290,8 +2304,10 @@ static int virtnet_open(struct net_device *dev)
 	for (i = 0; i < vi->max_queue_pairs; i++) {
 		if (i < vi->curr_queue_pairs)
 			/* Make sure we have some buffers: if oom use wq. */
-			if (!try_fill_recv(vi, &vi->rq[i], GFP_KERNEL))
+			if (!try_fill_recv(vi, &vi->rq[i], GFP_KERNEL)) {
+				WRITE_ONCE(vi->rq[i].refill_needed, true);
 				schedule_delayed_work(&vi->refill, 0);
+			}
 
 		err = virtnet_enable_queue_pair(vi, i);
 		if (err < 0)
@@ -2474,8 +2490,10 @@ static int virtnet_rx_resize(struct virtnet_info *vi,
 	if (err)
 		netdev_err(vi->dev, "resize rx fail: rx queue index: %d err: %d\n", qindex, err);
 
-	if (!try_fill_recv(vi, rq, GFP_KERNEL))
+	if (!try_fill_recv(vi, rq, GFP_KERNEL)) {
+		WRITE_ONCE(rq->refill_needed, true);
 		schedule_delayed_work(&vi->refill, 0);
+	}
 
 	if (running)
 		virtnet_napi_enable(rq->vq, &rq->napi);
@@ -2688,8 +2706,13 @@ static int _virtnet_set_queues(struct virtnet_info *vi, u16 queue_pairs)
 	} else {
 		vi->curr_queue_pairs = queue_pairs;
 		/* virtnet_open() will refill when device is going to up. */
-		if (dev->flags & IFF_UP)
+		if (dev->flags & IFF_UP) {
+			int i;
+
+			for (i = 0; i < queue_pairs; ++i)
+				WRITE_ONCE(vi->rq[i].refill_needed, true);
 			schedule_delayed_work(&vi->refill, 0);
+		}
 	}
 
 	return 0;
