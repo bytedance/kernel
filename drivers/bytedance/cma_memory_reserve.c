@@ -16,6 +16,8 @@
 #include <linux/mm.h>
 #include <linux/nodemask.h>
 #include <linux/gfp.h>
+#include <linux/mutex.h>
+#include <linux/cma_memory_reserve.h>
 
 #define CMR_NAME "cmr_char"
 #define CMR_CLASS_NAME "cmr_class"
@@ -31,20 +33,24 @@ static unsigned long alloc_size_mb; /* Default 0MB */
 module_param(alloc_size_mb, ulong, 0444);
 MODULE_PARM_DESC(alloc_size_mb, "Size of memory to reserve per node in MB");
 
-/* Default 0: non-coherent */
+/*
+ * Default 0: non-coherent. When disabled, userspace must ensure that
+ * the current platform has no cache coherency issue for this use case,
+ * or handle cache coherency by other external means.
+ */
 static int need_coherent;
 module_param(need_coherent, int, 0444);
 MODULE_PARM_DESC(need_coherent,
-		 "Whether memory needs to be reserved as coherent");
+		 "Use coherent DMA memory; false means userspace handles coherency");
 
 struct cmr_node_ctx {
 	int node_id;
 	dev_t dev_num;
-	struct cdev cdev;
-	struct device *dev;	/* The sysfs device (/sys/devices/virtual/...) */
+	struct device *dev;	/* Private DMA device, never published to sysfs */
+	struct device *class_dev;	/* Published /dev and sysfs device */
 
 	/* Memory resources */
-	dma_addr_t dma_handle;	/* DMA address (Physical-like address) */
+	dma_addr_t dma_handle;	/* DMA address in ctx->dev DMA address space */
 	size_t size;		/* Actual size in bytes */
 	void *kvaddr;		/* Kernel virtual address (Uncached) */
 
@@ -53,9 +59,13 @@ struct cmr_node_ctx {
 
 static struct class *cmr_class;
 static LIST_HEAD(ctx_list);  /* Linked list to manage our devices */
+static DEFINE_MUTEX(ctx_lock);
 
 static dev_t cmr_devt_base;
 static unsigned int cmr_devt_count;
+static struct cdev cmr_cdev;
+static bool cmr_cdev_added;
+static bool cmr_ready;
 
 static char *cmr_devnode(const struct device *dev, umode_t *mode)
 {
@@ -72,7 +82,40 @@ static char *cmr_devnode(const struct device *dev, umode_t *mode)
  */
 static struct cmr_node_ctx *get_ctx_from_inode(struct inode *inode)
 {
-	return container_of(inode->i_cdev, struct cmr_node_ctx, cdev);
+	struct cmr_node_ctx *ctx;
+	unsigned int minor = iminor(inode);
+	unsigned int base_minor = MINOR(cmr_devt_base);
+	int node;
+
+	if (minor < base_minor)
+		return NULL;
+
+	node = minor - base_minor;
+	list_for_each_entry(ctx, &ctx_list, list) {
+		if (ctx->node_id == node)
+			return ctx;
+	}
+
+	return NULL;
+}
+
+static void cmr_destroy_class_device(struct cmr_node_ctx *ctx)
+{
+	if (!ctx->class_dev)
+		return;
+
+	dev_set_drvdata(ctx->class_dev, NULL);
+	device_unregister(ctx->class_dev);
+	ctx->class_dev = NULL;
+}
+
+static void cmr_put_dma_device(struct cmr_node_ctx *ctx)
+{
+	if (!ctx->dev)
+		return;
+
+	root_device_unregister(ctx->dev);
+	ctx->dev = NULL;
 }
 
 /*
@@ -172,8 +215,8 @@ static int cmr_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	/*
 	 * dma_mmap_coherent is the correct partner for dma_alloc_coherent.
-	 * It maps the 'dma_handle' (physical) to the user vma, ensuring the
-	 * cache attributes (Uncached) match what the kernel set up during allocation.
+	 * It maps the underlying DMA allocation into userspace while preserving
+	 * the cache attributes that were set up during allocation.
 	 */
 	if (need_coherent)
 		ret = dma_mmap_coherent(ctx->dev, vma, ctx->kvaddr, ctx->dma_handle,
@@ -191,13 +234,25 @@ static int cmr_mmap(struct file *filp, struct vm_area_struct *vma)
 
 static int cmr_open(struct inode *inode, struct file *filp)
 {
-	struct cmr_node_ctx *ctx = get_ctx_from_inode(inode);
+	struct cmr_node_ctx *ctx;
+	int ret = -ENODEV;
 
-	if (!ctx)
+	/*
+	 * Paired with the release-store after all contexts have been initialized
+	 * and before cdev/device nodes are published.
+	 */
+	if (!smp_load_acquire(&cmr_ready))
 		return -ENODEV;
 
-	filp->private_data = ctx;
-	return 0;
+	mutex_lock(&ctx_lock);
+	ctx = get_ctx_from_inode(inode);
+	if (ctx) {
+		filp->private_data = ctx;
+		ret = 0;
+	}
+	mutex_unlock(&ctx_lock);
+
+	return ret;
 }
 
 static int cmr_release(struct inode *inode, struct file *filp)
@@ -205,10 +260,42 @@ static int cmr_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
+static long cmr_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	struct cmr_node_ctx *ctx = filp->private_data;
+	struct cmr_user_mem_info info;
+
+	if (!ctx || !ctx->kvaddr)
+		return -ENODEV;
+
+	switch (cmd) {
+	case CMR_IOC_GET_MEM_INFO:
+		/*
+		 * Expose the DMA address only in the DMA domain of this cmr device.
+		 * It must not be treated as a generic CPU physical address. Another
+		 * device may be able to use it only when the relevant IOMMU
+		 * translation is configured in passthrough/PT mode; otherwise it is
+		 * meaningless and unusable for other devices. For non-coherent
+		 * allocations, this ioctl does not provide cache maintenance;
+		 * userspace must ensure cache coherency is not an issue on the
+		 * current platform, or handle it by other external means.
+		 */
+		info.dma_addr = ctx->dma_handle;
+		info.size = ctx->size;
+		if (copy_to_user((void __user *)arg, &info, sizeof(info)))
+			return -EFAULT;
+		return 0;
+	default:
+		return -ENOTTY;
+	}
+}
+
 static const struct file_operations cmr_fops = {
 	.owner		= THIS_MODULE,
 	.open		= cmr_open,
 	.release	= cmr_release,
+	.unlocked_ioctl	= cmr_ioctl,
+	.compat_ioctl	= compat_ptr_ioctl,
 	.read		= cmr_read,
 	.write		= cmr_write,
 	.mmap		= cmr_mmap,
@@ -216,10 +303,16 @@ static const struct file_operations cmr_fops = {
 };
 
 /*
- * Cleanup a single context (free memory, destroy device)
+ * Cleanup a single context (free memory, drop/unregister device)
  */
 static void cleanup_node_context(struct cmr_node_ctx *ctx)
 {
+	mutex_lock(&ctx_lock);
+	list_del(&ctx->list);
+	mutex_unlock(&ctx_lock);
+
+	cmr_destroy_class_device(ctx);
+
 	if (ctx->kvaddr) {
 		if (need_coherent)
 			dma_free_coherent(ctx->dev, ctx->size, ctx->kvaddr,
@@ -232,12 +325,8 @@ static void cleanup_node_context(struct cmr_node_ctx *ctx)
 			CMR_NAME, ctx->node_id, ctx->size);
 	}
 
-	if (ctx->dev)
-		device_destroy(cmr_class, ctx->dev_num);
+	cmr_put_dma_device(ctx);
 
-	cdev_del(&ctx->cdev);
-
-	list_del(&ctx->list);
 	kfree(ctx);
 }
 
@@ -286,8 +375,9 @@ static int __init cmr_init(void)
 		return ret;
 	}
 
-	/* Iterate over memory-backed NUMA nodes */
+	/* Prepare all per-node contexts and DMA buffers without publishing /dev nodes. */
 	for_each_node_state(node, N_MEMORY) {
+		char dma_dev_name[32];
 		dev_t devno;
 
 		ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
@@ -300,91 +390,62 @@ static int __init cmr_init(void)
 		ctx->size = alloc_size_bytes;
 		INIT_LIST_HEAD(&ctx->list);
 
-		/* 1. Use node id as minor number under a single allocated major */
+		/* Use node id as minor number under a single allocated major. */
 		devno = MKDEV(MAJOR(cmr_devt_base), MINOR(cmr_devt_base) + node);
 		ctx->dev_num = devno;
 
-		/* 2. Create device node /dev/cmr_char{nodeid} */
-		ctx->dev = device_create(cmr_class, NULL, ctx->dev_num, NULL, "%s%d",
-					 CMR_NAME, node);
+		snprintf(dma_dev_name, sizeof(dma_dev_name), "%s_dma%d",
+			 CMR_NAME, node);
+		ctx->dev = root_device_register(dma_dev_name);
 		if (IS_ERR(ctx->dev)) {
 			ret = PTR_ERR(ctx->dev);
-			pr_err("%s: device_create failed for node %d\n", CMR_NAME, node);
+			ctx->dev = NULL;
+			pr_err("%s: root_device_register failed for node %d: %d\n",
+			       CMR_NAME, node, ret);
 			kfree(ctx);
 			goto err_cleanup;
 		}
 
 		/*
-		 * device_create() creates a purely virtual device. Some architectures
-		 * leave ->dma_mask NULL for such devices, and dma_set_mask* will return
-		 * -EIO (-5). Initialize dma_mask/coherent_dma_mask explicitly.
+		 * root_device_register() provides a core-owned release callback, so
+		 * delayed kobject release cannot call back into unloaded module text.
 		 */
 		ctx->dev->dma_mask = &ctx->dev->coherent_dma_mask;
 		ctx->dev->coherent_dma_mask = DMA_BIT_MASK(64);
+		set_dev_node(ctx->dev, node);
 
-		/*
-		 * 4. Initialize DMA masks.
-		 * Essential for dma_alloc_* to work properly.
-		 */
+		/* Initialize DMA masks before allocating DMA memory. */
 		ret = dma_set_mask_and_coherent(ctx->dev, DMA_BIT_MASK(64));
 		if (ret)
 			ret = dma_set_mask_and_coherent(ctx->dev, DMA_BIT_MASK(32));
 		if (ret) {
 			pr_err("%s: dma_set_mask_and_coherent failed for node %d: %d\n",
 			       CMR_NAME, node, ret);
-			device_destroy(cmr_class, ctx->dev_num);
+			cmr_put_dma_device(ctx);
 			kfree(ctx);
 			goto err_cleanup;
 		}
 
-		/* 4. Bind device to NUMA node */
-		set_dev_node(ctx->dev, node);
-
-		/* 5. Allocate Memory using dma_alloc_coherent/dma_alloc_noncoherent */
+		/* Allocate Memory using dma_alloc_coherent/dma_alloc_noncoherent. */
 		if (need_coherent)
-			ctx->kvaddr = dma_alloc_coherent(ctx->dev,
-						 ctx->size,
-						 &ctx->dma_handle,
-						 GFP_KERNEL);
+			ctx->kvaddr = dma_alloc_coherent(ctx->dev, ctx->size,
+							 &ctx->dma_handle, GFP_KERNEL);
 		else
-			ctx->kvaddr = dma_alloc_noncoherent(ctx->dev,
-					    ctx->size,
-					    &ctx->dma_handle,
-					    DMA_BIDIRECTIONAL,
-					    GFP_KERNEL);
+			ctx->kvaddr = dma_alloc_noncoherent(ctx->dev, ctx->size,
+							    &ctx->dma_handle,
+							    DMA_BIDIRECTIONAL,
+							    GFP_KERNEL);
 
 		if (!ctx->kvaddr) {
 			pr_err("%s: dma_alloc failed for node %d (size=%zu)\n",
 			       CMR_NAME, node, ctx->size);
 			ret = -ENOMEM;
-			device_destroy(cmr_class, ctx->dev_num);
+			cmr_put_dma_device(ctx);
 			kfree(ctx);
 			goto err_cleanup;
 		}
 
-		/*
-		 * 6. Register cdev only after memory allocation succeeds.
-		 * This avoids a possible use-after-free if userspace opens the device
-		 * and a later init failure triggers cleanup.
-		 */
-		cdev_init(&ctx->cdev, &cmr_fops);
-		ctx->cdev.owner = THIS_MODULE;
-		ret = cdev_add(&ctx->cdev, ctx->dev_num, 1);
-		if (ret) {
-			pr_err("%s: cdev_add failed for node %d\n", CMR_NAME, node);
-			if (need_coherent)
-				dma_free_coherent(ctx->dev, ctx->size, ctx->kvaddr,
-						  ctx->dma_handle);
-			else
-				dma_free_noncoherent(ctx->dev, ctx->size, ctx->kvaddr,
-						     ctx->dma_handle,
-						     DMA_BIDIRECTIONAL);
-			device_destroy(cmr_class, ctx->dev_num);
-			kfree(ctx);
-			goto err_cleanup;
-		}
-
-		/* Add to global list (fully initialized contexts only) */
+		/* Add to global list (fully initialized contexts only). */
 		list_add_tail(&ctx->list, &ctx_list);
 
 		pr_info("%s: node %d setup done. Virt: %p, DMA Addr: %llx\n",
@@ -392,9 +453,43 @@ static int __init cmr_init(void)
 			(unsigned long long)ctx->dma_handle);
 	}
 
+	/* Make initialized contexts visible before publishing cdev/devices. */
+	smp_store_release(&cmr_ready, true);
+
+	cdev_init(&cmr_cdev, &cmr_fops);
+	cmr_cdev.owner = THIS_MODULE;
+	ret = cdev_add(&cmr_cdev, cmr_devt_base, cmr_devt_count);
+	if (ret) {
+		pr_err("%s: cdev_add failed: %d\n", CMR_NAME, ret);
+		goto err_cleanup;
+	}
+	cmr_cdev_added = true;
+
+	/* Publish /dev nodes only after chrdev range is registered. */
+	list_for_each_entry(ctx, &ctx_list, list) {
+		ctx->class_dev = device_create(cmr_class, ctx->dev,
+					       ctx->dev_num, ctx, "%s%d",
+					       CMR_NAME, ctx->node_id);
+		if (IS_ERR(ctx->class_dev)) {
+			ret = PTR_ERR(ctx->class_dev);
+			ctx->class_dev = NULL;
+			pr_err("%s: device_create failed for node %d: %d\n",
+			       CMR_NAME, ctx->node_id, ret);
+			continue;
+		}
+	}
+
 	return 0;
 
 err_cleanup:
+	/* Keep cmr_ready updates ordered consistently with the publish path. */
+	smp_store_release(&cmr_ready, false);
+
+	if (cmr_cdev_added) {
+		cdev_del(&cmr_cdev);
+		cmr_cdev_added = false;
+	}
+
 	/* Iterate list and clean up everything */
 	list_for_each_entry_safe(ctx, tmp, &ctx_list, list)
 		cleanup_node_context(ctx);
@@ -402,7 +497,10 @@ err_cleanup:
 	if (cmr_devt_count)
 		unregister_chrdev_region(cmr_devt_base, cmr_devt_count);
 	cmr_devt_count = 0;
-	class_destroy(cmr_class);
+	if (cmr_class) {
+		class_destroy(cmr_class);
+		cmr_class = NULL;
+	}
 	return ret;
 }
 
@@ -412,15 +510,25 @@ static void __exit cmr_exit(void)
 
 	pr_info("%s: unloading module\n", CMR_NAME);
 
+	/* Keep cmr_ready updates ordered consistently with the publish path. */
+	smp_store_release(&cmr_ready, false);
+
+	if (cmr_cdev_added) {
+		cdev_del(&cmr_cdev);
+		cmr_cdev_added = false;
+	}
+
 	list_for_each_entry_safe(ctx, tmp, &ctx_list, list)
 		cleanup_node_context(ctx);
-
-	if (cmr_class)
-		class_destroy(cmr_class);
 
 	if (cmr_devt_count)
 		unregister_chrdev_region(cmr_devt_base, cmr_devt_count);
 	cmr_devt_count = 0;
+
+	if (cmr_class) {
+		class_destroy(cmr_class);
+		cmr_class = NULL;
+	}
 }
 
 module_init(cmr_init);
