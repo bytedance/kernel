@@ -356,6 +356,7 @@ Code  Seq#    Include File                                           Comments
 0xB7  all    uapi/linux/remoteproc_cdev.h                            <mailto:linux-remoteproc@vger.kernel.org>
 0xB7  all    uapi/linux/nsfs.h                                       <mailto:Andrei Vagin <avagin@openvz.org>>
 0xC0  00-0F  linux/usb/iowarrior.h
+0xC1  00-1F  include/uapi/linux/cma_memory_reserve.h                  ByteDance CMA memory reserve driver
 0xCA  00-0F  uapi/misc/cxl.h
 0xCA  10-2F  uapi/misc/ocxl.h
 0xCA  80-BF  uapi/scsi/cxlflash_ioctl.h
