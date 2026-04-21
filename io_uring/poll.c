@@ -990,7 +990,7 @@ int io_poll_remove(struct io_kiocb *req, unsigned int issue_flags)
 	struct io_ring_ctx *ctx = req->ctx;
 	struct io_hash_bucket *bucket;
 	struct io_kiocb *preq;
-	int ret2, ret = 0;
+	int ret2 = -ECANCELED, ret = 0;
 
 	io_ring_submit_lock(ctx, issue_flags);
 	preq = io_poll_find(ctx, true, &cd, &ctx->cancel_table, &bucket);
@@ -1043,7 +1043,9 @@ found:
 	}
 
 	req_set_fail(preq);
-	io_req_set_res(preq, -ECANCELED, 0);
+	if (ret2 >= 0)
+		ret2 = -ECANCELED;
+	io_req_set_res(preq, ret2, 0);
 	preq->io_task_work.func = io_req_task_complete;
 	io_req_task_work_add(preq);
 out:
