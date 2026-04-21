@@ -439,15 +439,17 @@ static int io_poll_wake(struct wait_queue_entry *wait, unsigned mode, int sync,
 	if (mask && !(mask & (poll->events & ~IO_ASYNC_POLL_COMMON)))
 		return 0;
 
-	if (io_poll_get_ownership(req)) {
-		/*
-		 * If we trigger a multishot poll off our own wakeup path,
-		 * disable multishot as there is a circular dependency between
-		 * CQ posting and triggering the event.
-		 */
-		if (mask & EPOLL_URING_WAKE)
-			poll->events |= EPOLLONESHOT;
+	/*
+	 * If we trigger a multishot poll off our own wakeup path,
+	 * disable multishot as there is a circular dependency between
+	 * CQ posting and triggering the event.
+	 */
+	if (mask & EPOLL_URING_WAKE) {
+		poll->events |= EPOLLONESHOT;
+		req->apoll_events |= EPOLLONESHOT;
+	}
 
+	if (io_poll_get_ownership(req)) {
 		/* optional, saves extra locking for removal in tw handler */
 		if (mask && poll->events & EPOLLONESHOT) {
 			list_del_init(&poll->wait.entry);
