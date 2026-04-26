@@ -532,11 +532,7 @@ void cgroup_base_stat_cputime_show(struct seq_file *seq)
 	struct cgroup_base_stat bstat;
 
 	if (cgroup_parent(cgrp)) {
-		/*
-		 * We always flush the entire tree, so concurrent flushers can just
-		 * skip. This avoids a thundering herd problem on the rstat global lock.
-		 */
-		cgroup_rstat_flush_ratelimited(cgrp);
+		cgroup_rstat_flush(cgrp);
 
 		spin_lock_irq(&cgroup_rstat_lock);
 		bstat = cgrp->bstat;
