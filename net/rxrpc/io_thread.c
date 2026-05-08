@@ -174,6 +174,7 @@ static bool rxrpc_input_packet(struct rxrpc_local *local, struct sk_buff **_skb)
 	struct rxrpc_skb_priv *sp;
 	struct rxrpc_peer *peer = NULL;
 	struct sk_buff *skb = *_skb;
+	struct sk_buff *nskb = NULL;
 	bool ret = false;
 
 	skb_pull(skb, sizeof(struct udphdr));
@@ -224,7 +225,15 @@ static bool rxrpc_input_packet(struct rxrpc_local *local, struct sk_buff **_skb)
 		 * decryption.
 		 */
 		if (sp->hdr.securityIndex != 0) {
-			skb = skb_unshare(skb, GFP_ATOMIC);
+			if (skb_cloned(skb) || skb_has_frag_list(skb) ||
+			    skb_has_shared_frag(skb)) {
+				nskb = skb_copy(skb, GFP_ATOMIC);
+				if (likely(nskb))
+					consume_skb(skb);
+				else
+					kfree_skb(skb);
+				skb = nskb;
+			}
 			if (!skb) {
 				rxrpc_eaten_skb(*_skb, rxrpc_skb_eaten_by_unshare_nomem);
 				*_skb = NULL;
