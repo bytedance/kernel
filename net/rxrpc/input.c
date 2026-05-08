@@ -1314,7 +1314,15 @@ int rxrpc_input_packet(struct sock *udp_sk, struct sk_buff *skb)
 		 * decryption.
 		 */
 		if (sp->hdr.securityIndex != 0) {
-			struct sk_buff *nskb = skb_unshare(skb, GFP_ATOMIC);
+			struct sk_buff *nskb = skb;
+			if (skb_cloned(skb) || skb_has_frag_list(skb) ||
+			    skb_has_shared_frag(skb)) {
+				nskb = skb_copy(skb, GFP_ATOMIC);
+				if (likely(nskb))
+					consume_skb(skb);
+				else
+					kfree_skb(skb);
+			}
 			if (!nskb) {
 				rxrpc_eaten_skb(skb, rxrpc_skb_unshared_nomem);
 				goto out;
