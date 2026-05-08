@@ -1320,7 +1320,7 @@ ssize_t store_energy_performance_preference(struct cpufreq_policy *policy,
 		if (ret)
 			epp = epp_values[ret];
 		else
-			epp = amd_pstate_get_balanced_epp(policy);
+			epp = cpudata->epp_default_dc;
 	}
 
 	if (epp > 0 && policy->policy == CPUFREQ_POLICY_PERFORMANCE) {
@@ -1844,7 +1844,7 @@ static int amd_pstate_epp_cpu_init(struct cpufreq_policy *policy)
 	if (dynamic_epp)
 		ret = amd_pstate_set_dynamic_epp(policy);
 	else
-		ret = amd_pstate_set_epp(policy, amd_pstate_get_balanced_epp(policy));
+		ret = amd_pstate_set_epp(policy, cpudata->epp_default_dc);
 	if (ret)
 		goto free_cpudata1;
 
