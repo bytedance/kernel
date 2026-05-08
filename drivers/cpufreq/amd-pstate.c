@@ -1600,6 +1600,8 @@ static int amd_pstate_change_driver_mode(int mode)
 {
 	int ret;
 
+	lockdep_assert_held(&amd_pstate_driver_lock);
+
 	ret = amd_pstate_unregister_driver(0);
 	if (ret)
 		return ret;
@@ -1714,6 +1716,13 @@ static ssize_t dynamic_epp_store(struct device *a, struct device_attribute *b,
 	ret = kstrtobool(buf, &enabled);
 	if (ret)
 		return ret;
+
+	guard(mutex)(&amd_pstate_driver_lock);
+
+	if (cppc_state != AMD_PSTATE_ACTIVE) {
+		pr_debug("dynamic_epp can only be toggled in active mode\n");
+		return -EINVAL;
+	}
 
 	if (dynamic_epp == enabled)
 		return -EINVAL;
