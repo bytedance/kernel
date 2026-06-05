@@ -7,6 +7,10 @@
 #include <cxlmem.h>
 #include "trace.h"
 
+/* Check that UCE header definition is maintained to keep ABI intact  */
+static_assert(CXL_HEADERLOG_TRACE_SIZE_U32 == 128,
+	      "rasdaemon ABI requires exactly 128 u32s");
+
 static void cxl_cper_trace_corr_port_prot_err(struct pci_dev *pdev,
 					      struct cxl_ras_capability_regs ras_cap)
 {
@@ -18,6 +22,7 @@ static void cxl_cper_trace_corr_port_prot_err(struct pci_dev *pdev,
 static void cxl_cper_trace_uncorr_port_prot_err(struct pci_dev *pdev,
 						struct cxl_ras_capability_regs ras_cap)
 {
+	u32 hl[CXL_HEADERLOG_TRACE_SIZE_U32] = {};
 	u32 status = ras_cap.uncor_status & ~ras_cap.uncor_mask;
 	u32 fe;
 
@@ -27,8 +32,8 @@ static void cxl_cper_trace_uncorr_port_prot_err(struct pci_dev *pdev,
 	else
 		fe = status;
 
-	trace_cxl_port_aer_uncorrectable_error(&pdev->dev, status, fe,
-					       ras_cap.header_log);
+	memcpy(hl, ras_cap.header_log, CXL_HEADERLOG_SIZE);
+	trace_cxl_port_aer_uncorrectable_error(&pdev->dev, status, fe, hl);
 }
 
 static void cxl_cper_trace_corr_prot_err(struct cxl_memdev *cxlmd,
@@ -43,6 +48,7 @@ static void
 cxl_cper_trace_uncorr_prot_err(struct cxl_memdev *cxlmd,
 			       struct cxl_ras_capability_regs ras_cap)
 {
+	u32 hl[CXL_HEADERLOG_TRACE_SIZE_U32] = {};
 	u32 status = ras_cap.uncor_status & ~ras_cap.uncor_mask;
 	u32 fe;
 
@@ -52,8 +58,15 @@ cxl_cper_trace_uncorr_prot_err(struct cxl_memdev *cxlmd,
 	else
 		fe = status;
 
-	trace_cxl_aer_uncorrectable_error(cxlmd, status, fe,
-					  ras_cap.header_log);
+	/*
+	 * ras_cap.header_log[] holds CXL_HEADERLOG_SIZE_U32 (16) hardware
+	 * dwords.  Copy them into the front of a zero-filled
+	 * CXL_HEADERLOG_TRACE_SIZE_U32 (128) u32 staging buffer so the trace
+	 * event memcpy sees a full 512-byte source and the userspace ABI
+	 * (rasdaemon) is preserved.
+	 */
+	memcpy(hl, ras_cap.header_log, CXL_HEADERLOG_SIZE);
+	trace_cxl_aer_uncorrectable_error(cxlmd, status, fe, hl);
 }
 
 static int match_memdev_by_parent(struct device *dev, const void *uport)
