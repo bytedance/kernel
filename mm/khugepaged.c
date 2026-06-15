@@ -999,7 +999,6 @@ static bool __collapse_huge_page_swapin(struct mm_struct *mm,
 			 */
 			pte = pte_offset_map_ro_nolock(mm, pmd, address, &ptl);
 			if (!pte) {
-				mmap_read_unlock(mm);
 				result = false;
 				goto out;
 			}
