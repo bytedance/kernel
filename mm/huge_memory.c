@@ -110,7 +110,7 @@ bool hugepage_vma_check(struct vm_area_struct *vma,
 	 * own flags.
 	 */
 	if (!in_pf && shmem_file(vma->vm_file))
-		return shmem_huge_enabled(vma, vma->vm_flags);
+		return shmem_huge_enabled(vma, vm_flags);
 
 	/* THP settings require madvise. */
 	if (!(vm_flags & VM_HUGEPAGE) && !khugepaged_always())
