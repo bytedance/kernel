@@ -52,7 +52,7 @@ static void copy_pte_entire_async(struct vm_area_struct *dst_vma,
 	swp_entry_t entry = (swp_entry_t){0};
 	struct page *prealloc = NULL;
 	unsigned long end;
-	struct page *dst_pte_page;
+	struct page *dst_pte_page = NULL;
 
 	/*
 	 * When parent process proactively performs copying, the passed addr
@@ -79,6 +79,8 @@ static void copy_pte_entire_async(struct vm_area_struct *dst_vma,
 	if (unlikely(err)) {
 		/* take src_pte lock */
 		src_pte = pte_offset_map_lock(src_mm, src_pmd, addr, &src_ptl);
+		if (!src_pte)
+			goto unlock_pg_lock;
 		/*
 		 * Other CPUs may have successfully allocated dst_pte, so check
 		 * again whether there is dst_pte while holding src_pte lock.
@@ -107,6 +109,8 @@ have_dst_pte:
 again:
 	init_rss_vec(rss);
 	src_pte = pte_offset_map_lock(src_mm, src_pmd, addr, &src_ptl);
+	if (!src_pte)
+		goto unlock_pg_lock;
 	orig_src_pte = src_pte;
 	if (!pmd_test_async_copy_flag(*src_pmd)) {
 		pte_unmap_unlock(orig_src_pte, src_ptl);
@@ -205,7 +209,8 @@ restore_pmd:
 	set_pmd_at(src_mm, end - PMD_SIZE, src_pmd, pmd_mkwrite(*src_pmd));
 	pmd_clear_async_copy_flag(*src_pmd);
 unlock_pg_lock:
-	unlock_page(dst_pte_page);
+	if (dst_pte_page)
+		unlock_page(dst_pte_page);
 	if (unlikely(prealloc))
 		put_page(prealloc);
 	cond_resched();
@@ -487,6 +492,8 @@ static inline void clean_pmd_range(struct mm_struct *mm, pud_t *pud,
 		 * so pte_lock is used for synchronization.
 		 */
 		pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+		if (!pte)
+			continue;
 		/* check async copy flag again */
 		if (pmd_test_async_copy_flag(*pmd)) {
 			/*
