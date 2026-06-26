@@ -2503,7 +2503,15 @@ static int mpage_prepare_extent_to_map(struct mpage_da_data *mpd)
 			 */
 			if (!folio_buffers(folio)) {
 				ext4_warning_inode(mpd->inode, "page %lu does not have buffers attached", folio->index);
-				folio_clear_dirty(folio);
+				/*
+				 * folio_cancel_dirty() pairs the dropped dirty state
+				 * with dirty accounting. Cycle through writeback state
+				 * so the generic writeback helpers update the xarray
+				 * tags.
+				 */
+				folio_cancel_dirty(folio);
+				folio_start_writeback(folio);
+				folio_end_writeback(folio);
 				folio_unlock(folio);
 				continue;
 			}
