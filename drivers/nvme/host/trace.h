@@ -80,6 +80,33 @@ TRACE_EVENT(nvme_setup_cmd,
 				__entry->fctype),
 		      parse_nvme_cmd(__entry->qid, __entry->opcode,
 				__entry->fctype, __entry->cdw10))
+	);
+
+TRACE_EVENT(nvme_rw_ioprio,
+	    TP_PROTO(struct request *req, u16 ioprio, u16 hint, u32 dsmgmt),
+	    TP_ARGS(req, ioprio, hint, dsmgmt),
+	    TP_STRUCT__entry(
+		__array(char, disk, DISK_NAME_LEN)
+		__field(int, ctrl_id)
+		__field(int, qid)
+		__field(unsigned int, cmd_flags)
+		__field(u16, ioprio)
+		__field(u16, hint)
+		__field(u32, dsmgmt)
+	    ),
+	    TP_fast_assign(
+		__entry->ctrl_id = nvme_req(req)->ctrl->instance;
+		__entry->qid = nvme_req_qid(req);
+		__entry->cmd_flags = req->cmd_flags;
+		__entry->ioprio = ioprio;
+		__entry->hint = hint;
+		__entry->dsmgmt = dsmgmt;
+		__assign_disk_name(__entry->disk, req->rq_disk);
+	    ),
+	    TP_printk("nvme%d: %sqid=%d, flags=%#x, ioprio=%#x, hint=%u, dsmgmt=%#x",
+		      __entry->ctrl_id, __print_disk_name(__entry->disk),
+		      __entry->qid, __entry->cmd_flags, __entry->ioprio,
+		      __entry->hint, __entry->dsmgmt)
 );
 
 TRACE_EVENT(nvme_complete_rq,

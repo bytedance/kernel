@@ -100,6 +100,12 @@ enum {
 	IOPRIO_HINT_DEV_DURATION_LIMIT_5 = 5,
 	IOPRIO_HINT_DEV_DURATION_LIMIT_6 = 6,
 	IOPRIO_HINT_DEV_DURATION_LIMIT_7 = 7,
+
+	/* ByteDance downstream NVMe CDL hints. */
+	IOPRIO_HINT_BSK_CDL_LOW = 8,
+	IOPRIO_HINT_BSK_CDL_MEDIUM = 9,
+	IOPRIO_HINT_BSK_CDL_HIGH = 10,
+	IOPRIO_HINT_BSK_CDL_URGENT = 11,
 };
 
 #define IOPRIO_BAD_VALUE(val, max) ((val) < 0 || (val) >= (max))
@@ -123,5 +129,18 @@ static __always_inline __u16 ioprio_value(int prioclass, int priolevel,
 	ioprio_value(prioclass, priolevel, IOPRIO_HINT_NONE)
 #define IOPRIO_PRIO_VALUE_HINT(prioclass, priolevel, priohint)	\
 	ioprio_value(prioclass, priolevel, priohint)
+
+#define IOPRIO_BSK_CDL_LOW	\
+	IOPRIO_PRIO_VALUE_HINT(IOPRIO_CLASS_NONE, 0, \
+				IOPRIO_HINT_BSK_CDL_LOW)
+#define IOPRIO_BSK_CDL_MEDIUM	\
+	IOPRIO_PRIO_VALUE_HINT(IOPRIO_CLASS_NONE, 0, \
+				IOPRIO_HINT_BSK_CDL_MEDIUM)
+#define IOPRIO_BSK_CDL_HIGH	\
+	IOPRIO_PRIO_VALUE_HINT(IOPRIO_CLASS_NONE, 0, \
+				IOPRIO_HINT_BSK_CDL_HIGH)
+#define IOPRIO_BSK_CDL_URGENT	\
+	IOPRIO_PRIO_VALUE_HINT(IOPRIO_CLASS_NONE, 0, \
+				IOPRIO_HINT_BSK_CDL_URGENT)
 
 #endif /* _UAPI_LINUX_IOPRIO_H */

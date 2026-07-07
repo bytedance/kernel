@@ -11,10 +11,12 @@
 #include <linux/delay.h>
 #include <linux/errno.h>
 #include <linux/hdreg.h>
+#include <linux/ioprio.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/backing-dev.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include <linux/types.h>
 #include <linux/pr.h>
 #include <linux/ptrace.h>
@@ -901,6 +903,31 @@ static inline blk_status_t nvme_setup_write_zeroes(struct nvme_ns *ns,
 	return BLK_STS_OK;
 }
 
+static void nvme_assign_rw_io_priority(struct request *req, u32 *dsmgmt)
+{
+	u16 ioprio = req_get_ioprio(req);
+	u16 hint = IOPRIO_PRIO_HINT(ioprio);
+
+	switch (hint) {
+	case IOPRIO_HINT_BSK_CDL_URGENT:
+		*dsmgmt |= NVME_RW_DSM_CDL_URGENT;
+		break;
+	case IOPRIO_HINT_BSK_CDL_HIGH:
+		*dsmgmt |= NVME_RW_DSM_CDL_HIGH;
+		break;
+	case IOPRIO_HINT_BSK_CDL_LOW:
+		*dsmgmt |= NVME_RW_DSM_CDL_LOW;
+		break;
+	case IOPRIO_HINT_BSK_CDL_MEDIUM:
+	case IOPRIO_HINT_NONE:
+	default:
+		*dsmgmt |= NVME_RW_DSM_CDL_MEDIUM;
+		break;
+	}
+
+	trace_nvme_rw_ioprio(req, ioprio, hint, *dsmgmt);
+}
+
 static inline blk_status_t nvme_setup_rw(struct nvme_ns *ns,
 		struct request *req, struct nvme_command *cmnd,
 		enum nvme_opcode op)
@@ -921,6 +948,9 @@ static inline blk_status_t nvme_setup_rw(struct nvme_ns *ns,
 	cmnd->rw.nsid = cpu_to_le32(ns->head->ns_id);
 	cmnd->rw.slba = cpu_to_le64(nvme_sect_to_lba(ns, blk_rq_pos(req)));
 	cmnd->rw.length = cpu_to_le16((blk_rq_bytes(req) >> ns->lba_shift) - 1);
+
+	if (test_bit(NVME_CTRL_IOPRIO, &ctrl->flags))
+		nvme_assign_rw_io_priority(req, &dsmgmt);
 
 	if (req_op(req) == REQ_OP_WRITE && ctrl->nr_streams)
 		nvme_assign_write_stream(ctrl, req, &control, &dsmgmt);
@@ -3220,6 +3250,53 @@ static ssize_t nvme_sysfs_rescan(struct device *dev,
 }
 static DEVICE_ATTR(rescan_controller, S_IWUSR, NULL, nvme_sysfs_rescan);
 
+static int nvme_check_bsk_cdl_supported(struct nvme_ctrl *ctrl)
+{
+	return nvme_get_features(ctrl, NVME_FEAT_BSK_CDL, 0, NULL, 0, NULL);
+}
+
+static ssize_t ioprio_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	struct nvme_ctrl *ctrl = dev_get_drvdata(dev);
+	int ret;
+	bool val;
+
+	ret = kstrtobool(buf, &val);
+	if (ret) {
+		dev_err(dev, "invalid value '%.*s' for ioprio (use 0 or 1)\n",
+			(int)strcspn(buf, "\n"), buf);
+		return ret;
+	}
+
+	if (val) {
+		ret = nvme_check_bsk_cdl_supported(ctrl);
+		if (ret) {
+			dev_warn(dev, "BSK CDL feature is not supported, ret=%d\n",
+				 ret);
+			return ret;
+		}
+		set_bit(NVME_CTRL_IOPRIO, &ctrl->flags);
+	} else {
+		clear_bit(NVME_CTRL_IOPRIO, &ctrl->flags);
+	}
+
+	dev_info(dev, "set ioprio to %d\n", val);
+
+	return count;
+}
+
+static ssize_t ioprio_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct nvme_ctrl *ctrl = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%d\n",
+			  test_bit(NVME_CTRL_IOPRIO, &ctrl->flags));
+}
+static DEVICE_ATTR_RW(ioprio);
+
 static inline struct nvme_ns_head *dev_to_ns_head(struct device *dev)
 {
 	struct gendisk *disk = dev_to_disk(dev);
@@ -3578,6 +3655,7 @@ static struct attribute *nvme_dev_attrs[] = {
 	&dev_attr_reconnect_delay.attr,
 	&dev_attr_fast_io_fail_tmo.attr,
 	&dev_attr_kato.attr,
+	&dev_attr_ioprio.attr,
 	NULL
 };
 
