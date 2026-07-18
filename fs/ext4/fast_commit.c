@@ -642,7 +642,7 @@ void ext4_fc_track_range(handle_t *handle, struct inode *inode, ext4_lblk_t star
 
 static void ext4_fc_submit_bh(struct super_block *sb, bool is_tail)
 {
-	int write_flags = REQ_SYNC;
+	int write_flags = REQ_SYNC | REQ_BSK_URGENT;
 	struct buffer_head *bh = EXT4_SB(sb)->s_fc_bh;
 
 	/* Add REQ_FUA | REQ_PREFLUSH only its tail */
@@ -1591,7 +1591,7 @@ static int ext4_fc_replay_inode(struct super_block *sb,
 	ret = ext4_handle_dirty_metadata(NULL, NULL, iloc.bh);
 	if (ret)
 		goto out;
-	ret = sync_dirty_buffer(iloc.bh);
+	ret = __sync_dirty_buffer(iloc.bh, REQ_SYNC | REQ_BSK_URGENT);
 	if (ret)
 		goto out;
 	ret = ext4_mark_inode_used(sb, ino);
@@ -1617,7 +1617,7 @@ static int ext4_fc_replay_inode(struct super_block *sb,
 
 	ext4_inode_csum_set(inode, ext4_raw_inode(&iloc), EXT4_I(inode));
 	ret = ext4_handle_dirty_metadata(NULL, NULL, iloc.bh);
-	sync_dirty_buffer(iloc.bh);
+	__sync_dirty_buffer(iloc.bh, REQ_SYNC | REQ_BSK_URGENT);
 	brelse(iloc.bh);
 out:
 	iput(inode);

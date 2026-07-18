@@ -144,6 +144,9 @@ MODULE_ALIAS("ext3");
 static inline void __ext4_read_bh(struct buffer_head *bh, int op_flags,
 				  bh_end_io_t *end_io)
 {
+	if ((op_flags & (REQ_META | REQ_PRIO)) && !(op_flags & REQ_RAHEAD))
+		op_flags |= REQ_BSK_URGENT;
+
 	/*
 	 * buffer's verified bit is no longer valid after reading from
 	 * disk again due to write out error, clear it to make sure we
@@ -5555,7 +5558,8 @@ static int ext4_commit_super(struct super_block *sb)
 	BUFFER_TRACE(sbh, "marking dirty");
 	mark_buffer_dirty(sbh);
 	error = __sync_dirty_buffer(sbh,
-		REQ_SYNC | (test_opt(sb, BARRIER) ? REQ_FUA : 0));
+		REQ_SYNC | REQ_BSK_URGENT |
+		(test_opt(sb, BARRIER) ? REQ_FUA : 0));
 	if (buffer_write_io_error(sbh)) {
 		ext4_msg(sb, KERN_ERR, "I/O error while writing "
 		       "superblock");

@@ -5447,7 +5447,7 @@ int ext4_write_inode(struct inode *inode, struct writeback_control *wbc)
 		 * it here separately for each inode.
 		 */
 		if (wbc->sync_mode == WB_SYNC_ALL && !wbc->for_sync)
-			sync_dirty_buffer(iloc.bh);
+			__sync_dirty_buffer(iloc.bh, REQ_SYNC | REQ_BSK_URGENT);
 		if (buffer_req(iloc.bh) && !buffer_uptodate(iloc.bh)) {
 			ext4_error_inode_block(inode, iloc.bh->b_blocknr, EIO,
 					       "IO error syncing inode");

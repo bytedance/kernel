@@ -38,6 +38,7 @@
 #include <linux/hash.h>
 #include <linux/suspend.h>
 #include <linux/buffer_head.h>
+#include <linux/ioprio.h>
 #include <linux/task_io_accounting_ops.h>
 #include <linux/bio.h>
 #include <linux/cpu.h>
@@ -3068,6 +3069,11 @@ static int submit_bh_wbc(int op, int op_flags, struct buffer_head *bh,
 
 	bio->bi_end_io = end_bio_bh_io_sync;
 	bio->bi_private = bh;
+
+	if (op_flags & REQ_BSK_URGENT) {
+		bio->bi_ioprio = IOPRIO_BSK_CDL_URGENT;
+		op_flags &= ~REQ_BSK_URGENT;
+	}
 
 	if (buffer_meta(bh))
 		op_flags |= REQ_META;

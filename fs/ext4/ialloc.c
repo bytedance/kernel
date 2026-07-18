@@ -788,7 +788,7 @@ int ext4_mark_inode_used(struct super_block *sb, int ino)
 		ext4_std_error(sb, err);
 		goto out;
 	}
-	err = sync_dirty_buffer(inode_bitmap_bh);
+	err = __sync_dirty_buffer(inode_bitmap_bh, REQ_SYNC | REQ_BSK_URGENT);
 	if (err) {
 		ext4_std_error(sb, err);
 		goto out;
@@ -807,7 +807,7 @@ int ext4_mark_inode_used(struct super_block *sb, int ino)
 
 		BUFFER_TRACE(block_bitmap_bh, "dirty block bitmap");
 		err = ext4_handle_dirty_metadata(NULL, NULL, block_bitmap_bh);
-		sync_dirty_buffer(block_bitmap_bh);
+		__sync_dirty_buffer(block_bitmap_bh, REQ_SYNC | REQ_BSK_URGENT);
 
 		/* recheck and clear flag under lock if we still need to */
 		ext4_lock_group(sb, group);
@@ -862,7 +862,7 @@ int ext4_mark_inode_used(struct super_block *sb, int ino)
 
 	ext4_unlock_group(sb, group);
 	err = ext4_handle_dirty_metadata(NULL, NULL, group_desc_bh);
-	sync_dirty_buffer(group_desc_bh);
+	__sync_dirty_buffer(group_desc_bh, REQ_SYNC | REQ_BSK_URGENT);
 out:
 	brelse(inode_bitmap_bh);
 	return err;

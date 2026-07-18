@@ -170,7 +170,7 @@ static Indirect *ext4_get_branch(struct inode *inode, int depth,
 		}
 
 		if (!bh_uptodate_or_lock(bh)) {
-			if (ext4_read_bh(bh, 0, NULL) < 0) {
+			if (ext4_read_bh(bh, REQ_BSK_URGENT, NULL) < 0) {
 				put_bh(bh);
 				goto failure;
 			}
@@ -1032,7 +1032,7 @@ static void ext4_free_branches(handle_t *handle, struct inode *inode,
 			}
 
 			/* Go read the buffer for the next level down */
-			bh = ext4_sb_bread(inode->i_sb, nr, 0);
+			bh = ext4_sb_bread(inode->i_sb, nr, REQ_BSK_URGENT);
 
 			/*
 			 * A read failure? Report error and clear slot

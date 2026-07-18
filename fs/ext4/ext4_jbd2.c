@@ -378,7 +378,7 @@ int __ext4_handle_dirty_metadata(const char *where, unsigned int line,
 		else
 			mark_buffer_dirty(bh);
 		if (inode && inode_needs_sync(inode)) {
-			sync_dirty_buffer(bh);
+			__sync_dirty_buffer(bh, REQ_SYNC | REQ_BSK_URGENT);
 			if (buffer_req(bh) && !buffer_uptodate(bh)) {
 				ext4_error_inode_err(inode, where, line,
 						     bh->b_blocknr, EIO,

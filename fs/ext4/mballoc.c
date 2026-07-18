@@ -4039,9 +4039,9 @@ void ext4_mb_mark_bb(struct super_block *sb, ext4_fsblk_t block,
 		err = ext4_handle_dirty_metadata(NULL, NULL, bitmap_bh);
 		if (err)
 			break;
-		sync_dirty_buffer(bitmap_bh);
+		__sync_dirty_buffer(bitmap_bh, REQ_SYNC | REQ_BSK_URGENT);
 		err = ext4_handle_dirty_metadata(NULL, NULL, gdp_bh);
-		sync_dirty_buffer(gdp_bh);
+		__sync_dirty_buffer(gdp_bh, REQ_SYNC | REQ_BSK_URGENT);
 		if (err)
 			break;
 
@@ -5983,8 +5983,8 @@ static void ext4_free_blocks_simple(struct inode *inode, ext4_fsblk_t block,
 	ext4_block_bitmap_csum_set(sb, group, gdp, bitmap_bh);
 	ext4_group_desc_csum_set(sb, group, gdp);
 	ext4_handle_dirty_metadata(NULL, NULL, gdp_bh);
-	sync_dirty_buffer(bitmap_bh);
-	sync_dirty_buffer(gdp_bh);
+	__sync_dirty_buffer(bitmap_bh, REQ_SYNC | REQ_BSK_URGENT);
+	__sync_dirty_buffer(gdp_bh, REQ_SYNC | REQ_BSK_URGENT);
 	brelse(bitmap_bh);
 }
 

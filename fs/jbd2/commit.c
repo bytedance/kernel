@@ -154,9 +154,12 @@ static int journal_submit_commit_record(journal_t *journal,
 	if (journal->j_flags & JBD2_BARRIER &&
 	    !jbd2_has_feature_async_commit(journal))
 		ret = submit_bh(REQ_OP_WRITE,
-			JBD2_JOURNAL_REQ_FLAGS | REQ_PREFLUSH | REQ_FUA, bh);
+			JBD2_JOURNAL_REQ_FLAGS | REQ_PREFLUSH | REQ_FUA |
+			REQ_BSK_URGENT, bh);
 	else
-		ret = submit_bh(REQ_OP_WRITE, JBD2_JOURNAL_REQ_FLAGS, bh);
+		ret = submit_bh(REQ_OP_WRITE,
+				JBD2_JOURNAL_REQ_FLAGS | REQ_BSK_URGENT,
+				bh);
 
 	*cbh = bh;
 	return ret;
@@ -762,7 +765,9 @@ start_journal_io:
 				clear_buffer_dirty(bh);
 				set_buffer_uptodate(bh);
 				bh->b_end_io = journal_end_buffer_io_sync;
-				submit_bh(REQ_OP_WRITE, JBD2_JOURNAL_REQ_FLAGS, bh);
+				submit_bh(REQ_OP_WRITE,
+					  JBD2_JOURNAL_REQ_FLAGS |
+					  REQ_BSK_URGENT, bh);
 			}
 			cond_resched();
 
