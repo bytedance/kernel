@@ -26,6 +26,7 @@
 #include <linux/stddef.h>
 #include <linux/bpfptr.h>
 #include <linux/memcontrol.h>
+#include <linux/rcupdate_trace.h>
 
 struct bpf_verifier_env;
 struct bpf_verifier_log;
@@ -1567,6 +1568,9 @@ out:
 			_ret = (_cn ? NET_XMIT_DROP : _ret);		\
 		_ret;					\
 	})
+
+#define bpf_rcu_lock_held() \
+	(rcu_read_lock_held() || rcu_read_lock_trace_held() || rcu_read_lock_bh_held())
 
 #ifdef CONFIG_BPF_SYSCALL
 DECLARE_PER_CPU(int, bpf_prog_active);
