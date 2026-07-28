@@ -821,13 +821,15 @@ void nvme_mpath_add_disk(struct nvme_ns *ns, struct nvme_id_ns *id)
 #endif
 }
 
-void nvme_mpath_shutdown_disk(struct nvme_ns_head *head)
+void nvme_mpath_shutdown_disk(struct nvme_ns_head *head, bool surprise)
 {
 	if (!head->disk)
 		return;
 	kblockd_schedule_work(&head->requeue_work);
 	if (test_bit(NVME_NSHEAD_DISK_LIVE, &head->flags)) {
 		nvme_cdev_del(&head->cdev, &head->cdev_device);
+		if (surprise)
+			blk_mark_disk_surprise_dead(head->disk);
 		del_gendisk(head->disk);
 	}
 }

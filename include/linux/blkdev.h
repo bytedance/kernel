@@ -722,6 +722,7 @@ bool __must_check blk_get_queue(struct request_queue *);
 extern void blk_put_queue(struct request_queue *);
 
 void blk_mark_disk_dead(struct gendisk *disk);
+void blk_mark_disk_surprise_dead(struct gendisk *disk);
 
 #ifdef CONFIG_BLOCK
 /*

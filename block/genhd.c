@@ -568,6 +568,22 @@ void blk_mark_disk_dead(struct gendisk *disk)
 EXPORT_SYMBOL_GPL(blk_mark_disk_dead);
 
 /**
+ * blk_mark_disk_surprise_dead - mark a surprise removed disk as dead
+ * @disk: disk to mark as dead
+ *
+ * Record that the disk is already gone and stop new I/O if needed.  Teardown
+ * can then skip writeback that cannot complete while still invalidating cached
+ * data.
+ */
+void blk_mark_disk_surprise_dead(struct gendisk *disk)
+{
+	set_bit(GD_SURPRISE_REMOVED, &disk->state);
+	if (!test_and_set_bit(GD_DEAD, &disk->state))
+		blk_queue_start_drain(disk->queue);
+}
+EXPORT_SYMBOL_GPL(blk_mark_disk_surprise_dead);
+
+/**
  * del_gendisk - remove the gendisk
  * @disk: the struct gendisk to remove
  *
@@ -602,7 +618,8 @@ void del_gendisk(struct gendisk *disk)
 	blk_drop_partitions(disk);
 	mutex_unlock(&disk->open_mutex);
 
-	fsync_bdev(disk->part0);
+	if (!test_bit(GD_SURPRISE_REMOVED, &disk->state))
+		fsync_bdev(disk->part0);
 	__invalidate_device(disk->part0, true);
 
 	/*

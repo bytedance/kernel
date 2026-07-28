@@ -4040,7 +4040,7 @@ static void nvme_alloc_ns(struct nvme_ctrl *ctrl, unsigned nsid,
 	kfree(id);
 }
 
-static void nvme_ns_remove(struct nvme_ns *ns)
+static void nvme_ns_remove(struct nvme_ns *ns, bool surprise)
 {
 	bool last_path = false;
 
@@ -4068,6 +4068,8 @@ static void nvme_ns_remove(struct nvme_ns *ns)
 
 	if (!nvme_ns_head_multipath(ns->head))
 		nvme_cdev_del(&ns->cdev, &ns->cdev_device);
+	if (surprise)
+		blk_mark_disk_surprise_dead(ns->disk);
 	del_gendisk(ns->disk);
 	blk_cleanup_queue(ns->queue);
 
@@ -4076,7 +4078,7 @@ static void nvme_ns_remove(struct nvme_ns *ns)
 	up_write(&ns->ctrl->namespaces_rwsem);
 
 	if (last_path)
-		nvme_mpath_shutdown_disk(ns->head);
+		nvme_mpath_shutdown_disk(ns->head, surprise);
 	nvme_put_ns(ns);
 }
 
@@ -4085,7 +4087,7 @@ static void nvme_ns_remove_by_nsid(struct nvme_ctrl *ctrl, u32 nsid)
 	struct nvme_ns *ns = nvme_find_get_ns(ctrl, nsid);
 
 	if (ns) {
-		nvme_ns_remove(ns);
+		nvme_ns_remove(ns, false);
 		nvme_put_ns(ns);
 	}
 }
@@ -4121,7 +4123,7 @@ out:
 	 * TODO: we should probably schedule a delayed retry here.
 	 */
 	if (ret > 0 && (ret & NVME_SC_DNR))
-		nvme_ns_remove(ns);
+		nvme_ns_remove(ns, false);
 }
 
 static void nvme_validate_or_alloc_ns(struct nvme_ctrl *ctrl, unsigned nsid)
@@ -4179,7 +4181,7 @@ static void nvme_remove_invalid_namespaces(struct nvme_ctrl *ctrl,
 	up_write(&ctrl->namespaces_rwsem);
 
 	list_for_each_entry_safe(ns, next, &rm_list, list)
-		nvme_ns_remove(ns);
+		nvme_ns_remove(ns, false);
 
 }
 
@@ -4323,6 +4325,7 @@ void nvme_remove_namespaces(struct nvme_ctrl *ctrl)
 {
 	struct nvme_ns *ns, *next;
 	LIST_HEAD(ns_list);
+	bool surprise = ctrl->state == NVME_CTRL_DEAD;
 
 	/*
 	 * make sure to requeue I/O to all namespaces as these
@@ -4340,7 +4343,7 @@ void nvme_remove_namespaces(struct nvme_ctrl *ctrl)
 	 * removing the namespaces' disks; fail all the queues now to avoid
 	 * potentially having to clean up the failed sync later.
 	 */
-	if (ctrl->state == NVME_CTRL_DEAD)
+	if (surprise)
 		nvme_kill_queues(ctrl);
 
 	/* this is a no-op when called from the controller reset handler */
@@ -4351,7 +4354,7 @@ void nvme_remove_namespaces(struct nvme_ctrl *ctrl)
 	up_write(&ctrl->namespaces_rwsem);
 
 	list_for_each_entry_safe(ns, next, &ns_list, list)
-		nvme_ns_remove(ns);
+		nvme_ns_remove(ns, surprise);
 }
 EXPORT_SYMBOL_GPL(nvme_remove_namespaces);
 
