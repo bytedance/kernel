@@ -934,6 +934,7 @@ extern int intel_iommu_sm;
 int iommu_calculate_agaw(struct intel_iommu *iommu);
 int iommu_calculate_max_sagaw(struct intel_iommu *iommu);
 int ecmd_submit_sync(struct intel_iommu *iommu, u8 ecmd, u64 oa, u64 ob);
+extern int cx6_2M_limitation;
 
 static inline bool ecmd_has_pmu_essential(struct intel_iommu *iommu)
 {
@@ -955,6 +956,7 @@ static inline int iommu_calculate_max_sagaw(struct intel_iommu *iommu)
 #define dmar_disabled	(1)
 #define intel_iommu_enabled (0)
 #define intel_iommu_sm (0)
+#define cx6_2M_limitation   (0)
 #endif
 
 static inline const char *decode_prq_descriptor(char *str, size_t size,
