@@ -628,11 +628,13 @@ static int kvm_uc_decode(struct mce *mce, char *mod_name,
 	if (!mod_name)
 		return NOTIFY_DONE;
 
+	rcu_read_lock_sched();
 	mod = find_module(mod_name);
-	if (!mod)
-		return NOTIFY_DONE;
+	if (mod && (mod->state != MODULE_STATE_LIVE || !try_module_get(mod)))
+		mod = NULL;
+	rcu_read_unlock_sched();
 
-	if (!try_module_get(mod))
+	if (!mod)
 		return NOTIFY_DONE;
 
 	n = snprintf(sym_name, sizeof(sym_name),
