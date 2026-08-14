@@ -699,11 +699,11 @@ static int uc_decode_notifier(struct notifier_block *nb, unsigned long val,
 		 * is clear, this UCR error was not signaled via a
 		 * corrected machine check (CMC).
 		 */
-		mcestat_record(kvm_task, mce->addr, signal,
+		mcestat_record(kvm_task, pfn << PAGE_SHIFT, signal,
 			       !(mce->status & MCI_STATUS_S));
 #endif
 	} else {
-		mcestat_record(NULL, mce->addr, 0,
+		mcestat_record(NULL, pfn << PAGE_SHIFT, 0,
 			       !(mce->status & MCI_STATUS_S));
 	}
 
