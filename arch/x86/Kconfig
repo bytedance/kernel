@@ -1167,6 +1167,21 @@ config BYTEDANCE_X86_MCE_STAT
 	  memory address, process, and signal.
 	  If unsure, say N.
 
+config BYTEDANCE_X86_MCE_KVM_RECOVERY
+	bool "Supports KVM recovery for unhandled UE memory errors"
+	default BYTEDANCE_X86_MCE_STAT
+	depends on X86_MCE && KVM = m && KALLSYMS && BYTEDANCE
+	help
+	  Supports the KVM-specific recovery path for uncorrected memory
+	  errors when memory_failure() cannot handle the poisoned page.
+	  This path can identify the affected KVM task and optionally send
+	  SIGBUS to it.
+
+	  This path resolves callbacks from loaded KVM modules and only
+	  supports modular KVM builds.
+
+	  This is independent from BYTEDANCE_X86_MCE_STAT. If unsure, say N.
+
 config X86_MCELOG_LEGACY
 	bool "Support for deprecated /dev/mcelog character device"
 	depends on X86_MCE

@@ -13,3 +13,4 @@ obj-$(CONFIG_ACPI_APEI)		+= apei.o
 
 obj-$(CONFIG_X86_MCELOG_LEGACY)	+= dev-mcelog.o
 obj-$(CONFIG_BYTEDANCE_X86_MCE_STAT)	+= stat.o
+obj-$(CONFIG_BYTEDANCE_X86_MCE_KVM_RECOVERY)	+= kvm-recovery.o

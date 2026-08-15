@@ -23471,6 +23471,7 @@ F:	arch/x86/kernel/cpu/mce/*
 X86 MCE STAT
 M:	Rui Qi <qirui.001@bytedance.com>
 S:	Maintained
+F:	arch/x86/kernel/cpu/mce/kvm-recovery.c
 F:	include/linux/mce.h
 
 X86 MICROCODE UPDATE SUPPORT
