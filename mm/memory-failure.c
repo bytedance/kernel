@@ -345,7 +345,7 @@ static int kill_proc(struct to_kill *tk, unsigned long pfn, int flags)
 	int ret = 0;
 
 	mcestat_record(tk->tsk, pfn << PAGE_SHIFT, SIGBUS,
-		       !(flags & MF_ACTION_REQUIRED));
+		       false);
 
 	pr_err("%#lx: Sending SIGBUS to %s:%d due to hardware memory corruption\n",
 			pfn, t->comm, t->pid);
@@ -537,7 +537,7 @@ static void kill_procs(struct list_head *to_kill, int forcekill, bool fail,
 			 */
 			if (fail || tk->addr == -EFAULT) {
 				mcestat_record(tk->tsk, pfn << PAGE_SHIFT, SIGKILL,
-					       !(flags & MF_ACTION_REQUIRED));
+					       false);
 
 				pr_err("%#lx: forcibly killing %s:%d because of failure to unmap corrupted page\n",
 				       pfn, tk->tsk->comm, tk->tsk->pid);
@@ -645,7 +645,7 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
 				continue;
 
 			mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
-				       0, !force_early);
+				       0, false);
 			if (t)
 				add_to_kill_anon_file(t, page, vma, to_kill);
 		}
@@ -686,7 +686,7 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 			 */
 			if (vma->vm_mm == tsk->mm) {
 				mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
-					       0, !force_early);
+					       0, false);
 				if (t)
 					add_to_kill_anon_file(t, page, vma, to_kill);
 			}
