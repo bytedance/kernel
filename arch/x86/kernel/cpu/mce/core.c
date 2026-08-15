@@ -679,12 +679,17 @@ static int uc_decode_notifier(struct notifier_block *nb, unsigned long val,
 	} else if (mce_kvm) {
 		struct task_struct *kvm_task = NULL;
 		int signal = 0;
-		int i, ret;
+		int i, ret = NOTIFY_DONE;
 
 		for (i = 0; i < ARRAY_SIZE(kvm_mod_names); i++) {
-			ret = kvm_uc_decode(mce, kvm_mod_names[i], &kvm_task);
-			if (ret == NOTIFY_OK)
+			struct task_struct *candidate = NULL;
+
+			ret = kvm_uc_decode(mce, kvm_mod_names[i],
+					    &candidate);
+			if (ret == NOTIFY_OK) {
+				kvm_task = candidate;
 				break;
+			}
 			cond_resched();
 		}
 
