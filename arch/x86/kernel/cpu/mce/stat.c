@@ -138,7 +138,7 @@ static int mcestat_proc_show(struct seq_file *m, void *v)
 		ts = record.time;
 		rem_nsec = do_div(ts, 1000000000);
 
-		seq_printf(m, "%5d %8d%16s %16lx    %1d  %5d %5lu.%06lu %s\n",
+		seq_printf(m, "%5d %8d%16.16s %16lx    %1d  %5d %5lu.%06lu %s\n",
 			   i, record.pid, record.comm,
 			   record.addr,
 			   (int)record.hpage,
