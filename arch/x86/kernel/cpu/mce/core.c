@@ -689,9 +689,13 @@ static int uc_decode_notifier(struct notifier_block *nb, unsigned long val,
 		}
 
 		if (ret == NOTIFY_OK && mce_kill_kvm) {
-			do_send_sig_info(SIGBUS, SEND_SIG_PRIV, kvm_task,
-					 PIDTYPE_PID);
-			signal = SIGBUS;
+			if (kvm_task) {
+				do_send_sig_info(SIGBUS, SEND_SIG_PRIV, kvm_task,
+						 PIDTYPE_PID);
+				signal = SIGBUS;
+			} else {
+				pr_warn_once("Machine Check: KVM: missing task for SIGBUS\n");
+			}
 		}
 		/*
 		 * S (Signaling) flag, bit 56 - Indicates (when set)
