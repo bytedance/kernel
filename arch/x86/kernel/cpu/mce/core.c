@@ -698,12 +698,10 @@ static int uc_decode_notifier(struct notifier_block *nb, unsigned long val,
 			}
 		}
 		/*
-		 * S (Signaling) flag, bit 56 - Indicates (when set)
-		 * that a machine check exception was generated for
-		 * the UCR error reported in this MC bank.
-		 * When the S flag in the IA32_MCi_STATUS register
-		 * is clear, this UCR error was not signaled via a
-		 * corrected machine check (CMC).
+		 * MCI_STATUS_S indicates that a machine check exception
+		 * (#MC) was generated for the uncorrected error reported
+		 * in this bank. If clear, the error was not signaled via
+		 * #MC.
 		 */
 		mcestat_record(kvm_task, pfn << PAGE_SHIFT, signal,
 			       !(mce->status & MCI_STATUS_S));
