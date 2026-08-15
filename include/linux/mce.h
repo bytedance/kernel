@@ -8,14 +8,14 @@
 extern void mcestat_record(struct task_struct *task,
 			   unsigned long addr, int signal, bool cmci);
 #else
-static void mcestat_record(struct task_struct *task,
-			   unsigned long addr, int signal, bool cmci)
+static inline void mcestat_record(struct task_struct *task,
+				  unsigned long addr, int signal, bool cmci)
 {
 
 }
 #endif
 
-#if IS_ENABLED(CONFIG_KVM)
+#if IS_ENABLED(CONFIG_BYTEDANCE_X86_MCE_KVM_RECOVERY)
 extern bool mce_kvm __read_mostly;
 extern bool mce_kill_kvm __read_mostly;
 #endif
