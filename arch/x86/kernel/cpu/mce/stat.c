@@ -4,6 +4,7 @@
 #include <linux/list.h>
 #include <linux/mce.h>
 #include <linux/mm.h>
+#include <linux/spinlock.h>
 
 struct mce_stat {
 	bool cmci;
@@ -16,7 +17,8 @@ struct mce_stat {
 };
 #define MAX_NR_RECORD 256
 static struct mce_stat mcestat[MAX_NR_RECORD];
-static atomic_t mce_records = ATOMIC_INIT(0);
+static DEFINE_SPINLOCK(mcestat_lock);
+static int mce_records;
 static bool mcestat_enabled __read_mostly = true;
 
 static int mcestat_enabled_show(struct seq_file *m, void *v)
@@ -58,7 +60,11 @@ static const struct proc_ops mcestat_enabled_fops = {
 
 static void mcestat_reset(void)
 {
-	atomic_set(&mce_records, 0);
+	unsigned long flags;
+
+	spin_lock_irqsave(&mcestat_lock, flags);
+	mce_records = 0;
+	spin_unlock_irqrestore(&mcestat_lock, flags);
 }
 
 static bool is_hugepage(unsigned long pfn)
@@ -74,47 +80,71 @@ static bool is_hugepage(unsigned long pfn)
 void mcestat_record(struct task_struct *task,
 		    unsigned long addr, int signal, bool cmci)
 {
-	int records;
+	struct mce_stat record = {
+		.pid = -1,
+	};
+	unsigned long flags;
 
 	if (!mcestat_enabled)
 		return;
 
-	records = atomic_inc_return(&mce_records) - 1;
-	if (records >= MAX_NR_RECORD)
-		return;
+	record.addr = addr;
+	record.signal = signal;
+	record.cmci = cmci;
+	record.hpage = is_hugepage(addr >> PAGE_SHIFT);
+	record.time = ktime_get_ns();
 
 	if (task) {
-		mcestat[records].pid = task->pid;
-		strscpy(mcestat[records].comm, task->comm, sizeof(mcestat[records].comm));
+		record.pid = task->pid;
+		strscpy(record.comm, task->comm, sizeof(record.comm));
 	} else {
-		mcestat[records].pid = -1;
-		strscpy(mcestat[records].comm, "kernel", sizeof(mcestat[records].comm));
+		strscpy(record.comm, "kernel", sizeof(record.comm));
 	}
-	mcestat[records].addr = addr;
-	mcestat[records].signal = signal;
-	mcestat[records].cmci = cmci;
-	mcestat[records].hpage = is_hugepage(addr >> PAGE_SHIFT);
-	mcestat[records].time = ktime_get_ns();
+
+	spin_lock_irqsave(&mcestat_lock, flags);
+	if (mce_records < MAX_NR_RECORD)
+		mcestat[mce_records++] = record;
+	spin_unlock_irqrestore(&mcestat_lock, flags);
 }
 
 static int mcestat_proc_show(struct seq_file *m, void *v)
 {
-	int records = atomic_read(&mce_records);
+	struct mce_stat record;
+	unsigned long flags;
+	int records;
 	int i;
 
 	seq_puts(m, "INDEX      PID         COMMAND             ADDR HUGE SIGNUM         TIME INTERRUPT\n");
-	records = records < MAX_NR_RECORD ? records : MAX_NR_RECORD;
+	spin_lock_irqsave(&mcestat_lock, flags);
+	records = mce_records;
+	spin_unlock_irqrestore(&mcestat_lock, flags);
+
 	for (i = 0; i < records; i++) {
-		u64 ts = mcestat[i].time;
-		unsigned long rem_nsec = do_div(ts, 1000000000);
+		u64 ts;
+		unsigned long rem_nsec;
+
+		spin_lock_irqsave(&mcestat_lock, flags);
+		/*
+		 * A concurrent O_TRUNC reset can shrink mce_records after
+		 * the loop limit is sampled.
+		 */
+		if (i >= mce_records) {
+			spin_unlock_irqrestore(&mcestat_lock, flags);
+			break;
+		}
+		record = mcestat[i];
+		spin_unlock_irqrestore(&mcestat_lock, flags);
+
+		ts = record.time;
+		rem_nsec = do_div(ts, 1000000000);
 
 		seq_printf(m, "%5d %8d%16s %16lx    %1d  %5d %5lu.%06lu %s\n",
-			   i, mcestat[i].pid, mcestat[i].comm,
-			   mcestat[i].addr,
-			   (int)mcestat[i].hpage,
-			   mcestat[i].signal,
+			   i, record.pid, record.comm,
+			   record.addr,
+			   (int)record.hpage,
+			   record.signal,
 			   (unsigned long)ts, rem_nsec / 1000,
-			   mcestat[i].cmci ? "CMCI" : "MachineCheck");
+			   record.cmci ? "CMCI" : "MachineCheck");
 	}
 	return 0;
 }
