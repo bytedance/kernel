@@ -7,6 +7,7 @@
 
 struct mce_stat {
 	bool cmci;
+	bool hpage;
 	int signal;
 	pid_t pid;
 	unsigned long addr;
@@ -60,6 +61,16 @@ static void mcestat_reset(void)
 	atomic_set(&mce_records, 0);
 }
 
+static bool is_hugepage(unsigned long pfn)
+{
+	struct page *page = pfn_to_online_page(pfn);
+
+	if (!page)
+		return false;
+
+	return PageTransHuge(compound_head(page));
+}
+
 void mcestat_record(struct task_struct *task,
 		    unsigned long addr, int signal, bool cmci)
 {
@@ -82,27 +93,8 @@ void mcestat_record(struct task_struct *task,
 	mcestat[records].addr = addr;
 	mcestat[records].signal = signal;
 	mcestat[records].cmci = cmci;
+	mcestat[records].hpage = is_hugepage(addr >> PAGE_SHIFT);
 	mcestat[records].time = ktime_get_ns();
-}
-
-static bool is_hugepage(unsigned long pfn)
-{
-	struct page *page = pfn_to_online_page(pfn);
-	struct folio *folio;
-	bool huge = false;
-
-	if (!page)
-		return false;
-
-	folio = page_folio(page);
-	if (!folio_try_get(folio))
-		return false;
-
-	if (likely(page_folio(page) == folio))
-		huge = PageTransHuge(&folio->page);
-
-	folio_put(folio);
-	return huge;
 }
 
 static int mcestat_proc_show(struct seq_file *m, void *v)
@@ -119,7 +111,7 @@ static int mcestat_proc_show(struct seq_file *m, void *v)
 		seq_printf(m, "%5d %8d%16s %16lx    %1d  %5d %5lu.%06lu %s\n",
 			   i, mcestat[i].pid, mcestat[i].comm,
 			   mcestat[i].addr,
-			   (int)is_hugepage((mcestat[i].addr) >> PAGE_SHIFT),
+			   (int)mcestat[i].hpage,
 			   mcestat[i].signal,
 			   (unsigned long)ts, rem_nsec / 1000,
 			   mcestat[i].cmci ? "CMCI" : "MachineCheck");
