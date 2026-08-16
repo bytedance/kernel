@@ -40,6 +40,7 @@
 #include <linux/mce.h>
 #include <linux/mm.h>
 #include <linux/page-flags.h>
+#include <linux/sched/mm.h>
 #include <linux/sched/signal.h>
 #include <linux/sched/task.h>
 #include <linux/dax.h>
@@ -611,6 +612,79 @@ struct task_struct *task_early_kill(struct task_struct *tsk, int force_early)
 	return find_early_kill_thread(tsk);
 }
 
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+#define MCESTAT_MAX_AFFECTED_MMS 256
+
+struct mcestat_affected_mms {
+	struct mm_struct *mms[MCESTAT_MAX_AFFECTED_MMS];
+	unsigned int nr;
+};
+
+static struct mcestat_affected_mms *mcestat_alloc_affected_mms(void)
+{
+	return kzalloc(sizeof(struct mcestat_affected_mms), GFP_ATOMIC);
+}
+
+static bool mcestat_has_affected_mm(const struct mcestat_affected_mms *affected,
+				    struct mm_struct *mm)
+{
+	unsigned int i;
+
+	for (i = 0; i < affected->nr; i++) {
+		if (affected->mms[i] == mm)
+			return true;
+	}
+
+	return false;
+}
+
+static void mcestat_add_affected_mm(struct mcestat_affected_mms *affected,
+				    struct mm_struct *mm)
+{
+	if (!mm)
+		return;
+	if (affected->nr >= ARRAY_SIZE(affected->mms))
+		return;
+	if (mcestat_has_affected_mm(affected, mm))
+		return;
+
+	mmgrab(mm);
+	affected->mms[affected->nr++] = mm;
+}
+
+static void mcestat_put_affected_mms(struct mcestat_affected_mms *affected)
+{
+	if (!affected)
+		return;
+
+	while (affected->nr)
+		mmdrop(affected->mms[--affected->nr]);
+}
+
+static void mcestat_free_affected_mms(struct mcestat_affected_mms *affected)
+{
+	mcestat_put_affected_mms(affected);
+	kfree(affected);
+}
+
+static void mcestat_record_affected_tasks(struct mcestat_affected_mms *affected,
+					  struct page *page)
+{
+	unsigned long addr = page_to_pfn(page) << PAGE_SHIFT;
+	struct task_struct *tsk;
+
+	if (!affected || !affected->nr)
+		return;
+
+	rcu_read_lock();
+	for_each_process(tsk) {
+		if (mcestat_has_affected_mm(affected, READ_ONCE(tsk->mm)))
+			mcestat_record(tsk, addr, 0, false);
+	}
+	rcu_read_unlock();
+}
+#endif
+
 /*
  * Collect processes when the error hit an anonymous page.
  */
@@ -621,37 +695,57 @@ static void collect_procs_anon(struct folio *folio, struct page *page,
 	struct task_struct *tsk;
 	struct anon_vma *av;
 	pgoff_t pgoff;
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	struct anon_vma_chain *stat_vmac;
+	struct mcestat_affected_mms *affected;
+#endif
 
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	affected = mcestat_alloc_affected_mms();
+#endif
 	av = folio_lock_anon_vma_read(folio, NULL);
-	if (av == NULL)	/* Not actually mapped anymore */
+	if (!av) {	/* Not actually mapped anymore */
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+		mcestat_free_affected_mms(affected);
+#endif
 		return;
+	}
 
 	pgoff = page_to_pgoff(page);
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	if (affected) {
+		anon_vma_interval_tree_foreach(stat_vmac, &av->rb_root,
+					       pgoff, pgoff) {
+			vma = stat_vmac->vma;
+			if (!page_mapped_in_vma(page, vma))
+				continue;
+			mcestat_add_affected_mm(affected, vma->vm_mm);
+		}
+	}
+#endif
 	rcu_read_lock();
 	for_each_process(tsk) {
 		struct anon_vma_chain *vmac;
 		struct task_struct *t = task_early_kill(tsk, force_early);
 
-#if !defined(CONFIG_BYTEDANCE_X86_MCE_STAT)
 		if (!t)
 			continue;
-#endif
 		anon_vma_interval_tree_foreach(vmac, &av->rb_root,
 					       pgoff, pgoff) {
 			vma = vmac->vma;
-			if (vma->vm_mm != tsk->mm)
+			if (vma->vm_mm != t->mm)
 				continue;
 			if (!page_mapped_in_vma(page, vma))
 				continue;
-
-			mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
-				       0, false);
-			if (t)
-				add_to_kill_anon_file(t, page, vma, to_kill);
+			add_to_kill_anon_file(t, page, vma, to_kill);
 		}
 	}
 	rcu_read_unlock();
 	anon_vma_unlock_read(av);
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	mcestat_record_affected_tasks(affected, page);
+	mcestat_free_affected_mms(affected);
+#endif
 }
 
 /*
@@ -664,17 +758,28 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 	struct task_struct *tsk;
 	struct address_space *mapping = folio->mapping;
 	pgoff_t pgoff;
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	struct mcestat_affected_mms *affected;
+#endif
 
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	affected = mcestat_alloc_affected_mms();
+#endif
 	i_mmap_lock_read(mapping);
-	rcu_read_lock();
 	pgoff = page_to_pgoff(page);
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	if (affected) {
+		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+					  pgoff)
+			mcestat_add_affected_mm(affected, vma->vm_mm);
+	}
+#endif
+	rcu_read_lock();
 	for_each_process(tsk) {
 		struct task_struct *t = task_early_kill(tsk, force_early);
 
-#if !defined(CONFIG_BYTEDANCE_X86_MCE_STAT)
 		if (!t)
 			continue;
-#endif
 		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
 				      pgoff) {
 			/*
@@ -684,16 +789,16 @@ static void collect_procs_file(struct folio *folio, struct page *page,
 			 * Assume applications who requested early kill want
 			 * to be informed of all such data corruptions.
 			 */
-			if (vma->vm_mm == tsk->mm) {
-				mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
-					       0, false);
-				if (t)
-					add_to_kill_anon_file(t, page, vma, to_kill);
-			}
+			if (vma->vm_mm == t->mm)
+				add_to_kill_anon_file(t, page, vma, to_kill);
 		}
 	}
 	rcu_read_unlock();
 	i_mmap_unlock_read(mapping);
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	mcestat_record_affected_tasks(affected, page);
+	mcestat_free_affected_mms(affected);
+#endif
 }
 
 #ifdef CONFIG_FS_DAX
@@ -713,27 +818,39 @@ static void collect_procs_fsdax(struct page *page,
 {
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	struct mcestat_affected_mms *affected;
+#endif
 
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	affected = mcestat_alloc_affected_mms();
+#endif
 	i_mmap_lock_read(mapping);
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	if (affected) {
+		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff,
+					  pgoff)
+			mcestat_add_affected_mm(affected, vma->vm_mm);
+	}
+#endif
 	rcu_read_lock();
 	for_each_process(tsk) {
 		struct task_struct *t = task_early_kill(tsk, true);
 
-#if !defined(CONFIG_BYTEDANCE_X86_MCE_STAT)
 		if (!t)
 			continue;
-#endif
 		vma_interval_tree_foreach(vma, &mapping->i_mmap, pgoff, pgoff) {
-			if (vma->vm_mm == tsk->mm) {
-				mcestat_record(tsk, page_to_pfn(page) << PAGE_SHIFT,
-					       0, false);
-				if (t)
-					add_to_kill_fsdax(t, page, vma, to_kill, pgoff);
-			}
+			if (vma->vm_mm == t->mm)
+				add_to_kill_fsdax(t, page, vma, to_kill,
+						  pgoff);
 		}
 	}
 	rcu_read_unlock();
 	i_mmap_unlock_read(mapping);
+#ifdef CONFIG_BYTEDANCE_X86_MCE_STAT
+	mcestat_record_affected_tasks(affected, page);
+	mcestat_free_affected_mms(affected);
+#endif
 }
 #endif /* CONFIG_FS_DAX */
 
