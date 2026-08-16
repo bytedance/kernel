@@ -4,6 +4,7 @@
 #include <linux/list.h>
 #include <linux/mce.h>
 #include <linux/mm.h>
+#include <linux/rcupdate.h>
 #include <linux/spinlock.h>
 
 struct mce_stat {
@@ -69,12 +70,27 @@ static void mcestat_reset(void)
 
 static bool is_hugepage(unsigned long pfn)
 {
-	struct page *page = pfn_to_online_page(pfn);
+	struct page *page;
+	struct folio *folio;
+	bool huge = false;
 
+	rcu_read_lock();
+
+	page = pfn_to_online_page(pfn);
 	if (!page)
-		return false;
+		goto out;
 
-	return PageTransHuge(compound_head(page));
+	folio = page_folio(page);
+	if (!folio_try_get(folio))
+		goto out;
+
+	if (likely(page_folio(page) == folio))
+		huge = folio_test_large(folio);
+
+	folio_put(folio);
+out:
+	rcu_read_unlock();
+	return huge;
 }
 
 void mcestat_record(struct task_struct *task,
