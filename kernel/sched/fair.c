@@ -981,6 +981,9 @@ static struct sched_entity *pick_eevdf(struct cfs_rq *cfs_rq)
 		if (left) {
 			pr_err("EEVDF scheduling fail, picking leftmost\n");
 			return left;
+		} else if (cfs_rq->curr && cfs_rq->curr->on_rq) {
+			pr_err_once("EEVDF scheduling fail, picking curr\n");
+			return cfs_rq->curr;
 		}
 	}
 
